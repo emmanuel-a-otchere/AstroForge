@@ -16,6 +16,13 @@ truth for the project's behavior, architecture, and feature set.
 |---|---|---|---|---|
 | 1.0.0 | *(attachment, not on disk)* | 📦 Superseded | 2026-08-30 | Original draft; superseded by 1.1.0 |
 
+## Related Documents
+
+| Document | Location | Purpose |
+|---|---|---|
+| **Living Project Plan** | [../PROJECT_PLAN.md](../PROJECT_PLAN.md) | Phased milestones, task breakdown, and progress tracking. Rebased frequently against actual work progress. |
+| **Contributing Guide** | [../../CONTRIBUTING.md](../../CONTRIBUTING.md) | Spec-driven development workflow and governance rules. |
+
 ## Versioning Rules
 
 Specifications follow [Semantic Versioning](https://semver.org/):
@@ -31,7 +38,11 @@ Specifications follow [Semantic Versioning](https://semver.org/):
 
 1. **Propose** a change by creating or updating a spec file in `docs/specs/`.
 2. **Version** the spec according to the rules above. Update `SPEC_INDEX.md`.
-3. **Review** the spec change before any code is written or modified.
-4. **Implement** the codebase to match the approved spec — never the reverse.
-5. **Verify** that the implementation matches the spec. If reality diverges,
+3. **Update the project plan** in `docs/PROJECT_PLAN.md` to reflect any new or
+   changed tasks resulting from the spec change.
+4. **Review** the spec and plan changes before any code is written or modified.
+5. **Implement** the codebase to match the approved spec — never the reverse.
+6. **Verify** that the implementation matches the spec. If reality diverges,
    update the spec first, then the code.
+7. **Rebase the project plan** after every completed milestone: mark tasks done,
+   adjust remaining estimates, re-evaluate blocked items.

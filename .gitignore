@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+
+# Rust / Tauri
+target/
+src-tauri/target/
+crates/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env.local
+.env.*.local
+
+# Tauri
+src-tauri/gen/
+src-tauri/WixTools/
+
+# AstroForge local data
+AstroForge/

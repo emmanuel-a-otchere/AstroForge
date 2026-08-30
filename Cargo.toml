@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/astroforge-core",
+    "crates/astroforge-ai",
+    "crates/astroforge-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["AstroForge Contributors"]
+
+[workspace.dependencies]
+astroforge-core = { path = "crates/astroforge-core" }
+astroforge-ai = { path = "crates/astroforge-ai" }
+ndarray = "0.16"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+log = "0.4"
+env_logger = "0.11"

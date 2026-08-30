@@ -1,4 +1,7 @@
+pub mod artifact;
+pub mod db;
 pub mod image;
+pub mod orchestrator;
 pub mod pipeline;
 
 pub fn version() -> &'static str {

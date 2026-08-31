@@ -1,20 +1,57 @@
 <script lang="ts">
   import { probeGpu, type GpuCapability } from "./lib/gpu";
+  import InitialDialog from "./components/InitialDialog.svelte";
+  import ClassificationDialog from "./components/ClassificationDialog.svelte";
 
   let gpuCapability: GpuCapability = "canvas2d";
   let gpuChecked = false;
+  let showInitialDialog = false;
+  let showClassificationDialog = false;
+  let classificationFrames: Array<{
+    path: string;
+    frame_type: string;
+    exptime: number | null;
+    filter: string | null;
+    anomalies: string[];
+  }> = [];
 
-  onMount(() => {
+  function init() {
     gpuCapability = probeGpu();
     gpuChecked = true;
-  });
+  }
 
-  function onMount(fn: () => void) {
-    if (document.readyState !== "loading") {
-      fn();
-    } else {
-      document.addEventListener("DOMContentLoaded", fn, { once: true });
+  if (document.readyState !== "loading") {
+    init();
+  } else {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  }
+
+  function startProcessing() {
+    showInitialDialog = true;
+  }
+
+  function handleInitialConfirm(data: {
+    targetName: string;
+    cameraType: string;
+    focalLength: number | null;
+    lightsOnly: boolean;
+    includeDithering: boolean;
+  }) {
+    showInitialDialog = false;
+    // In a real Tauri app, this would invoke the Rust backend to scan the folder.
+    // For now, we simulate with empty frames and show the classification dialog.
+    classificationFrames = [];
+    showClassificationDialog = true;
+  }
+
+  function handleReclassify(index: number, newType: string) {
+    if (classificationFrames[index]) {
+      classificationFrames[index].frame_type = newType;
     }
+  }
+
+  function handleClassificationConfirm() {
+    showClassificationDialog = false;
   }
 </script>
 
@@ -38,16 +75,29 @@
   </header>
 
   <section class="workspace">
+    {#if showInitialDialog}
+      <InitialDialog onConfirm={handleInitialConfirm} onCancel={() => (showInitialDialog = false)} />
+    {/if}
+
+    {#if showClassificationDialog}
+      <ClassificationDialog
+        frames={classificationFrames}
+        onConfirm={handleClassificationConfirm}
+        onReclassify={handleReclassify}
+      />
+    {/if}
+
     <div class="workspace-empty">
       <h1>AstroForge</h1>
       <p class="tagline">Raw telescope data to publication-ready images</p>
-      <div class="version">v0.1.0 — Foundation</div>
+      <div class="version">v0.1.0 — Phase 1 MVP</div>
+      <button class="btn-start" on:click={startProcessing}>Start Processing</button>
     </div>
   </section>
 
   <footer class="app-footer">
     <span>AstroForge v0.1.0</span>
-    <span>Phase 0 — Foundation &amp; Scaffolding</span>
+    <span>Phase 1 — MVP Core Pipeline</span>
   </footer>
 </main>
 
@@ -102,6 +152,7 @@
     align-items: center;
     justify-content: center;
     background: var(--bg-primary);
+    position: relative;
   }
 
   .workspace-empty {
@@ -129,6 +180,23 @@
     border-radius: 0.375rem;
     background: var(--bg-secondary);
     display: inline-block;
+    margin-bottom: 1.5rem;
+  }
+
+  .btn-start {
+    padding: 0.625rem 2rem;
+    background: var(--accent);
+    color: var(--bg-primary);
+    border: none;
+    border-radius: 0.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .btn-start:hover {
+    background: var(--accent-dim);
   }
 
   .app-footer {

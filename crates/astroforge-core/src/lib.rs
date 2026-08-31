@@ -2,6 +2,7 @@ pub mod artifact;
 pub mod db;
 pub mod fits;
 pub mod image;
+pub mod ingest;
 pub mod orchestrator;
 pub mod pipeline;
 

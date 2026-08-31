@@ -1,14 +1,15 @@
 pub mod artifact;
 pub mod background;
+pub mod bayer_detection;
 pub mod calibration;
 pub mod color_calibration;
 pub mod cosmetic;
 pub mod crop;
 pub mod db;
 pub mod debayer;
-pub mod detail_enhancement;
 pub mod dialog_modes;
 pub mod dip;
+pub mod dng_parser;
 pub mod export;
 pub mod fits;
 pub mod image;

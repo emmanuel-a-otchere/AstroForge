@@ -24,6 +24,7 @@ pub mod planetary_routing;
 pub mod pipeline;
 pub mod plate_solve;
 pub mod quality;
+pub mod recipe;
 pub mod registration;
 pub mod session;
 pub mod stacking;
@@ -31,5 +32,5 @@ pub mod star_segmentation;
 pub mod stretching;
 
 pub fn version() -> &'static str {
-    env!(CARGO_PKG_VERSION")
+    env!("CARGO_PKG_VERSION")
 }

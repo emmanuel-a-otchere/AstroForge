@@ -16,6 +16,11 @@ pub mod ingest;
 pub mod mvp_pipeline;
 pub mod narrowband;
 pub mod orchestrator;
+pub mod planetary_drizzle;
+pub mod planetary_features;
+pub mod planetary_lucky;
+pub mod planetary_pipeline;
+pub mod planetary_routing;
 pub mod pipeline;
 pub mod plate_solve;
 pub mod quality;
@@ -26,5 +31,5 @@ pub mod star_segmentation;
 pub mod stretching;
 
 pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+    env!(CARGO_PKG_VERSION")
 }

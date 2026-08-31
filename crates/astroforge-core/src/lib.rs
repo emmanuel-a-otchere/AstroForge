@@ -30,6 +30,7 @@ pub mod session;
 pub mod stacking;
 pub mod star_segmentation;
 pub mod stretching;
+pub mod telemetry;
 
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")

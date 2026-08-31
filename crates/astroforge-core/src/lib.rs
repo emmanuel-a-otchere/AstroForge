@@ -15,6 +15,7 @@ pub mod mvp_pipeline;
 pub mod narrowband;
 pub mod orchestrator;
 pub mod pipeline;
+pub mod plate_solve;
 pub mod quality;
 pub mod registration;
 pub mod stacking;

@@ -12,6 +12,7 @@ pub mod fits;
 pub mod image;
 pub mod ingest;
 pub mod mvp_pipeline;
+pub mod narrowband;
 pub mod orchestrator;
 pub mod pipeline;
 pub mod quality;

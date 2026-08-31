@@ -1,4 +1,5 @@
 pub mod artifact;
+pub mod calibration;
 pub mod db;
 pub mod fits;
 pub mod image;

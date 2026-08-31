@@ -1,5 +1,6 @@
 <script lang="ts">
   import { probeGpu, type GpuCapability } from "./lib/gpu";
+  import { analyzeFiles, type AnalysisResult } from "./lib/image-analysis";
   import InitialDialog from "./components/InitialDialog.svelte";
   import ClassificationDialog from "./components/ClassificationDialog.svelte";
 
@@ -16,7 +17,9 @@
     filter: string | null;
     anomalies: string[];
   }> = [];
-  let sessionData: { targetName: string; cameraType: string; focalLength: number | null; lightsOnly: boolean; includeDithering: boolean } | null = null;
+  let sessionData: { targetName: string; cameraType: string; focalLength: number | null; lightsOnly: boolean; includeDithering: boolean; objectType: string } | null = null;
+  let analysisResult: AnalysisResult | null = null;
+  let analyzing = false;
 
   function init() {
     gpuCapability = probeGpu();
@@ -59,7 +62,14 @@
     selectedFiles = [];
   }
 
-  function proceedToSessionSetup() {
+  async function proceedToSessionSetup() {
+    analyzing = true;
+    try {
+      analysisResult = await analyzeFiles(selectedFiles);
+    } catch {
+      analysisResult = null;
+    }
+    analyzing = false;
     currentStep = "session-setup";
   }
 
@@ -69,15 +79,26 @@
     focalLength: number | null;
     lightsOnly: boolean;
     includeDithering: boolean;
+    objectType: string;
   }) {
     sessionData = data;
-    classificationFrames = selectedFiles.map(f => ({
-      path: f.name,
-      frame_type: guessFrameType(f.name),
-      exptime: null,
-      filter: null,
-      anomalies: [],
-    }));
+    if (analysisResult) {
+      classificationFrames = analysisResult.frames.map(f => ({
+        path: f.fileName,
+        frame_type: f.frameType,
+        exptime: f.exposureTime,
+        filter: f.filter,
+        anomalies: [],
+      }));
+    } else {
+      classificationFrames = selectedFiles.map(f => ({
+        path: f.name,
+        frame_type: guessFrameType(f.name),
+        exptime: null,
+        filter: null,
+        anomalies: [],
+      }));
+    }
     currentStep = "review-frames";
   }
 
@@ -104,6 +125,7 @@
     selectedFiles = [];
     sessionData = null;
     classificationFrames = [];
+    analysisResult = null;
   }
 
   function backToSelectFiles() {
@@ -236,10 +258,14 @@
         </div>
       </div>
     {:else if currentStep === "session-setup"}
-      {#if sessionData}
-        <InitialDialog onConfirm={handleInitialConfirm} onCancel={backToSelectFiles} />
+      {#if analyzing}
+        <div class="analyzing-panel">
+          <div class="analyzing-spinner"></div>
+          <p>Analyzing your files...</p>
+          <span class="analyzing-hint">Reading FITS headers and EXIF data</span>
+        </div>
       {:else}
-        <InitialDialog onConfirm={handleInitialConfirm} onCancel={backToSelectFiles} />
+        <InitialDialog {analysis} onConfirm={handleInitialConfirm} onCancel={backToSelectFiles} />
       {/if}
     {:else if currentStep === "review-frames"}
       <ClassificationDialog
@@ -277,6 +303,7 @@
             <p><strong>Target:</strong> {sessionData.targetName || "Unspecified"}</p>
             <p><strong>Camera:</strong> {sessionData.cameraType === "smart_telescope" ? "Smart telescope" : "OSC / DSLR"}</p>
             <p><strong>Focal length:</strong> {sessionData.focalLength ? sessionData.focalLength + " mm" : "Not specified"}</p>
+            <p><strong>Object type:</strong> {sessionData.objectType || "Not specified"}</p>
           </div>
         {/if}
         <p class="processing-note">The processing pipeline will run automatically through each stage. You can pause to review results at any step.</p>
@@ -634,6 +661,38 @@
 
   .btn-secondary:hover {
     background: var(--border);
+  }
+
+  .analyzing-panel {
+    text-align: center;
+    color: var(--text-secondary);
+  }
+
+  .analyzing-spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    margin: 0 auto 1rem;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .analyzing-panel p {
+    font-size: 1rem;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+  }
+
+  .analyzing-hint {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
   }
 
   .processing-panel {

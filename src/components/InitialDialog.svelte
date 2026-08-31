@@ -41,7 +41,7 @@
       </div>
 
       <div class="field">
-        <label>Camera type</label>
+        <span class="field-label">Camera type</span>
         <div class="radio-group">
           <label class="radio">
             <input type="radio" bind:group={cameraType} value="smart_telescope" />
@@ -119,6 +119,7 @@
   }
 
   .field label,
+  .field .field-label,
   .field-row label {
     display: block;
     font-size: 0.875rem;

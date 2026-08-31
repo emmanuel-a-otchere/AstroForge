@@ -34,44 +34,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "windows": {
-      "wix": {
-        "language": "en-US"
-      },
-      "nsis": {
-        "installMode": "perMachine"
-      }
-    },
-    "macOS": {
-      "minimumSystemVersion": "11.0",
-      "exceptionDomain": "",
-      "signingIdentity": null,
-      "providerShortName": null,
-      "entitlements": null
-    },
-    "linux": {
-      "deb": {
-        "depends": []
-      },
-      "rpm": {
-        "depends": []
-      },
-      "appimage": {
-        "bundleMediaFramework": false
-      }
-    }
-  },
-  "plugins": {
-    "updater": {
-      "active": true,
-      "endpoints": [
-        "https://releases.astroforge.app/{{target}}/{{arch}}/{{current_version}}"
-      ],
-      "pubkey": "REPLACE_WITH_SIGNING_PUBKEY",
-      "windows": {
-        "installMode": "passive"
-      }
-    }
+    ]
   }
 }

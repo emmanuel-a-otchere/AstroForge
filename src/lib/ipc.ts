@@ -24,7 +24,6 @@ export type PipelineStageId =
 export type Verbosity = "beginner" | "intermediate" | "expert";
 export type DialogMode = "auto" | "confirm" | "manual";
 export type TargetType = "deep_sky" | "planetary" | "lunar";
-export type BayerPattern = "RGGB" | "BGGR" | "GRBG" | "GBRG";
 
 export interface IngestRequest {
   sourceDir: string;

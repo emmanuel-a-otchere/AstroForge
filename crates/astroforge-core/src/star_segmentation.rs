@@ -82,7 +82,7 @@ pub fn remove_satellite_trails(image: &F32Image, trail_mask: &F32Image) -> F32Im
     for c in 0..result.channels() {
         for y in 0..result.height() {
             for x in 0..result.width() {
-                if trail_mask[(c.min(trail_mask.channels() - 1), y.min(trail_mask.height() - 1), x.min(trail_mask.width() - 1))] > 0.5 {
+                if trail_mask[(c.min(trail_mask.channels() - 1), y.min(trail_mask.height() - 1), x.min(trail_mask.width() - 1)] > 0.5 {
                     let mut sum = 0.0f32;
                     let mut count = 0;
                     for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {

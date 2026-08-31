@@ -7,6 +7,7 @@ pub mod crop;
 pub mod db;
 pub mod debayer;
 pub mod detail_enhancement;
+pub mod dip;
 pub mod export;
 pub mod fits;
 pub mod image;

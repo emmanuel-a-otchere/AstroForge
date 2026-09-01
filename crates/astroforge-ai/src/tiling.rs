@@ -27,11 +27,7 @@ pub struct Tile {
     pub height: u32,
 }
 
-pub fn generate_tiles(
-    image_width: u32,
-    image_height: u32,
-    config: &TileConfig,
-) -> Vec<Tile> {
+pub fn generate_tiles(image_width: u32, image_height: u32, config: &TileConfig) -> Vec<Tile> {
     let mut tiles = Vec::new();
     let step = config.tile_size - config.overlap;
 

@@ -42,7 +42,12 @@ fn compute_midtones(image: &F32Image) -> f64 {
     }
 }
 
-pub fn histogram_stretch(image: &F32Image, shadows: f64, highlights: f64, midtones: f64) -> F32Image {
+pub fn histogram_stretch(
+    image: &F32Image,
+    shadows: f64,
+    highlights: f64,
+    midtones: f64,
+) -> F32Image {
     let mut result = image.clone();
     let range = (highlights - shadows).max(1e-10);
 
@@ -94,7 +99,11 @@ mod tests {
             img[(0, i / 4, i % 4)] = i as f32 * 100.0;
         }
         let stretched = auto_stretch(&img);
-        let max = stretched.iter().copied().fold(f32::NEG_INFINITY, f32::min).max(0.0);
+        let max = stretched
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::min)
+            .max(0.0);
         let min = stretched.iter().copied().fold(f32::INFINITY, f32::min);
         assert!(max <= 1.0);
         assert!(min >= 0.0);

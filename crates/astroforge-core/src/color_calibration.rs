@@ -45,7 +45,11 @@ pub fn calibrate_color(image: &F32Image) -> ColorCalibrationResult {
 
 pub fn apply_color_calibration(image: &F32Image, calibration: &ColorCalibrationResult) -> F32Image {
     let mut result = image.clone();
-    let gains = [calibration.red_gain, calibration.green_gain, calibration.blue_gain];
+    let gains = [
+        calibration.red_gain,
+        calibration.green_gain,
+        calibration.blue_gain,
+    ];
 
     for c in 0..result.channels().min(3) {
         let gain = gains[c];

@@ -1,9 +1,6 @@
 use crate::image::F32Image;
 
-pub fn extract_background(
-    image: &F32Image,
-    sample_points: &[(f64, f64)],
-) -> F32Image {
+pub fn extract_background(image: &F32Image, sample_points: &[(f64, f64)]) -> F32Image {
     let width = image.width();
     let height = image.height();
     let channels = image.channels();
@@ -71,7 +68,8 @@ pub fn subtract_gradient(image: &F32Image, gradient: &F32Image) -> F32Image {
     for ch in 0..result.channels() {
         for y in 0..result.height() {
             for x in 0..result.width() {
-                let g = if ch < gradient.channels() && y < gradient.height() && x < gradient.width() {
+                let g = if ch < gradient.channels() && y < gradient.height() && x < gradient.width()
+                {
                     gradient[(ch, y, x)]
                 } else {
                     0.0

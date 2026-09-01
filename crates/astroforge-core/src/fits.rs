@@ -156,7 +156,10 @@ pub fn write_header(header: &FitsHeader, writer: &mut impl Write) -> Result<(), 
     }
 
     for (key, value) in &header.cards {
-        if !matches!(key.as_str(), "SIMPLE" | "BITPIX" | "NAXIS" | "NAXIS1" | "NAXIS2" | "NAXIS3") {
+        if !matches!(
+            key.as_str(),
+            "SIMPLE" | "BITPIX" | "NAXIS" | "NAXIS1" | "NAXIS2" | "NAXIS3"
+        ) {
             records.push(format_card(key, value));
         }
     }
@@ -189,10 +192,7 @@ fn format_card(key: &str, value: &str) -> String {
     }
 }
 
-pub fn read_f32_image(
-    data: &[u8],
-    header: &FitsHeader,
-) -> Result<F32Image, FitsError> {
+pub fn read_f32_image(data: &[u8], header: &FitsHeader) -> Result<F32Image, FitsError> {
     let width = header.naxis1().ok_or(FitsError::MissingAxis("NAXIS1"))? as usize;
     let height = header.naxis2().ok_or(FitsError::MissingAxis("NAXIS2"))? as usize;
     let channels = header.naxis3().unwrap_or(1) as usize;

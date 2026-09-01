@@ -1,5 +1,5 @@
-use crate::image::F32Image;
 use crate::debayer::BayerPattern;
+use crate::image::F32Image;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,7 +145,11 @@ fn green_variance_test(image: &F32Image) -> f64 {
     }
 
     let overall_mean = means.iter().sum::<f64>() / 4.0;
-    let variance: f64 = means.iter().map(|m| (m - overall_mean).powi(2)).sum::<f64>() / 4.0;
+    let variance: f64 = means
+        .iter()
+        .map(|m| (m - overall_mean).powi(2))
+        .sum::<f64>()
+        / 4.0;
 
     let g0_g2_diff = (means[0] - means[2]).abs();
     let g1_g3_diff = (means[1] - means[3]).abs();

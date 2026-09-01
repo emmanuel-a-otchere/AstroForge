@@ -33,7 +33,11 @@ pub fn compute_sharpness(image: &F32Image) -> f64 {
 
 pub fn rank_by_sharpness(sharpness_scores: &[FrameSharpness]) -> Vec<usize> {
     let mut sorted = sharpness_scores.to_vec();
-    sorted.sort_by(|a, b| b.sharpness.partial_cmp(&a.sharpness).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| {
+        b.sharpness
+            .partial_cmp(&a.sharpness)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     sorted.iter().map(|s| s.index).collect()
 }
 
@@ -42,10 +46,7 @@ pub fn select_best_frames(ranked: &[usize], total_frames: usize, percentile: f64
     ranked.iter().take(count.max(1)).copied().collect()
 }
 
-pub fn lucky_imaging_select(
-    frames: &[F32Image],
-    best_percent: f64,
-) -> Vec<usize> {
+pub fn lucky_imaging_select(frames: &[F32Image], best_percent: f64) -> Vec<usize> {
     let sharpness_scores: Vec<FrameSharpness> = frames
         .iter()
         .enumerate()
@@ -84,7 +85,11 @@ impl StreamingRanker {
         self.frame_count += 1;
 
         if self.scores.len() > self.max_memory_frames {
-            self.scores.sort_by(|a, b| b.sharpness.partial_cmp(&a.sharpness).unwrap_or(std::cmp::Ordering::Equal));
+            self.scores.sort_by(|a, b| {
+                b.sharpness
+                    .partial_cmp(&a.sharpness)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             let keep = (self.max_memory_frames as f64 * self.best_percent / 100.0) as usize;
             self.scores.truncate(keep.max(10));
         }
@@ -92,7 +97,11 @@ impl StreamingRanker {
 
     pub fn select_best(&self) -> Vec<usize> {
         let mut sorted = self.scores.clone();
-        sorted.sort_by(|a, b| b.sharpness.partial_cmp(&a.sharpness).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.sharpness
+                .partial_cmp(&a.sharpness)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let count = ((self.frame_count as f64) * self.best_percent / 100.0).round() as usize;
         sorted.iter().take(count.max(1)).map(|s| s.index).collect()
     }
@@ -132,9 +141,18 @@ mod tests {
     #[test]
     fn test_rank_by_sharpness() {
         let scores = vec![
-            FrameSharpness { index: 0, sharpness: 10.0 },
-            FrameSharpness { index: 1, sharpness: 50.0 },
-            FrameSharpness { index: 2, sharpness: 30.0 },
+            FrameSharpness {
+                index: 0,
+                sharpness: 10.0,
+            },
+            FrameSharpness {
+                index: 1,
+                sharpness: 50.0,
+            },
+            FrameSharpness {
+                index: 2,
+                sharpness: 30.0,
+            },
         ];
         let ranked = rank_by_sharpness(&scores);
         assert_eq!(ranked, vec![1, 2, 0]);

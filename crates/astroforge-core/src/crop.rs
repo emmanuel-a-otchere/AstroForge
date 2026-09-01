@@ -129,7 +129,12 @@ mod tests {
     fn test_crop() {
         let mut img = F32Image::new(8, 8, 1);
         img.fill(100.0);
-        let region = CropRegion { x: 2, y: 2, width: 4, height: 4 };
+        let region = CropRegion {
+            x: 2,
+            y: 2,
+            width: 4,
+            height: 4,
+        };
         let result = crop(&img, &region);
         assert_eq!(result.width(), 4);
         assert_eq!(result.height(), 4);

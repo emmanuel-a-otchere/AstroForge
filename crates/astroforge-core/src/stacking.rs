@@ -34,12 +34,18 @@ pub fn kappa_sigma_stack(
                 let mut mask: Vec<bool> = vec![true; n];
 
                 for _ in 0..max_iterations {
-                    let active: Vec<f32> = values.iter().zip(&mask).filter(|(_, &m)| m).map(|(&v, _)| v).collect();
+                    let active: Vec<f32> = values
+                        .iter()
+                        .zip(&mask)
+                        .filter(|(_, &m)| m)
+                        .map(|(&v, _)| v)
+                        .collect();
                     if active.len() < 3 {
                         break;
                     }
                     let mean = active.iter().sum::<f32>() / active.len() as f32;
-                    let var = active.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / active.len() as f32;
+                    let var = active.iter().map(|v| (v - mean).powi(2)).sum::<f32>()
+                        / active.len() as f32;
                     let std = var.sqrt();
                     let threshold = kappa as f32 * std;
 
@@ -56,7 +62,12 @@ pub fn kappa_sigma_stack(
                     }
                 }
 
-                let active: Vec<f32> = values.iter().zip(&mask).filter(|(_, &m)| m).map(|(&v, _)| v).collect();
+                let active: Vec<f32> = values
+                    .iter()
+                    .zip(&mask)
+                    .filter(|(_, &m)| m)
+                    .map(|(&v, _)| v)
+                    .collect();
                 if active.is_empty() {
                     result[(c, y, x)] = 0.0;
                 } else {
@@ -108,7 +119,8 @@ impl StreamingStacker {
 
     pub fn result(&self) -> StackResult {
         let mut image = F32Image::new(self.sum.width(), self.sum.height(), self.sum.channels());
-        let mut weight_map = F32Image::new(self.sum.width(), self.sum.height(), self.sum.channels());
+        let mut weight_map =
+            F32Image::new(self.sum.width(), self.sum.height(), self.sum.channels());
 
         for c in 0..image.channels() {
             for y in 0..image.height() {

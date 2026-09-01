@@ -41,15 +41,13 @@ pub fn plate_solve(
 ) -> PlateSolveResult {
     match backend {
         PlateSolveBackend::Astap => solve_with_astap(_image_data, _focal_length_mm, _pixel_size_um),
-        PlateSolveBackend::AstrometryNet => solve_with_astrometry(_image_data, _focal_length_mm, _pixel_size_um),
+        PlateSolveBackend::AstrometryNet => {
+            solve_with_astrometry(_image_data, _focal_length_mm, _pixel_size_um)
+        }
     }
 }
 
-fn solve_with_astap(
-    _image_data: &[u8],
-    focal_length: f64,
-    pixel_size: f64,
-) -> PlateSolveResult {
+fn solve_with_astap(_image_data: &[u8], focal_length: f64, pixel_size: f64) -> PlateSolveResult {
     PlateSolveResult {
         solution: None,
         backend: PlateSolveBackend::Astap,

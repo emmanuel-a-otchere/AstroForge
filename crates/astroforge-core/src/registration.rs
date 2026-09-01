@@ -15,11 +15,7 @@ pub fn extract_stars(image: &F32Image, threshold_sigma: f64) -> Vec<Star> {
     let width = image.width();
 
     let mean = image.iter().sum::<f32>() / image.len() as f32;
-    let var = image
-        .iter()
-        .map(|v| (v - mean).powi(2))
-        .sum::<f32>()
-        / image.len() as f32;
+    let var = image.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / image.len() as f32;
     let std = var.sqrt();
     let threshold = mean + threshold_sigma as f32 * std;
 
@@ -76,7 +72,11 @@ pub fn extract_stars(image: &F32Image, threshold_sigma: f64) -> Vec<Star> {
         }
     }
 
-    stars.sort_by(|a, b| b.brightness.partial_cmp(&a.brightness).unwrap_or(std::cmp::Ordering::Equal));
+    stars.sort_by(|a, b| {
+        b.brightness
+            .partial_cmp(&a.brightness)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     stars
 }
 
@@ -171,10 +171,7 @@ pub struct AffineTransform {
     pub scale: f64,
 }
 
-pub fn compute_transform(
-    ref_stars: &[Star],
-    frame_stars: &[Star],
-) -> Option<AffineTransform> {
+pub fn compute_transform(ref_stars: &[Star], frame_stars: &[Star]) -> Option<AffineTransform> {
     if ref_stars.len() < 3 || frame_stars.len() < 3 {
         return None;
     }
@@ -222,10 +219,7 @@ pub fn apply_transform(image: &F32Image, transform: &AffineTransform) -> F32Imag
     result
 }
 
-pub fn cross_correlate(
-    ref_cutout: &F32Image,
-    frame_cutout: &F32Image,
-) -> (f64, f64) {
+pub fn cross_correlate(ref_cutout: &F32Image, frame_cutout: &F32Image) -> (f64, f64) {
     let c = 0;
     let height = ref_cutout.height();
     let width = ref_cutout.width();
@@ -291,12 +285,32 @@ mod tests {
     fn test_select_reference_frame() {
         let stars_per_frame = vec![
             vec![
-                Star { x: 10.0, y: 10.0, brightness: 1000.0, fwhm: 3.0 },
-                Star { x: 50.0, y: 50.0, brightness: 800.0, fwhm: 3.5 },
+                Star {
+                    x: 10.0,
+                    y: 10.0,
+                    brightness: 1000.0,
+                    fwhm: 3.0,
+                },
+                Star {
+                    x: 50.0,
+                    y: 50.0,
+                    brightness: 800.0,
+                    fwhm: 3.5,
+                },
             ],
             vec![
-                Star { x: 10.0, y: 10.0, brightness: 1000.0, fwhm: 2.0 },
-                Star { x: 50.0, y: 50.0, brightness: 800.0, fwhm: 2.5 },
+                Star {
+                    x: 10.0,
+                    y: 10.0,
+                    brightness: 1000.0,
+                    fwhm: 2.0,
+                },
+                Star {
+                    x: 50.0,
+                    y: 50.0,
+                    brightness: 800.0,
+                    fwhm: 2.5,
+                },
             ],
         ];
         let ref_idx = select_reference_frame(&stars_per_frame);
@@ -306,14 +320,44 @@ mod tests {
     #[test]
     fn test_compute_transform() {
         let ref_stars = vec![
-            Star { x: 10.0, y: 10.0, brightness: 1000.0, fwhm: 3.0 },
-            Star { x: 50.0, y: 50.0, brightness: 800.0, fwhm: 3.0 },
-            Star { x: 30.0, y: 70.0, brightness: 600.0, fwhm: 3.0 },
+            Star {
+                x: 10.0,
+                y: 10.0,
+                brightness: 1000.0,
+                fwhm: 3.0,
+            },
+            Star {
+                x: 50.0,
+                y: 50.0,
+                brightness: 800.0,
+                fwhm: 3.0,
+            },
+            Star {
+                x: 30.0,
+                y: 70.0,
+                brightness: 600.0,
+                fwhm: 3.0,
+            },
         ];
         let frame_stars = vec![
-            Star { x: 12.0, y: 11.0, brightness: 1000.0, fwhm: 3.0 },
-            Star { x: 52.0, y: 51.0, brightness: 800.0, fwhm: 3.0 },
-            Star { x: 32.0, y: 71.0, brightness: 600.0, fwhm: 3.0 },
+            Star {
+                x: 12.0,
+                y: 11.0,
+                brightness: 1000.0,
+                fwhm: 3.0,
+            },
+            Star {
+                x: 52.0,
+                y: 51.0,
+                brightness: 800.0,
+                fwhm: 3.0,
+            },
+            Star {
+                x: 32.0,
+                y: 71.0,
+                brightness: 600.0,
+                fwhm: 3.0,
+            },
         ];
         let transform = compute_transform(&ref_stars, &frame_stars).unwrap();
         assert!((transform.dx - 2.0).abs() < 0.01);
@@ -325,7 +369,12 @@ mod tests {
         let mut img = F32Image::new(8, 8, 1);
         img.fill(0.0);
         img[(0, 4, 4)] = 100.0;
-        let transform = AffineTransform { dx: 1.0, dy: 0.0, rotation: 0.0, scale: 1.0 };
+        let transform = AffineTransform {
+            dx: 1.0,
+            dy: 0.0,
+            rotation: 0.0,
+            scale: 1.0,
+        };
         let result = apply_transform(&img, &transform);
         assert_eq!(result[(0, 4, 3)], 100.0);
     }

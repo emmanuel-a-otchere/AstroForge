@@ -25,28 +25,48 @@ impl BayerPattern {
         let y_even = y % 2 == 0;
         match self {
             Self::RGGB => {
-                if x_even && y_even { 0 }
-                else if !x_even && y_even { 1 }
-                else if x_even && !y_even { 1 }
-                else { 2 }
+                if x_even && y_even {
+                    0
+                } else if !x_even && y_even {
+                    1
+                } else if x_even && !y_even {
+                    1
+                } else {
+                    2
+                }
             }
             Self::BGGR => {
-                if x_even && y_even { 2 }
-                else if !x_even && y_even { 1 }
-                else if x_even && !y_even { 1 }
-                else { 0 }
+                if x_even && y_even {
+                    2
+                } else if !x_even && y_even {
+                    1
+                } else if x_even && !y_even {
+                    1
+                } else {
+                    0
+                }
             }
             Self::GRBG => {
-                if x_even && y_even { 1 }
-                else if !x_even && y_even { 0 }
-                else if x_even && !y_even { 2 }
-                else { 1 }
+                if x_even && y_even {
+                    1
+                } else if !x_even && y_even {
+                    0
+                } else if x_even && !y_even {
+                    2
+                } else {
+                    1
+                }
             }
             Self::GBRG => {
-                if x_even && y_even { 1 }
-                else if !x_even && y_even { 2 }
-                else if x_even && !y_even { 0 }
-                else { 1 }
+                if x_even && y_even {
+                    1
+                } else if !x_even && y_even {
+                    2
+                } else if x_even && !y_even {
+                    0
+                } else {
+                    1
+                }
             }
         }
     }
@@ -58,11 +78,7 @@ pub enum DebayerAlgorithm {
     Vng,
 }
 
-pub fn debayer(
-    bayer: &F32Image,
-    pattern: BayerPattern,
-    algorithm: DebayerAlgorithm,
-) -> F32Image {
+pub fn debayer(bayer: &F32Image, pattern: BayerPattern, algorithm: DebayerAlgorithm) -> F32Image {
     match algorithm {
         DebayerAlgorithm::Bilinear => debayer_bilinear(bayer, pattern),
         DebayerAlgorithm::Vng => debayer_bilinear(bayer, pattern),
@@ -87,7 +103,16 @@ fn debayer_bilinear(bayer: &F32Image, pattern: BayerPattern) -> F32Image {
                 let mut sum = 0.0f32;
                 let mut count = 0;
 
-                for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                for (dx, dy) in [
+                    (-1, 0),
+                    (1, 0),
+                    (0, -1),
+                    (0, 1),
+                    (-1, -1),
+                    (1, -1),
+                    (-1, 1),
+                    (1, 1),
+                ] {
                     let nx = x as i32 + dx;
                     let ny = y as i32 + dy;
                     if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {

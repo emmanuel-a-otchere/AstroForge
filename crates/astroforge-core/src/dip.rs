@@ -42,11 +42,7 @@ impl DipState {
     }
 }
 
-pub fn dip_deconvolve(
-    image: &F32Image,
-    psf: &F32Image,
-    config: &DipConfig,
-) -> F32Image {
+pub fn dip_deconvolve(image: &F32Image, psf: &F32Image, config: &DipConfig) -> F32Image {
     let mut state = DipState::new(image);
 
     for iter in 0..config.max_iterations {
@@ -73,11 +69,7 @@ pub fn dip_deconvolve(
     state.best_image
 }
 
-pub fn dip_denoise(
-    image: &F32Image,
-    config: &DipConfig,
-    blend_ratio: f32,
-) -> F32Image {
+pub fn dip_denoise(image: &F32Image, config: &DipConfig, blend_ratio: f32) -> F32Image {
     let mut state = DipState::new(image);
 
     for iter in 0..config.max_iterations {
@@ -115,11 +107,7 @@ pub fn dip_denoise(
     result
 }
 
-pub fn dip_inpaint(
-    image: &F32Image,
-    mask: &F32Image,
-    config: &DipConfig,
-) -> F32Image {
+pub fn dip_inpaint(image: &F32Image, mask: &F32Image, config: &DipConfig) -> F32Image {
     let mut state = DipState::new(image);
 
     for iter in 0..config.max_iterations {
@@ -147,7 +135,11 @@ pub fn dip_inpaint(
     for c in 0..image.channels() {
         for y in 0..image.height() {
             for x in 0..image.width() {
-                let mask_val = mask[(c.min(mask.channels() - 1), y.min(mask.height() - 1), x.min(mask.width() - 1))];
+                let mask_val = mask[(
+                    c.min(mask.channels() - 1),
+                    y.min(mask.height() - 1),
+                    x.min(mask.width() - 1),
+                )];
                 if mask_val > 0.5 {
                     result[(c, y, x)] = state.best_image[(c, y, x)];
                 }
@@ -201,7 +193,11 @@ fn compute_inpaint_loss(target: &F32Image, estimate: &F32Image, mask: &F32Image)
     for c in 0..target.channels() {
         for y in 0..target.height() {
             for x in 0..target.width() {
-                let mask_val = mask[(c.min(mask.channels() - 1), y.min(mask.height() - 1), x.min(mask.width() - 1))];
+                let mask_val = mask[(
+                    c.min(mask.channels() - 1),
+                    y.min(mask.height() - 1),
+                    x.min(mask.width() - 1),
+                )];
                 if mask_val <= 0.5 {
                     let diff = target[(c, y, x)] - estimate[(c, y, x)];
                     loss += (diff * diff) as f64;
@@ -232,7 +228,11 @@ fn apply_psf(image: &F32Image, psf: &F32Image) -> F32Image {
                         let dx = px as i32 - radius as i32;
                         let nx = x as i32 + dx;
                         let ny = y as i32 + dy;
-                        if nx >= 0 && nx < image.width() as i32 && ny >= 0 && ny < image.height() as i32 {
+                        if nx >= 0
+                            && nx < image.width() as i32
+                            && ny >= 0
+                            && ny < image.height() as i32
+                        {
                             let w = psf[(0, py, px)];
                             sum += image[(c, ny as usize, nx as usize)] * w;
                             weight_sum += w;

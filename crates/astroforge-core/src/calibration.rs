@@ -54,7 +54,11 @@ pub fn apply_calibration(
         for c in 0..result.channels() {
             for y in 0..result.height() {
                 for x in 0..result.width() {
-                    let f = flat[(c.min(flat.channels() - 1), y.min(flat.height() - 1), x.min(flat.width() - 1))];
+                    let f = flat[(
+                        c.min(flat.channels() - 1),
+                        y.min(flat.height() - 1),
+                        x.min(flat.width() - 1),
+                    )];
                     if f.abs() > 1e-10 {
                         result[(c, y, x)] /= f / median as f32;
                     }
@@ -66,10 +70,7 @@ pub fn apply_calibration(
     result
 }
 
-pub fn apply_calibration_lights_only(
-    light: &F32Image,
-    master_flat: Option<&F32Image>,
-) -> F32Image {
+pub fn apply_calibration_lights_only(light: &F32Image, master_flat: Option<&F32Image>) -> F32Image {
     apply_calibration(light, None, master_flat, None)
 }
 
@@ -117,14 +118,12 @@ fn sigma_clipped_median_combine(
     for c in 0..channels {
         for y in 0..height {
             for x in 0..width {
-                let mut values: Vec<f32> = frames
-                    .iter()
-                    .map(|f| f[(c, y, x)])
-                    .collect();
+                let mut values: Vec<f32> = frames.iter().map(|f| f[(c, y, x)]).collect();
 
                 for _ in 0..max_iters {
                     let mean = values.iter().sum::<f32>() / values.len() as f32;
-                    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32;
+                    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f32>()
+                        / values.len() as f32;
                     let std = var.sqrt();
                     let threshold = sigma as f32 * std;
 
@@ -190,20 +189,14 @@ mod tests {
 
     #[test]
     fn test_master_dark_build() {
-        let frames = vec![
-            make_test_image(4, 4, 500.0),
-            make_test_image(4, 4, 500.0),
-        ];
+        let frames = vec![make_test_image(4, 4, 500.0), make_test_image(4, 4, 500.0)];
         let master = build_master_dark(&frames, 300.0, Some(-10.0)).unwrap();
         assert!((master[(0, 0, 0)] - 500.0).abs() < 0.01);
     }
 
     #[test]
     fn test_master_flat_normalize() {
-        let frames = vec![
-            make_test_image(4, 4, 2000.0),
-            make_test_image(4, 4, 2000.0),
-        ];
+        let frames = vec![make_test_image(4, 4, 2000.0), make_test_image(4, 4, 2000.0)];
         let master = build_master_flat(&frames).unwrap();
         let mean = master.mean().unwrap_or(0.0);
         assert!((mean - 1.0).abs() < 0.01);

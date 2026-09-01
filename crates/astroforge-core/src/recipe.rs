@@ -249,7 +249,9 @@ mod tests {
         recipe.add_model("swinir-denoise-astro", ModelType::Deterministic);
         let available = vec!["other-model".to_string()];
         match validate_compatibility(&recipe, &available) {
-            ValidationResult::MissingModels(m) => assert!(m.contains(&"swinir-denoise-astro".to_string())),
+            ValidationResult::MissingModels(m) => {
+                assert!(m.contains(&"swinir-denoise-astro".to_string()))
+            }
             _ => panic!("Expected MissingModels"),
         }
     }

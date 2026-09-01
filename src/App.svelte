@@ -3,6 +3,14 @@
   import { analyzeFiles, type AnalysisResult } from "./lib/image-analysis";
   import InitialDialog from "./components/InitialDialog.svelte";
   import ClassificationDialog from "./components/ClassificationDialog.svelte";
+  import PreviewCanvas from "./components/PreviewCanvas.svelte";
+  import WizardBottomSheet from "./components/WizardBottomSheet.svelte";
+  import {
+    initSession,
+    sessionStore,
+    activeStepIndex,
+  } from "./lib/pipeline-store";
+  import type { PreviewParams } from "./lib/gl-renderer";
 
   type WorkflowStep = "landing" | "select-files" | "session-setup" | "review-frames" | "processing";
 
@@ -20,6 +28,18 @@
   let sessionData: { targetName: string; cameraType: string; focalLength: number | null; lightsOnly: boolean; includeDithering: boolean; objectType: string } | null = null;
   let analysisResult: AnalysisResult | null = null;
   let analyzing = false;
+
+  let previewParams: PreviewParams = {
+    blackPoint: 0,
+    midtones: 0.25,
+    highlights: 1,
+    strength: 0,
+    scnrStrength: 0,
+    scnrMethod: 0,
+  };
+
+  let renderMode: "identity" | "mtf" | "scnr" | "difference" | "composite" = "mtf";
+  let showForgeMode = false;
 
   function init() {
     gpuCapability = probeGpu();
@@ -117,6 +137,7 @@
   }
 
   function handleClassificationConfirm() {
+    initSession(undefined, "automagic");
     currentStep = "processing";
   }
 
@@ -131,6 +152,14 @@
   function backToSelectFiles() {
     currentStep = "select-files";
   }
+
+  function handleParamsChange(params: Partial<PreviewParams>) {
+    previewParams = { ...previewParams, ...params };
+  }
+
+  $: stepIdx = $activeStepIndex;
+  $: isStretchStage = $sessionStore?.pipelineGraph.nodes[stepIdx]?.type === "stretch";
+  $: renderMode = isStretchStage ? "mtf" : "identity";
 
   const steps: { id: WorkflowStep; label: string; icon: string }[] = [
     { id: "select-files", label: "Load Files", icon: "1" },
@@ -162,14 +191,14 @@
     </button>
     <div class="gpu-badge" class:gpu-checked={gpuChecked}>
       {#if gpuChecked}
-        GPU: {gpuCapability === "webgpu" ? "WebGPU" : "Canvas2D"}
+        GPU: {gpuCapability === "webgpu" ? "WebGPU" : "WebGL"}
       {:else}
         Detecting GPU...
       {/if}
     </div>
   </header>
 
-  {#if currentStep !== "landing"}
+  {#if currentStep !== "landing" && currentStep !== "processing"}
     <nav class="step-bar">
       {#each steps as step, i}
         <div class="step" class:active={currentStep === step.id} class:done={i < stepIndex()}>
@@ -186,23 +215,19 @@
   <section class="workspace">
     {#if currentStep === "landing"}
       <div class="workspace-empty">
-        <h1>AstroForge</h1>
-        <p class="tagline">Raw telescope data to publication-ready images</p>
-        <div class="version">v0.1.0 — Full Pipeline</div>
+        <h1 class="text-display-xl">AstroForge</h1>
+        <p class="tagline text-body">Raw telescope data to publication-ready images</p>
+        <div class="version text-metadata">v0.1.0 — Full Pipeline</div>
         <button class="btn-start" on:click={goToSelectFiles}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/>
-            <line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
+          <span class="material-symbols-outlined">upload</span>
           Load Your Data
         </button>
-        <p class="hint">Select FITS, TIFF, PNG, JPEG, or DNG files from your telescope</p>
+        <p class="hint text-metadata">Select FITS, TIFF, PNG, JPEG, or DNG files from your telescope</p>
       </div>
     {:else if currentStep === "select-files"}
       <div class="file-select-panel">
-        <h2>Select your image files</h2>
-        <p class="subtitle">Choose the raw frames from your imaging session. You can drag and drop or browse.</p>
+        <h2 class="text-headline-mobile">Select your image files</h2>
+        <p class="subtitle text-body">Choose the raw frames from your imaging session. You can drag and drop or browse.</p>
 
         <div
           class="drop-zone"
@@ -214,25 +239,21 @@
         >
           {#if fileCount === 0}
             <div class="drop-empty">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/>
-                <line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
-              <p>Drag and drop your files here</p>
-              <span class="drop-hint">FITS, TIFF, PNG, JPEG, DNG</span>
+              <span class="material-symbols-outlined drop-icon">cloud_upload</span>
+              <p class="text-body">Drag and drop your files here</p>
+              <span class="drop-hint text-metadata">FITS, TIFF, PNG, JPEG, DNG</span>
             </div>
           {:else}
             <div class="file-list-header">
-              <span>{fileCount} file{fileCount !== 1 ? "s" : ""} selected</span>
+              <span class="text-body">{fileCount} file{fileCount !== 1 ? "s" : ""} selected</span>
               <button class="btn-clear" on:click={clearFiles}>Clear all</button>
             </div>
             <div class="file-list">
               {#each selectedFiles as file}
                 <div class="file-item">
-                  <span class="file-icon">📄</span>
-                  <span class="file-name" title={file.name}>{file.name}</span>
-                  <span class="file-size">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                  <span class="material-symbols-outlined file-icon">description</span>
+                  <span class="file-name text-body" title={file.name}>{file.name}</span>
+                  <span class="file-size text-metadata">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
                 </div>
               {/each}
             </div>
@@ -261,8 +282,8 @@
       {#if analyzing}
         <div class="analyzing-panel">
           <div class="analyzing-spinner"></div>
-          <p>Analyzing your files...</p>
-          <span class="analyzing-hint">Reading FITS headers and EXIF data</span>
+          <p class="text-body">Analyzing your files...</p>
+          <span class="text-metadata analyzing-hint">Reading FITS headers and EXIF data</span>
         </div>
       {:else}
         <InitialDialog analysis={analysisResult} onConfirm={handleInitialConfirm} onCancel={backToSelectFiles} />
@@ -274,50 +295,25 @@
         onReclassify={handleReclassify}
       />
     {:else if currentStep === "processing"}
-      <div class="processing-panel">
-        <h2>Ready to process</h2>
-        <div class="processing-summary">
-          <div class="summary-item">
-            <span class="summary-label">Total files</span>
-            <span class="summary-value">{fileCount}</span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">Lights</span>
-            <span class="summary-value">{lightCount}</span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">Darks</span>
-            <span class="summary-value">{darkCount}</span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">Flats</span>
-            <span class="summary-value">{flatCount}</span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">Biases</span>
-            <span class="summary-value">{biasCount}</span>
-          </div>
-        </div>
-        {#if sessionData}
-          <div class="session-info">
-            <p><strong>Target:</strong> {sessionData.targetName || "Unspecified"}</p>
-            <p><strong>Camera:</strong> {sessionData.cameraType === "smart_telescope" ? "Smart telescope" : "OSC / DSLR"}</p>
-            <p><strong>Focal length:</strong> {sessionData.focalLength ? sessionData.focalLength + " mm" : "Not specified"}</p>
-            <p><strong>Object type:</strong> {sessionData.objectType || "Not specified"}</p>
-          </div>
-        {/if}
-        <p class="processing-note">The processing pipeline will run automatically through each stage. You can pause to review results at any step.</p>
-        <div class="actions">
-          <button class="btn-secondary" on:click={backToLanding}>Start Over</button>
-        </div>
+      <div class="processing-workspace">
+        <PreviewCanvas
+          params={previewParams}
+          {renderMode}
+        />
+        <WizardBottomSheet
+          {previewParams}
+          onParamsChange={handleParamsChange}
+        />
       </div>
     {/if}
   </section>
 
-  <footer class="app-footer">
-    <span>AstroForge v0.1.0</span>
-    <span>Full Pipeline — Deep Sky, Planetary & Lunar</span>
-  </footer>
+  {#if currentStep !== "processing"}
+    <footer class="app-footer">
+      <span class="text-metadata">AstroForge v0.1.0</span>
+      <span class="text-metadata">Full Pipeline — Deep Sky, Planetary & Lunar</span>
+    </footer>
+  {/if}
 </main>
 
 <style>
@@ -325,17 +321,17 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    background: var(--bg-primary);
+    background: var(--background);
   }
 
   .app-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 1.5rem;
+    padding: 0 var(--sp-lg);
     height: 3.5rem;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
+    background: var(--surface-container);
+    border-bottom: 1px solid var(--outline-variant);
     flex-shrink: 0;
   }
 
@@ -343,23 +339,27 @@
     display: flex;
     align-items: center;
     gap: 0.625rem;
-    color: var(--accent);
+    color: var(--cobalt-accent);
     cursor: pointer;
+    background: none;
+    border: none;
   }
 
   .app-name {
+    font-family: var(--font-display);
     font-size: 1.25rem;
     font-weight: 600;
-    color: var(--text-primary);
-    letter-spacing: 0.02em;
+    color: var(--on-surface);
+    letter-spacing: var(--ls-headline);
   }
 
   .gpu-badge {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-    padding: 0.25rem 0.75rem;
-    border-radius: 0.375rem;
-    background: var(--bg-tertiary);
+    font-family: var(--font-data);
+    font-size: var(--text-metadata);
+    color: var(--on-surface-variant);
+    padding: 4px 12px;
+    border-radius: var(--radius-md);
+    background: var(--surface-container-high);
   }
 
   .gpu-badge.gpu-checked {
@@ -369,23 +369,23 @@
   .step-bar {
     display: flex;
     align-items: center;
-    padding: 0.75rem 2rem;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
+    padding: var(--sp-sm) var(--sp-lg);
+    background: var(--surface-container);
+    border-bottom: 1px solid var(--outline-variant);
     flex-shrink: 0;
   }
 
   .step {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    color: var(--text-muted);
-    font-size: 0.8125rem;
+    gap: var(--sp-sm);
+    color: var(--on-surface-variant);
+    font-size: var(--text-metadata);
     white-space: nowrap;
   }
 
   .step.active {
-    color: var(--accent);
+    color: var(--cobalt-accent);
   }
 
   .step.done {
@@ -399,29 +399,29 @@
     width: 1.5rem;
     height: 1.5rem;
     border-radius: 50%;
-    background: var(--bg-tertiary);
+    background: var(--surface-container-high);
     font-size: 0.75rem;
     font-weight: 600;
-    border: 1px solid var(--border);
+    border: 1px solid var(--outline-variant);
   }
 
   .step.active .step-num {
-    background: var(--accent);
-    color: var(--bg-primary);
-    border-color: var(--accent);
+    background: var(--cobalt-accent);
+    color: var(--surface);
+    border-color: var(--cobalt-accent);
   }
 
   .step.done .step-num {
     background: var(--success);
-    color: var(--bg-primary);
+    color: var(--surface);
     border-color: var(--success);
   }
 
   .step-connector {
     width: 2rem;
     height: 1px;
-    background: var(--border);
-    margin: 0 0.5rem;
+    background: var(--outline-variant);
+    margin: 0 var(--sp-sm);
   }
 
   .step-connector.done {
@@ -433,7 +433,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--bg-primary);
+    background: var(--background);
     position: relative;
     overflow: auto;
   }
@@ -443,79 +443,75 @@
   }
 
   .workspace-empty h1 {
-    font-size: 3rem;
-    font-weight: 700;
-    color: var(--accent);
-    margin-bottom: 0.5rem;
-    letter-spacing: -0.02em;
+    color: var(--cobalt-accent);
+    margin-bottom: var(--sp-xs);
   }
 
   .tagline {
-    font-size: 1.125rem;
-    color: var(--text-secondary);
-    margin-bottom: 1rem;
+    color: var(--on-surface-variant);
+    margin-bottom: var(--sp-sm);
   }
 
   .version {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    padding: 0.25rem 0.75rem;
-    border-radius: 0.375rem;
-    background: var(--bg-secondary);
+    color: var(--on-surface-variant);
+    padding: 4px 12px;
+    border-radius: var(--radius-md);
+    background: var(--surface-container);
     display: inline-block;
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--sp-lg);
   }
 
   .btn-start {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem 2rem;
-    background: var(--accent);
-    color: var(--bg-primary);
+    gap: var(--sp-sm);
+    padding: 12px 32px;
+    background: var(--cobalt-accent);
+    color: var(--surface);
     border: none;
-    border-radius: 0.5rem;
-    font-size: 1rem;
+    border-radius: var(--radius-lg);
+    font-family: var(--font-body);
+    font-size: var(--text-body);
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: all var(--transition-fast);
   }
 
   .btn-start:hover {
-    background: var(--accent-dim);
+    background: var(--primary-container);
+    box-shadow: 0 0 16px rgba(203, 78, 61, 0.3);
+  }
+
+  .btn-start .material-symbols-outlined {
+    font-size: 20px;
   }
 
   .hint {
-    margin-top: 0.75rem;
-    font-size: 0.8125rem;
-    color: var(--text-muted);
+    margin-top: var(--sp-sm);
+    color: var(--on-surface-variant);
   }
 
   .file-select-panel {
     width: 560px;
     max-width: 90vw;
-    padding: 1.5rem;
+    padding: var(--sp-lg);
   }
 
   .file-select-panel h2 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.25rem;
+    margin-bottom: var(--sp-xs);
   }
 
   .subtitle {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    margin-bottom: 1.25rem;
+    color: var(--on-surface-variant);
+    margin-bottom: var(--sp-md);
   }
 
   .drop-zone {
-    border: 2px dashed var(--border);
-    border-radius: 0.75rem;
-    padding: 2rem 1.5rem;
+    border: 2px dashed var(--outline-variant);
+    border-radius: var(--radius-xl);
+    padding: var(--sp-xl) var(--sp-lg);
     text-align: center;
-    transition: border-color 0.15s ease, background 0.15s ease;
+    transition: border-color var(--transition-base), background var(--transition-base);
     min-height: 200px;
     display: flex;
     flex-direction: column;
@@ -524,43 +520,36 @@
 
   .drop-zone.has-files {
     border-style: solid;
-    padding: 1rem;
+    padding: var(--sp-md);
     text-align: left;
   }
 
   .drop-empty {
-    color: var(--text-muted);
+    color: var(--on-surface-variant);
   }
 
-  .drop-empty svg {
-    margin-bottom: 0.75rem;
+  .drop-icon {
+    font-size: 48px;
+    margin-bottom: var(--sp-sm);
     opacity: 0.5;
   }
 
-  .drop-empty p {
-    font-size: 0.9375rem;
-    margin-bottom: 0.25rem;
-  }
-
   .drop-hint {
-    font-size: 0.75rem;
-    color: var(--text-muted);
+    color: var(--on-surface-variant);
   }
 
   .file-list-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.75rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
+    margin-bottom: var(--sp-sm);
   }
 
   .btn-clear {
     background: none;
     border: none;
-    color: var(--text-muted);
-    font-size: 0.75rem;
+    color: var(--on-surface-variant);
+    font-size: var(--text-metadata);
     cursor: pointer;
     text-decoration: underline;
   }
@@ -574,21 +563,21 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--sp-xs);
   }
 
   .file-item {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.375rem 0.5rem;
-    background: var(--bg-tertiary);
-    border-radius: 0.25rem;
-    font-size: 0.8125rem;
+    gap: var(--sp-sm);
+    padding: 6px var(--sp-sm);
+    background: var(--surface-container-high);
+    border-radius: var(--radius-default);
   }
 
   .file-icon {
-    font-size: 0.875rem;
+    font-size: 1rem;
+    color: var(--on-surface-variant);
   }
 
   .file-name {
@@ -596,57 +585,58 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--text-primary);
+    color: var(--on-surface);
   }
 
   .file-size {
-    color: var(--text-muted);
-    font-size: 0.75rem;
+    color: var(--on-surface-variant);
     white-space: nowrap;
   }
 
   .btn-browse {
     display: inline-block;
-    margin-top: 1rem;
-    padding: 0.5rem 1.25rem;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    font-size: 0.9375rem;
+    margin-top: var(--sp-sm);
+    padding: var(--sp-sm) var(--sp-md);
+    background: var(--surface-container-high);
+    color: var(--on-surface);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    font-size: var(--text-body);
     font-weight: 500;
     cursor: pointer;
     text-align: center;
   }
 
   .btn-browse:hover {
-    border-color: var(--accent);
+    border-color: var(--cobalt-accent);
   }
 
   .actions {
     display: flex;
     justify-content: flex-end;
-    gap: 0.75rem;
-    margin-top: 1.5rem;
+    gap: var(--sp-sm);
+    margin-top: var(--sp-lg);
   }
 
   .btn-primary,
   .btn-secondary {
-    padding: 0.5rem 1.25rem;
-    border-radius: 0.375rem;
-    font-size: 0.9375rem;
+    padding: var(--sp-sm) var(--sp-md);
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    font-size: var(--text-body);
     font-weight: 500;
     cursor: pointer;
     border: none;
   }
 
   .btn-primary {
-    background: var(--accent);
-    color: var(--bg-primary);
+    background: var(--cobalt-accent);
+    color: var(--surface);
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: var(--accent-dim);
+    background: var(--primary-container);
   }
 
   .btn-primary:disabled {
@@ -655,119 +645,53 @@
   }
 
   .btn-secondary {
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
+    background: var(--surface-container-high);
+    color: var(--on-surface-variant);
   }
 
   .btn-secondary:hover {
-    background: var(--border);
+    background: var(--surface-container-highest);
   }
 
   .analyzing-panel {
     text-align: center;
-    color: var(--text-secondary);
+    color: var(--on-surface-variant);
   }
 
   .analyzing-spinner {
     width: 2.5rem;
     height: 2.5rem;
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
+    border: 3px solid var(--outline-variant);
+    border-top-color: var(--cobalt-accent);
     border-radius: 50%;
-    margin: 0 auto 1rem;
+    margin: 0 auto var(--sp-sm);
     animation: spin 0.8s linear infinite;
   }
 
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .analyzing-panel p {
-    font-size: 1rem;
-    color: var(--text-primary);
-    margin-bottom: 0.25rem;
+    color: var(--on-surface);
+    margin-bottom: 4px;
   }
 
   .analyzing-hint {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
+    color: var(--on-surface-variant);
   }
 
-  .processing-panel {
-    width: 480px;
-    max-width: 90vw;
-    text-align: center;
-  }
-
-  .processing-panel h2 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 1.5rem;
-  }
-
-  .processing-summary {
-    display: flex;
-    justify-content: center;
-    gap: 1.5rem;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
-  }
-
-  .summary-item {
+  .processing-workspace {
+    position: absolute;
+    inset: 0;
     display: flex;
     flex-direction: column;
-    align-items: center;
-  }
-
-  .summary-label {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-bottom: 0.25rem;
-  }
-
-  .summary-value {
-    font-size: 1.75rem;
-    font-weight: 700;
-    color: var(--accent);
-  }
-
-  .session-info {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    padding: 1rem;
-    text-align: left;
-    margin-bottom: 1.5rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-  }
-
-  .session-info p {
-    margin-bottom: 0.25rem;
-  }
-
-  .session-info strong {
-    color: var(--text-primary);
-  }
-
-  .processing-note {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-    margin-bottom: 1.5rem;
   }
 
   .app-footer {
     display: flex;
     justify-content: space-between;
-    padding: 0 1.5rem;
+    padding: 0 var(--sp-lg);
     height: 2.5rem;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border);
-    font-size: 0.75rem;
-    color: var(--text-muted);
+    background: var(--surface-container);
+    border-top: 1px solid var(--outline-variant);
+    color: var(--on-surface-variant);
     align-items: center;
     flex-shrink: 0;
   }

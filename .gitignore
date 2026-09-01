@@ -32,3 +32,5 @@ src-tauri/WixTools/
 
 # AstroForge local data
 AstroForge/
+local/
+scratch/

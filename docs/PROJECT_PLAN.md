@@ -1,6 +1,6 @@
 # AstroForge — Living Project Plan
 
-**Last updated:** 2026-09-01
+**Last updated:** 2026-09-02
 **Current phase:** Phase 0 — Foundation & Scaffolding (complete); Phase 1.5 — Guided Processing Train (active)
 **Spec version:** 1.1.0
 **Active CR:** AF-CR-2026-09-01-IMG-PIPELINE
@@ -191,14 +191,14 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M1-T1 | Define `ProcessingMode` type (Automagic / Automagic Expert / Pure Expert) and session-level mode state | §4.3 | pending | P1-M5-T3 |
-| P1.5-M1-T2 | Define `PipelineNode` and `PipelineGraph` TypeScript types matching CR JSON model (nodes with id, type, params, status; edges with from/to) | §4.1, §C.1 | pending | T1 |
-| P1.5-M1-T3 | Implement session state store (Svelte writable store) holding: session_id, current_mode, active_step_index, pipeline_graph, history_stack | §C.1 | pending | T2 |
-| P1.5-M1-T4 | Implement "Next Button" action logic: commit params to current node → append next node → wire edge → advance step index | §C.2 | pending | T3 |
-| P1.5-M1-T5 | Implement undo/redo history stack: every stage commit pushes a versioned snapshot (params + pixel ref); undo restores exact prior state | §4.2 | pending | T3 |
-| P1.5-M1-T6 | Implement mode-switch logic with confirmation: keep current pixel state OR re-process from chosen stage under new mode | §4.3 | pending | T1, T5 |
-| P1.5-M1-T7 | Implement stage receipt/log system: each stage emits human-readable entry with parameters, timing, warnings | §4.1 | pending | T3 |
-| P1.5-M1-T8 | Implement crash-safe autosave: persist session state (mode, history, intermediate refs) to Supabase on every stage commit | §5 NFR | pending | T5 |
+| P1.5-M1-T1 | [#137](https://github.com/emmanuel-a-otchere/AstroForge/issues/137) | Define `ProcessingMode` type (Automagic / Automagic Expert / Pure Expert) and session-level mode state | §4.3 | pending | P1-M5-T3 |
+| P1.5-M1-T2 | [#138](https://github.com/emmanuel-a-otchere/AstroForge/issues/138) | Define `PipelineNode` and `PipelineGraph` TypeScript types matching CR JSON model (nodes with id, type, params, status; edges with from/to) | §4.1, §C.1 | pending | T1 |
+| P1.5-M1-T3 | [#139](https://github.com/emmanuel-a-otchere/AstroForge/issues/139) | Implement session state store (Svelte writable store) holding: session_id, current_mode, active_step_index, pipeline_graph, history_stack | §C.1 | pending | T2 |
+| P1.5-M1-T4 | [#140](https://github.com/emmanuel-a-otchere/AstroForge/issues/140) | Implement "Next Button" action logic: commit params to current node → append next node → wire edge → advance step index | §C.2 | pending | T3 |
+| P1.5-M1-T5 | [#141](https://github.com/emmanuel-a-otchere/AstroForge/issues/141) | Implement undo/redo history stack: every stage commit pushes a versioned snapshot (params + pixel ref); undo restores exact prior state | §4.2 | pending | T3 |
+| P1.5-M1-T6 | [#142](https://github.com/emmanuel-a-otchere/AstroForge/issues/142) | Implement mode-switch logic with confirmation: keep current pixel state OR re-process from chosen stage under new mode | §4.3 | pending | T1, T5 |
+| P1.5-M1-T7 | [#143](https://github.com/emmanuel-a-otchere/AstroForge/issues/143) | Implement stage receipt/log system: each stage emits human-readable entry with parameters, timing, warnings | §4.1 | pending | T3 |
+| P1.5-M1-T8 | [#144](https://github.com/emmanuel-a-otchere/AstroForge/issues/144) | Implement crash-safe autosave: persist session state (mode, history, intermediate refs) to Supabase on every stage commit | §5 NFR | pending | T5 |
 
 ### Milestone 1.5.2 — PreviewCanvas & Live Preview System
 
@@ -207,14 +207,14 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M2-T1 | Implement `PreviewCanvas` Svelte component: persistent DOM element that survives wizard/forge mode transitions, renders to WebGL context | §A.1 | pending | P1.5-M1-T3 |
-| P1.5-M2-T2 | Implement WebGL rendering pipeline: texture upload from F32Image, full-screen quad, fragment shader output | §B | pending | T1 |
-| P1.5-M2-T3 | Implement MTF (Midtones Transfer Function) stretch shader in GLSL — black point clipping + midtone transfer per channel | §B.2 | pending | T2 |
-| P1.5-M2-T4 | Implement SCNR "Green-be-Gone" shader in GLSL — reduce green channel to min(R,B) with strength slider blend | §B.1 | pending | T2 |
-| P1.5-M2-T5 | Implement preview statistics stability: denoise/sharpen shaders must not alter display stretch statistics (separate display stretch from data) | §4.4 | pending | T3, T4 |
-| P1.5-M2-T6 | Implement real-pixel zoom/pan/refit on PreviewCanvas with synced multi-preview grid support | §4.4, §4.1 stage 7 | pending | T2 |
-| P1.5-M2-T7 | Implement "Hold to Compare" and side-by-side original vs current view at any stage | §4.2 | pending | T2 |
-| P1.5-M2-T8 | Implement debounced full-resolution render: preview renders at reduced res during slider drag, full res on rest | §4.4 | pending | T2 |
+| P1.5-M2-T1 | [#145](https://github.com/emmanuel-a-otchere/AstroForge/issues/145) | Implement `PreviewCanvas` Svelte component: persistent DOM element that survives wizard/forge mode transitions, renders to WebGL context | §A.1 | pending | P1.5-M1-T3 |
+| P1.5-M2-T2 | [#146](https://github.com/emmanuel-a-otchere/AstroForge/issues/146) | Implement WebGL rendering pipeline: texture upload from F32Image, full-screen quad, fragment shader output | §B | pending | T1 |
+| P1.5-M2-T3 | [#147](https://github.com/emmanuel-a-otchere/AstroForge/issues/147) | Implement MTF (Midtones Transfer Function) stretch shader in GLSL — black point clipping + midtone transfer per channel | §B.2 | pending | T2 |
+| P1.5-M2-T4 | [#148](https://github.com/emmanuel-a-otchere/AstroForge/issues/148) | Implement SCNR "Green-be-Gone" shader in GLSL — reduce green channel to min(R,B) with strength slider blend | §B.1 | pending | T2 |
+| P1.5-M2-T5 | [#149](https://github.com/emmanuel-a-otchere/AstroForge/issues/149) | Implement preview statistics stability: denoise/sharpen shaders must not alter display stretch statistics (separate display stretch from data) | §4.4 | pending | T3, T4 |
+| P1.5-M2-T6 | [#150](https://github.com/emmanuel-a-otchere/AstroForge/issues/150) | Implement real-pixel zoom/pan/refit on PreviewCanvas with synced multi-preview grid support | §4.4, §4.1 stage 7 | pending | T2 |
+| P1.5-M2-T7 | [#151](https://github.com/emmanuel-a-otchere/AstroForge/issues/151) | Implement "Hold to Compare" and side-by-side original vs current view at any stage | §4.2 | pending | T2 |
+| P1.5-M2-T8 | [#152](https://github.com/emmanuel-a-otchere/AstroForge/issues/152) | Implement debounced full-resolution render: preview renders at reduced res during slider drag, full res on rest | §4.4 | pending | T2 |
 
 ### Milestone 1.5.3 — Wizard Mode UI (Bottom Sheet)
 
@@ -222,12 +222,12 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M3-T1 | Implement `WizardBottomSheet` component: stepper (step N of 10), large strength slider, Next/Back buttons | §A.1 | pending | P1.5-M1-T4, P1.5-M2-T1 |
-| P1.5-M3-T2 | Implement stage-specific parameter panels that appear inside the bottom sheet per active step | §4.1 | pending | T1 |
-| P1.5-M3-T3 | Implement "Reveal Pipeline / Expert Mode" toggle in top nav bar | §A.2 | pending | T1 |
-| P1.5-M3-T4 | Implement wizard-to-forge transition animation: bottom sheet slides down + fades out, canvas shrinks, sidebars slide in, active step morphs into selected node | §A.2 | pending | T1, P1.5-M4-T1 |
-| P1.5-M3-T5 | Implement Automagic mode UI: single "Process" button, per-stage "Auto" buttons, progress + final result only, hidden granularity | §4.3 | pending | T1, T2 |
-| P1.5-M3-T6 | Implement mode indicator badge (persistent, always visible, colour-coded per mode) | §4.3, §7 | pending | T1 |
+| P1.5-M3-T1 | [#153](https://github.com/emmanuel-a-otchere/AstroForge/issues/153) | Implement `WizardBottomSheet` component: stepper (step N of 10), large strength slider, Next/Back buttons | §A.1 | pending | P1.5-M1-T4, P1.5-M2-T1 |
+| P1.5-M3-T2 | [#154](https://github.com/emmanuel-a-otchere/AstroForge/issues/154) | Implement stage-specific parameter panels that appear inside the bottom sheet per active step | §4.1 | pending | T1 |
+| P1.5-M3-T3 | [#155](https://github.com/emmanuel-a-otchere/AstroForge/issues/155) | Implement "Reveal Pipeline / Expert Mode" toggle in top nav bar | §A.2 | pending | T1 |
+| P1.5-M3-T4 | [#156](https://github.com/emmanuel-a-otchere/AstroForge/issues/156) | Implement wizard-to-forge transition animation: bottom sheet slides down + fades out, canvas shrinks, sidebars slide in, active step morphs into selected node | §A.2 | pending | T1, P1.5-M4-T1 |
+| P1.5-M3-T5 | [#157](https://github.com/emmanuel-a-otchere/AstroForge/issues/157) | Implement Automagic mode UI: single "Process" button, per-stage "Auto" buttons, progress + final result only, hidden granularity | §4.3 | pending | T1, T2 |
+| P1.5-M3-T6 | [#158](https://github.com/emmanuel-a-otchere/AstroForge/issues/158) | Implement mode indicator badge (persistent, always visible, colour-coded per mode) | §4.3, §7 | pending | T1 |
 
 ### Milestone 1.5.4 — Forge Mode UI (Node Graph + Sidebars)
 
@@ -235,11 +235,11 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M4-T1 | Implement `NodeSidebar` component: visual DAG with nodes (stages), edges (connections), status colours, active node highlight in accent colour | §A.1, §C.1 | pending | P1.5-M1-T2 |
-| P1.5-M4-T2 | Implement `ParameterSidebar` component: full parameter panel for selected node, all controls exposed | §A.1 | pending | T1 |
-| P1.5-M4-T3 | Implement node selection → parameter sidebar sync: clicking a node in the graph loads its params in the sidebar and updates the preview canvas | §C | pending | T1, T2, P1.5-M2-T1 |
-| P1.5-M4-T4 | Implement Pure Expert mode UI: every control, sub-parameter, mask, and intermediate buffer exposed; manual sub-step sequencing | §4.3 | pending | T2 |
-| P1.5-M4-T5 | Implement Automagic Expert mode UI: AI proposals in dialogs with live preview, accept/reject/refine, "Apply equally to selected" batch control | §4.3 | pending | T2, P1.5-M5-T1 |
+| P1.5-M4-T1 | [#159](https://github.com/emmanuel-a-otchere/AstroForge/issues/159) | Implement `NodeSidebar` component: visual DAG with nodes (stages), edges (connections), status colours, active node highlight in accent colour | §A.1, §C.1 | pending | P1.5-M1-T2 |
+| P1.5-M4-T2 | [#160](https://github.com/emmanuel-a-otchere/AstroForge/issues/160) | Implement `ParameterSidebar` component: full parameter panel for selected node, all controls exposed | §A.1 | pending | T1 |
+| P1.5-M4-T3 | [#161](https://github.com/emmanuel-a-otchere/AstroForge/issues/161) | Implement node selection → parameter sidebar sync: clicking a node in the graph loads its params in the sidebar and updates the preview canvas | §C | pending | T1, T2, P1.5-M2-T1 |
+| P1.5-M4-T4 | [#162](https://github.com/emmanuel-a-otchere/AstroForge/issues/162) | Implement Pure Expert mode UI: every control, sub-parameter, mask, and intermediate buffer exposed; manual sub-step sequencing | §4.3 | pending | T2 |
+| P1.5-M4-T5 | [#163](https://github.com/emmanuel-a-otchere/AstroForge/issues/163) | Implement Automagic Expert mode UI: AI proposals in dialogs with live preview, accept/reject/refine, "Apply equally to selected" batch control | §4.3 | pending | T2, P1.5-M5-T1 |
 
 ### Milestone 1.5.5 — Backend AI Service Layer
 
@@ -248,11 +248,11 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M5-T1 | Define `AIService` interface: `analyse(image, stage) → AnalysisResult`, `suggestParams(image, stage, dataType) → ParamProposal`, `execute(image, stage, params) → ProcessedImage` | §4.3, §8 | pending | P1.5-M1-T3 |
-| P1.5-M5-T2 | Implement AI service dispatch: route requests to local ONNX models, remote engines, or CPU fallback based on mode + hardware | §4.3 | pending | T1 |
-| P1.5-M5-T3 | Implement graceful degradation: if AI engine fails, fall back to algorithmic defaults and surface a clear warning | §4.3, §4.4 | pending | T2 |
-| P1.5-M5-T4 | Implement AI status + progress reporting to UI: measured progress, estimated time, engine name, quality tier | §5 NFR | pending | T2 |
-| P1.5-M5-T5 | Implement free-path vs accelerated-path selection with transparent messaging | §4.3, §5 NFR | pending | T2 |
+| P1.5-M5-T1 | [#164](https://github.com/emmanuel-a-otchere/AstroForge/issues/164) | Define `AIService` interface: `analyse(image, stage) → AnalysisResult`, `suggestParams(image, stage, dataType) → ParamProposal`, `execute(image, stage, params) → ProcessedImage` | §4.3, §8 | pending | P1.5-M1-T3 |
+| P1.5-M5-T2 | [#165](https://github.com/emmanuel-a-otchere/AstroForge/issues/165) | Implement AI service dispatch: route requests to local ONNX models, remote engines, or CPU fallback based on mode + hardware | §4.3 | pending | T1 |
+| P1.5-M5-T3 | [#166](https://github.com/emmanuel-a-otchere/AstroForge/issues/166) | Implement graceful degradation: if AI engine fails, fall back to algorithmic defaults and surface a clear warning | §4.3, §4.4 | pending | T2 |
+| P1.5-M5-T4 | [#167](https://github.com/emmanuel-a-otchere/AstroForge/issues/167) | Implement AI status + progress reporting to UI: measured progress, estimated time, engine name, quality tier | §5 NFR | pending | T2 |
+| P1.5-M5-T5 | [#168](https://github.com/emmanuel-a-otchere/AstroForge/issues/168) | Implement free-path vs accelerated-path selection with transparent messaging | §4.3, §5 NFR | pending | T2 |
 
 ### Milestone 1.5.6 — Canonical Pipeline Stages (10-Stage Train)
 
@@ -262,16 +262,16 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M6-T1 | Stage 1 — Ingest & Analyse: load FITS/TIFF/XISF, auto-detect camera type, filter set, bit depth, linear vs stretched, basic stats; produce data-type declaration | §4.1 stage 1 | pending | P1.5-M1-T7 |
-| P1.5-M6-T2 | Stage 2 — Framing / Crop / Rotate: interactive free-select crop, live rotation, aspect-ratio presets, meridian-flip awareness; explicit (never silent auto-crop) | §4.1 stage 2 | pending | T1, P1.5-M2-T6 |
-| P1.5-M6-T3 | Stage 3 — Gradient / Background Extraction: 2D polynomial/spline model, nebulosity mask, live preview | §4.1 stage 3 | pending | T1 |
-| P1.5-M6-T4 | Stage 4 — Colour Calibration / Balance: bounded corrections, dual-band and mono-aware, clear labelling | §4.1 stage 4 | pending | T1 |
-| P1.5-M6-T5 | Stage 5 — Sharpen / Deconvolution: Richardson-Lucy or van Cittert with PSF from stars, live preview | §4.1 stage 5 | pending | T1 |
-| P1.5-M6-T6 | Stage 6 — Denoise: SwinIR or wavelet fallback, preview-stable (no stat shift), live preview | §4.1 stage 6 | pending | T1, P1.5-M2-T5 |
-| P1.5-M6-T7 | Stage 7 — Stretch: data-anchored "Deep" engine, multi-preview grid (Soft/Normal/Aggressive/Deep/Deep-keep-colours/Custom), "Keep this look" commit | §4.1 stage 7, §4.4 | pending | P1.5-M2-T3, P1.5-M2-T6 |
-| P1.5-M6-T8 | Stage 8 — Star Handling: separation → independent starless/stars layers → exact or soft replace with strength + colour-boost; mathematically exact (verifiable by difference maps) | §4.1 stage 8, §4.4, §6 AC | pending | T7, P1.5-M5-T1 |
-| P1.5-M6-T9 | Stage 9 — Creative / Final Polish: curves (saturation channel, colour-family targeting), colour-transmutation spells with editable recipes, narrowband palette mixes, tone + detail | §4.1 stage 9 | pending | T7 |
-| P1.5-M6-T10 | Stage 10 — Export: multi-format (FITS master, TIFF, JPEG, starless, stars-only), non-destructive (session continues), success/failure messaging | §4.1 stage 10 | pending | T9 |
+| P1.5-M6-T1 | [#169](https://github.com/emmanuel-a-otchere/AstroForge/issues/169) | Stage 1 — Ingest & Analyse: load FITS/TIFF/XISF, auto-detect camera type, filter set, bit depth, linear vs stretched, basic stats; produce data-type declaration | §4.1 stage 1 | pending | P1.5-M1-T7 |
+| P1.5-M6-T2 | [#170](https://github.com/emmanuel-a-otchere/AstroForge/issues/170) | Stage 2 — Framing / Crop / Rotate: interactive free-select crop, live rotation, aspect-ratio presets, meridian-flip awareness; explicit (never silent auto-crop) | §4.1 stage 2 | pending | T1, P1.5-M2-T6 |
+| P1.5-M6-T3 | [#171](https://github.com/emmanuel-a-otchere/AstroForge/issues/171) | Stage 3 — Gradient / Background Extraction: 2D polynomial/spline model, nebulosity mask, live preview | §4.1 stage 3 | pending | T1 |
+| P1.5-M6-T4 | [#172](https://github.com/emmanuel-a-otchere/AstroForge/issues/172) | Stage 4 — Colour Calibration / Balance: bounded corrections, dual-band and mono-aware, clear labelling | §4.1 stage 4 | pending | T1 |
+| P1.5-M6-T5 | [#173](https://github.com/emmanuel-a-otchere/AstroForge/issues/173) | Stage 5 — Sharpen / Deconvolution: Richardson-Lucy or van Cittert with PSF from stars, live preview | §4.1 stage 5 | pending | T1 |
+| P1.5-M6-T6 | [#174](https://github.com/emmanuel-a-otchere/AstroForge/issues/174) | Stage 6 — Denoise: SwinIR or wavelet fallback, preview-stable (no stat shift), live preview | §4.1 stage 6 | pending | T1, P1.5-M2-T5 |
+| P1.5-M6-T7 | [#175](https://github.com/emmanuel-a-otchere/AstroForge/issues/175) | Stage 7 — Stretch: data-anchored "Deep" engine, multi-preview grid (Soft/Normal/Aggressive/Deep/Deep-keep-colours/Custom), "Keep this look" commit | §4.1 stage 7, §4.4 | pending | P1.5-M2-T3, P1.5-M2-T6 |
+| P1.5-M6-T8 | [#176](https://github.com/emmanuel-a-otchere/AstroForge/issues/176) | Stage 8 — Star Handling: separation → independent starless/stars layers → exact or soft replace with strength + colour-boost; mathematically exact (verifiable by difference maps) | §4.1 stage 8, §4.4, §6 AC | pending | T7, P1.5-M5-T1 |
+| P1.5-M6-T9 | [#177](https://github.com/emmanuel-a-otchere/AstroForge/issues/177) | Stage 9 — Creative / Final Polish: curves (saturation channel, colour-family targeting), colour-transmutation spells with editable recipes, narrowband palette mixes, tone + detail | §4.1 stage 9 | pending | T7 |
+| P1.5-M6-T10 | [#178](https://github.com/emmanuel-a-otchere/AstroForge/issues/178) | Stage 10 — Export: multi-format (FITS master, TIFF, JPEG, starless, stars-only), non-destructive (session continues), success/failure messaging | §4.1 stage 10 | pending | T9 |
 
 ### Milestone 1.5.7 — Non-Destructive Editing & History
 
@@ -279,11 +279,11 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M7-T1 | Implement versioned artefact store: each stage commit stores params + mask separately from pixel data | §4.2 | pending | P1.5-M1-T5 |
-| P1.5-M7-T2 | Implement "re-apply from here": re-running an earlier stage re-executes it and all downstream stages with current params | §4.2 | pending | T1 |
-| P1.5-M7-T3 | Implement multi-save: export multiple formats/versions without terminating session | §4.2 | pending | P1.5-M6-T10 |
-| P1.5-M7-T4 | Implement explicit warning when re-running an already-applied AI or irreversible-looking step | §4.2 | pending | T1 |
-| P1.5-M7-T5 | Implement exact reversibility for crop, stretch, and star-replace (restore exact pre-operation state) | §4.2, §6 AC3 | pending | T1, P1.5-M6-T7, P1.5-M6-T8 |
+| P1.5-M7-T1 | [#179](https://github.com/emmanuel-a-otchere/AstroForge/issues/179) | Implement versioned artefact store: each stage commit stores params + mask separately from pixel data | §4.2 | pending | P1.5-M1-T5 |
+| P1.5-M7-T2 | [#180](https://github.com/emmanuel-a-otchere/AstroForge/issues/180) | Implement "re-apply from here": re-running an earlier stage re-executes it and all downstream stages with current params | §4.2 | pending | T1 |
+| P1.5-M7-T3 | [#181](https://github.com/emmanuel-a-otchere/AstroForge/issues/181) | Implement multi-save: export multiple formats/versions without terminating session | §4.2 | pending | P1.5-M6-T10 |
+| P1.5-M7-T4 | [#182](https://github.com/emmanuel-a-otchere/AstroForge/issues/182) | Implement explicit warning when re-running an already-applied AI or irreversible-looking step | §4.2 | pending | T1 |
+| P1.5-M7-T5 | [#183](https://github.com/emmanuel-a-otchere/AstroForge/issues/183) | Implement exact reversibility for crop, stretch, and star-replace (restore exact pre-operation state) | §4.2, §6 AC3 | pending | T1, P1.5-M6-T7, P1.5-M6-T8 |
 
 ### Milestone 1.5.8 — Smart-Telescope & Data-Type Awareness
 
@@ -291,10 +291,10 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M8-T1 | Implement smart-telescope device detection from FITS headers and filenames (Seestar, Dwarf family, etc.) | §4.4 | pending | P1.5-M6-T1 |
-| P1.5-M8-T2 | Implement data-type declaration: OSC / dual-band / mono Ha/OIII/SII/LRGB, bit depth, linear vs stretched | §4.1 stage 1 | pending | T1 |
-| P1.5-M8-T3 | Implement data-type-aware guidance: mode-specific tooltips, calibration decisions, and filter naming conventions | §4.4 | pending | T1, T2 |
-| P1.5-M8-T4 | Implement honest feedback system: surface all warnings (hot pixels, blank frames, already-applied steps, imperfect alignment, linear data) as actionable messages | §4.4 | pending | T1 |
+| P1.5-M8-T1 | [#184](https://github.com/emmanuel-a-otchere/AstroForge/issues/184) | Implement smart-telescope device detection from FITS headers and filenames (Seestar, Dwarf family, etc.) | §4.4 | pending | P1.5-M6-T1 |
+| P1.5-M8-T2 | [#185](https://github.com/emmanuel-a-otchere/AstroForge/issues/185) | Implement data-type declaration: OSC / dual-band / mono Ha/OIII/SII/LRGB, bit depth, linear vs stretched | §4.1 stage 1 | pending | T1 |
+| P1.5-M8-T3 | [#186](https://github.com/emmanuel-a-otchere/AstroForge/issues/186) | Implement data-type-aware guidance: mode-specific tooltips, calibration decisions, and filter naming conventions | §4.4 | pending | T1, T2 |
+| P1.5-M8-T4 | [#187](https://github.com/emmanuel-a-otchere/AstroForge/issues/187) | Implement honest feedback system: surface all warnings (hot pixels, blank frames, already-applied steps, imperfect alignment, linear data) as actionable messages | §4.4 | pending | T1 |
 
 ---
 
@@ -523,3 +523,4 @@ resolved early to avoid blocking.
 | 2026-08-30 | All phases, milestones, tasks, and decision points created as GitHub issues (#1–#135) | AstroForge |
 | 2026-09-01 | Phase 0 marked done; Phase 1 core algorithms marked done; focal length + object type auto-detection added (P1-M1-T7) | AstroForge |
 | 2026-09-01 | Added Phase 1.5 — Guided Processing Train per CR AF-CR-2026-09-01-IMG-PIPELINE: 8 milestones, 43 tasks covering state machine, live preview, wizard/forge UI, AI service layer, 10-stage train, non-destructive editing, smart-telescope awareness | AstroForge |
+| 2026-09-02 | Cross-linked all 51 Phase 1.5 tasks to issues #137–#187 (previously tracked as commit-message-only) | AstroForge |

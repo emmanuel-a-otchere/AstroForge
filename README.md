@@ -14,6 +14,8 @@ How does AstroForge compare to existing solutions in the astrophotography ecosys
 * **Native Smart Telescope Apps:** Provide instant gratification and ease of use; but they operate as locked black boxes, failing to support advanced narrowband compositions, custom AI enhancement, or expert parameter tweaking.
 * **The AstroForge Advantage:** Purpose-built for the modern smart telescope output. It natively handles raw Bayer PNG and JPG files without relying on missing metadata, features a lightweight AI-augmented processing graph, and scales its interface from beginner-friendly wizards to expert parameter panels. Furthermore, it is explicitly engineered to run advanced AI models on modest 4GB to 8GB RAM systems.
 
+![Screenshot](https://raw.githubusercontent.com/emmanuel-a-otchere/AstroForge/main/screen.png)
+
 ## Core Capabilities
 * **Intelligent Ingestion:** Automatically detects raw Bayer patterns in FITS, DNG, PNG, and JPG formats using statistical analysis and autocorrelation when camera metadata is absent.
 * **Target-Aware Routing:** Dynamically switches between deep-sky stacking and planetary lucky-imaging pipelines based on exposure time and frame count heuristics.

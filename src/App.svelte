@@ -5,12 +5,25 @@
   import ClassificationDialog from "./components/ClassificationDialog.svelte";
   import PreviewCanvas from "./components/PreviewCanvas.svelte";
   import WizardBottomSheet from "./components/WizardBottomSheet.svelte";
+  import NodeSidebar from "./components/NodeSidebar.svelte";
+  import ParameterSidebar from "./components/ParameterSidebar.svelte";
   import {
     initSession,
     sessionStore,
     activeStepIndex,
   } from "./lib/pipeline-store";
   import type { PreviewParams } from "./lib/gl-renderer";
+
+  let showForgeMode = false;
+  let isTransitioning = false;
+
+  function toggleForgeMode() {
+    isTransitioning = true;
+    setTimeout(() => {
+      showForgeMode = !showForgeMode;
+      isTransitioning = false;
+    }, 300);
+  }
 
   type WorkflowStep = "landing" | "select-files" | "session-setup" | "review-frames" | "processing";
 
@@ -39,7 +52,6 @@
   };
 
   let renderMode: "identity" | "mtf" | "scnr" | "difference" | "composite" = "mtf";
-  let showForgeMode = false;
 
   function init() {
     gpuCapability = probeGpu();
@@ -295,15 +307,36 @@
         onReclassify={handleReclassify}
       />
     {:else if currentStep === "processing"}
-      <div class="processing-workspace">
-        <PreviewCanvas
-          params={previewParams}
-          {renderMode}
-        />
-        <WizardBottomSheet
-          {previewParams}
-          onParamsChange={handleParamsChange}
-        />
+      <div class="processing-workspace" class:forge={showForgeMode} class:transitioning={isTransitioning}>
+        {#if showForgeMode}
+          <div class="forge-layout">
+            <NodeSidebar />
+            <div class="forge-canvas-area">
+              <PreviewCanvas
+                params={previewParams}
+                {renderMode}
+              />
+            </div>
+            <ParameterSidebar
+              {previewParams}
+              onParamsChange={handleParamsChange}
+            />
+          </div>
+        {:else}
+          <PreviewCanvas
+            params={previewParams}
+            {renderMode}
+          />
+          <WizardBottomSheet
+            {previewParams}
+            onParamsChange={handleParamsChange}
+          />
+        {/if}
+
+        <button class="forge-toggle" on:click={toggleForgeMode} type="button" title="Toggle between guided and expert view">
+          <span class="material-symbols-outlined">{showForgeMode ? "view_agenda" : "account_tree"}</span>
+          <span class="toggle-label">{showForgeMode ? "Guided" : "Pipeline"}</span>
+        </button>
       </div>
     {/if}
   </section>
@@ -682,6 +715,58 @@
     inset: 0;
     display: flex;
     flex-direction: column;
+  }
+
+  .processing-workspace.transitioning > * {
+    opacity: 0.3;
+    transition: opacity var(--transition-slow);
+  }
+
+  .forge-layout {
+    display: flex;
+    flex: 1;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .forge-canvas-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: var(--surface-container-lowest);
+  }
+
+  .forge-toggle {
+    position: absolute;
+    top: var(--sp-md);
+    left: var(--sp-md);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: rgba(18, 20, 20, 0.85);
+    color: var(--on-surface);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-full);
+    font-family: var(--font-data);
+    font-size: var(--text-label);
+    font-weight: 700;
+    letter-spacing: var(--ls-label);
+    text-transform: uppercase;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    z-index: 30;
+    transition: all var(--transition-fast);
+  }
+
+  .forge-toggle:hover {
+    border-color: var(--cobalt-accent);
+    color: var(--cobalt-accent);
+    box-shadow: 0 0 8px rgba(203, 78, 61, 0.2);
+  }
+
+  .forge-toggle .material-symbols-outlined {
+    font-size: 18px;
   }
 
   .app-footer {

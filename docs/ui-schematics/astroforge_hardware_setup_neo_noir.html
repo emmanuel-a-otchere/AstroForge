@@ -1,0 +1,391 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>AstroForge - Hardware Configuration &amp; Environmental Setup</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "on-background": "#e4e2e2",
+                "primary-container": "#1a1a1a",
+                "surface-container-lowest": "#0e0e0e",
+                "surface": "#131314",
+                "surface-variant": "#343535",
+                "on-secondary-container": "#ffaea3",
+                "surface-container": "#1f2020",
+                "secondary-fixed-dim": "#ffb4a9",
+                "on-tertiary-fixed-variant": "#0039b3",
+                "on-primary": "#313030",
+                "on-secondary-fixed-variant": "#930004",
+                "on-primary-fixed": "#1c1b1b",
+                "error": "#ffb4ab",
+                "on-tertiary-fixed": "#001551",
+                "on-secondary": "#690002",
+                "on-tertiary-container": "#5179ff",
+                "inverse-on-surface": "#303030",
+                "on-surface-variant": "#c4c7c7",
+                "secondary-fixed": "#ffdad5",
+                "outline-variant": "#444748",
+                "background": "#131314",
+                "secondary": "#ffb4a9",
+                "primary-fixed": "#e5e2e1",
+                "surface-tint": "#c8c6c5",
+                "tertiary-fixed-dim": "#b6c4ff",
+                "on-error": "#690005",
+                "on-surface": "#e4e2e2",
+                "on-tertiary": "#002780",
+                "error-container": "#93000a",
+                "surface-container-highest": "#343535",
+                "primary-fixed-dim": "#c8c6c5",
+                "primary": "#c8c6c5",
+                "tertiary-fixed": "#dce1ff",
+                "on-error-container": "#ffdad6",
+                "inverse-primary": "#5f5e5e",
+                "surface-container-low": "#1b1c1c",
+                "surface-dim": "#131314",
+                "on-primary-container": "#848282",
+                "tertiary": "#b6c4ff",
+                "tertiary-container": "#00144d",
+                "secondary-container": "#a50005",
+                "on-secondary-fixed": "#410001",
+                "surface-bright": "#393939",
+                "outline": "#8e9192",
+                "inverse-surface": "#e4e2e2",
+                "on-primary-fixed-variant": "#474746",
+                "surface-container-high": "#2a2a2a"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.125rem",
+                "lg": "0.25rem",
+                "xl": "0.5rem",
+                "full": "0.75rem"
+        },
+        "spacing": {
+                "margin": "24px",
+                "stack-sm": "8px",
+                "stack-lg": "32px",
+                "gutter": "16px",
+                "stack-md": "16px",
+                "base": "4px"
+        },
+        "fontFamily": {
+                "body-lg": [
+                        "Inter"
+                ],
+                "headline-md": [
+                        "Space Grotesk"
+                ],
+                "headline-lg": [
+                        "Space Grotesk"
+                ],
+                "body-md": [
+                        "Inter"
+                ],
+                "label-md": [
+                        "Space Grotesk"
+                ]
+        },
+        "fontSize": {
+                "body-lg": [
+                        "16px",
+                        {
+                                "lineHeight": "24px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "headline-md": [
+                        "24px",
+                        {
+                                "lineHeight": "32px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "headline-lg": [
+                        "32px",
+                        {
+                                "lineHeight": "40px",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "body-md": [
+                        "14px",
+                        {
+                                "lineHeight": "20px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "label-md": [
+                        "12px",
+                        {
+                                "lineHeight": "16px",
+                                "fontWeight": "500"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+<style>
+        body {
+            background-color: #131314;
+            color: #e4e2e2;
+        }
+        .glow-active {
+            box-shadow: 0 0 12px 2px rgba(255, 180, 169, 0.2);
+            border-color: #ffb4a9;
+        }
+        .glass-panel {
+            background-color: rgba(31, 32, 32, 0.8);
+            backdrop-filter: blur(16px);
+            border: 1px solid #444748;
+        }
+        /* Hide scrollbar for clean look */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #131314; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #343535; 
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #444748; 
+        }
+        .bg-grid-pattern {
+            background-image: 
+                linear-gradient(to right, rgba(68, 71, 72, 0.2) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(68, 71, 72, 0.2) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+    </style>
+</head>
+<body class="antialiased overflow-hidden selection:bg-secondary selection:text-on-secondary flex h-screen w-screen bg-background">
+<!-- SideNavBar Component -->
+<nav class="hidden md:flex flex-col fixed left-0 top-0 h-full w-[320px] bg-surface border-r border-outline-variant py-margin z-50 transition-all duration-150 ease-in-out">
+<div class="px-margin mb-stack-lg flex flex-col gap-base">
+<h1 class="font-headline-md text-headline-md text-primary tracking-tighter">AstroForge</h1>
+<span class="font-label-md text-label-md text-secondary flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-secondary animate-pulse" style="box-shadow: 0 0 8px #ffb4a9;"></span>
+                System Active
+            </span>
+</div>
+<ul class="flex flex-col gap-base flex-grow">
+<!-- Pipeline -->
+<li class="">
+<a class="flex items-center gap-stack-md px-margin py-stack-sm text-on-surface-variant hover:bg-surface-variant transition-colors duration-150 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">account_tree</span>
+<span class="">Pipeline</span>
+</a>
+</li>
+<!-- Toolbox -->
+<li class="">
+<a class="flex items-center gap-stack-md px-margin py-stack-sm text-on-surface-variant hover:bg-surface-variant transition-colors duration-150 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">handyman</span>
+<span class="">Toolbox</span>
+</a>
+</li>
+<!-- Library -->
+<li class="">
+<a class="flex items-center gap-stack-md px-margin py-stack-sm text-on-surface-variant hover:bg-surface-variant transition-colors duration-150 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">photo_library</span>
+<span class="">Library</span>
+</a>
+</li>
+<!-- Hardware (Active) -->
+<li class="">
+<a class="flex items-center gap-stack-md px-margin py-stack-sm text-secondary font-bold border-l-2 border-secondary bg-surface-container transition-colors duration-150 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">settings_input_component</span>
+<span class="">Hardware</span>
+</a>
+</li>
+</ul>
+<div class="px-margin mt-auto flex items-center gap-stack-md">
+<img class="w-8 h-8 rounded-full border border-outline-variant object-cover" data-alt="A small, circular avatar portrait of an astronaut in a high-tech sleek spacesuit, dimly lit with neon cyan accents. The background is a dark, star-speckled void, adhering strictly to a scientific modernism aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBy-PB9gA0XpBwOrKh4D3ZWxMa_dL8KaNhQkyTpTPrsfcyPTGvnViLCiGVpCt81h5xEBeHT5na6OhbIXdaZct7PsGMOYXVDI95I5IvRjpdFjksiO7t0cPNnLRWU6GO2yK8zMefQnoO9XgcPCkc83HDBDR-YMaSoy33ESLW49_BJHOiBz_wEUzksCylo-976n-c-CuYI9A4cSypNnl1V_nI32ZkG8VVXL2FIQpsOCGHQB0tW1sFCSj8rOw">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface">User Profile</span>
+<span class="font-body-md text-label-md text-on-surface-variant">Admin</span>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<div class="flex flex-col flex-1 md:ml-[320px] h-screen overflow-hidden relative">
+<!-- TopNavBar Component -->
+<header class="flex justify-between items-center px-margin h-16 fixed top-0 right-0 left-0 md:left-[320px] bg-surface border-b border-outline-variant z-40 transition-opacity duration-150">
+<div class="md:hidden">
+<h1 class="font-headline-md text-headline-md font-bold text-primary" style="font-size: 19.2px; line-height: 24px;">AstroForge</h1>
+</div>
+<div class="hidden md:block">
+<!-- Spacing element for desktop -->
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">HARDWARE CONFIGURATION &amp; ENVIRONMENTAL SETUP</span>
+</div>
+<div class="flex items-center gap-stack-md text-primary font-label-md text-label-md">
+<button class="hover:text-secondary transition-colors duration-150" title="Sensors">
+<span class="material-symbols-outlined">sensors</span>
+</button>
+<button class="hover:text-secondary transition-colors duration-150" title="Memory">
+<span class="material-symbols-outlined">memory</span>
+</button>
+<button class="text-secondary transition-colors duration-150 animate-pulse" style="text-shadow: 0 0 8px rgba(255, 180, 169, 0.5);" title="Battery">
+<span class="material-symbols-outlined">battery_charging_full</span>
+</button>
+</div>
+</header>
+<!-- Main Dashboard Workspace -->
+<main class="flex-1 mt-16 p-stack-md lg:p-margin overflow-y-auto overflow-x-hidden relative">
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-stack-md h-full min-h-[800px] auto-rows-fr">
+<!-- Left Column (Live Feed & Hardware Status) -->
+<div class="lg:col-span-8 flex flex-col gap-stack-md">
+<!-- Setup Reference Image Panel -->
+<section class="glass-panel rounded flex-grow flex flex-col relative overflow-hidden group">
+<header class="flex justify-between items-center px-stack-md py-stack-sm border-b border-outline-variant">
+<h2 class="font-label-md text-label-md text-on-surface uppercase tracking-widest">SETUP REFERENCE IMAGE</h2>
+<span class="font-label-md text-label-md text-secondary flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px]">photo_camera</span> CAPTURED
+                            </span>
+</header>
+<div class="relative flex-grow bg-surface-container-lowest overflow-hidden flex items-center justify-center">
+<!-- Simulated space feed background -->
+<div class="absolute inset-0 bg-cover bg-center opacity-80" data-alt="A breathtaking, hyper-realistic astrophotography capture of the Orion Nebula. Deep space blacks contrasted with vibrant stellar cyan and nebula purple dust clouds. High resolution, scientific modernism style, suitable for a telescope live feed interface, sparse stars." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCm3M15gPExCtYnzHQTwIuyRpR3vKtFw38y3eNOsaP3JIXyrkfTQm_pXiFmKhmDy0ZUDKspB-wI1_XI4tvcD4o1vwKcBqiYho1u98KW9-dBFVGVxUeEtzi4BSQWimJ38ocbknf3qzBgBFPRBUPAZyDJ7v5_38kkWBZJKfMjZsZacYO8syiIXXFqithFCWn-YuFEpd6Ty5ZAKjLoNXmgOjyTmXn6eKoACm4NyLj5-yfapIPy5XlDu9u9Vg')"></div>
+<!-- Crosshair Overlay -->
+<div class="absolute inset-0 pointer-events-none flex items-center justify-center">
+<div class="w-full h-[1px] bg-secondary/30 absolute"></div>
+<div class="h-full w-[1px] bg-secondary/30 absolute"></div>
+<div class="w-12 h-12 border border-secondary/50 rounded-full flex items-center justify-center">
+<div class="w-1 h-1 bg-secondary rounded-full"></div>
+</div>
+</div>
+<!-- Overlay Telemetry -->
+<div class="absolute bottom-stack-md left-stack-md flex flex-col gap-base font-label-md text-label-md text-secondary bg-surface-container/80 px-stack-sm py-base rounded border border-outline-variant/30 backdrop-blur-sm">
+<span class="">EXP: 300s</span>
+<span class="">GAIN: 120</span>
+<span class="">BIN: 1x1</span>
+</div>
+<!-- Zoom Controls -->
+<div class="absolute bottom-stack-md right-stack-md flex gap-base">
+<button class="w-8 h-8 flex items-center justify-center bg-surface-container/80 border border-outline-variant/50 rounded text-on-surface hover:text-secondary hover:border-secondary transition-colors duration-150 backdrop-blur-sm">
+<span class="material-symbols-outlined text-[16px]">remove</span>
+</button>
+<div class="w-12 h-8 flex items-center justify-center bg-surface-container/80 border border-outline-variant/50 rounded font-label-md text-label-md text-on-surface backdrop-blur-sm">
+                                    100%
+                                </div>
+<button class="w-8 h-8 flex items-center justify-center bg-surface-container/80 border border-outline-variant/50 rounded text-on-surface hover:text-secondary hover:border-secondary transition-colors duration-150 backdrop-blur-sm">
+<span class="material-symbols-outlined text-[16px]">add</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Hardware Status Grid -->
+<section class="h-48 grid grid-cols-2 md:grid-cols-4 gap-stack-md">
+<!-- Metadata Sync -->
+<div class="glass-panel rounded p-stack-md flex flex-col justify-between col-span-2">
+<div class="flex justify-between items-center border-b border-outline-variant pb-base mb-2">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">METADATA SYNC</span>
+<button class="text-secondary hover:text-primary transition-colors font-label-md text-[10px] uppercase tracking-widest">SYNC DEVICE</button>
+</div>
+<div class="grid grid-cols-3 gap-y-2 gap-x-4">
+<div class="flex flex-col">
+<span class="font-label-md text-[10px] text-on-surface-variant uppercase tracking-widest">SENSOR TEMP</span>
+<input class="bg-surface border border-outline-variant rounded px-1 py-0.5 font-label-md text-[12px] text-secondary w-full" type="text" value="-15.0°C">
+</div>
+<div class="flex flex-col">
+<span class="font-label-md text-[10px] text-on-surface-variant uppercase tracking-widest">GAIN / OFFSET</span>
+<div class="flex gap-1">
+<input class="bg-surface border border-outline-variant rounded px-1 py-0.5 font-label-md text-[12px] text-secondary w-full text-center" type="text" value="120">
+<input class="bg-surface border border-outline-variant rounded px-1 py-0.5 font-label-md text-[12px] text-secondary w-full text-center" type="text" value="30">
+</div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-md text-[10px] text-on-surface-variant uppercase tracking-widest">FOCAL LENGTH</span>
+<input class="bg-surface border border-outline-variant rounded px-1 py-0.5 font-label-md text-[12px] text-secondary w-full" type="text" value="560mm">
+</div>
+</div>
+<div class="mt-auto pt-1 flex justify-between items-center">
+<span class="font-label-md text-[10px] text-on-surface-variant uppercase tracking-widest">PIXEL SCALE</span>
+<input class="bg-surface border border-outline-variant rounded px-2 py-0.5 font-label-md text-[12px] text-secondary text-right w-24" type="text" value="1.38&quot;/px">
+</div>
+</div>
+<!-- Filter Controls -->
+<div class="glass-panel rounded p-stack-md flex flex-col justify-between col-span-2 glow-active">
+<div class="flex justify-between items-center border-b border-outline-variant pb-base mb-2">
+<span class="font-label-md text-label-md text-secondary uppercase tracking-widest">FILTER PROFILE &amp; BOOST</span>
+<span class="material-symbols-outlined text-secondary text-[16px]">tune</span>
+</div>
+<div class="flex flex-col gap-2 flex-grow justify-center">
+<select class="bg-surface border border-outline-variant rounded px-2 py-1 font-label-md text-[12px] text-on-surface w-full focus:ring-secondary focus:border-secondary">
+<option>L-Pro Broadband</option>
+<option selected="">L-eXtreme Narrowband</option>
+<option>Triad Ultra Quad-Band</option>
+<option>Clear (No Filter)</option>
+</select>
+<div class="flex gap-4">
+<div class="flex flex-col flex-1">
+<div class="flex justify-between items-center">
+<span class="font-label-md text-[10px] text-on-surface-variant uppercase tracking-widest">HA BOOST</span>
+<span class="font-label-md text-[10px] text-secondary">1.5x</span>
+</div>
+<input class="w-full accent-secondary h-1 bg-surface-variant rounded-lg appearance-none cursor-pointer" max="3" min="1" step="0.1" type="range" value="1.5">
+</div>
+<div class="flex flex-col flex-1">
+<div class="flex justify-between items-center">
+<span class="font-label-md text-[10px] text-on-surface-variant uppercase tracking-widest">OIII BOOST</span>
+<span class="font-label-md text-[10px] text-primary">1.2x</span>
+</div>
+<input class="w-full accent-primary h-1 bg-surface-variant rounded-lg appearance-none cursor-pointer" max="3" min="1" step="0.1" type="range" value="1.2">
+</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Right Column (Telemetry & Controls) -->
+<div class="lg:col-span-4 flex flex-col gap-stack-md">
+<!-- Environmental & Algorithm Optimization -->
+<section class="glass-panel rounded flex flex-col flex-grow">
+<header class="flex justify-between items-center px-stack-md py-stack-sm border-b border-outline-variant">
+<h2 class="font-label-md text-label-md text-on-surface uppercase tracking-widest">ENVIRONMENTAL OPTIMIZATION</h2>
+<span class="font-label-md text-label-md text-secondary flex items-center gap-1 uppercase tracking-widest">
+<span class="material-symbols-outlined text-[14px]">public</span> SITE
+                            </span>
+</header>
+<div class="p-stack-md flex flex-col gap-stack-md">
+<!-- Bortle Selector -->
+<div class="flex flex-col gap-stack-sm">
+<div class="flex justify-between items-center">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">SKY QUALITY (BORTLE)</span>
+<span class="font-label-md text-label-md text-secondary bg-secondary/10 px-2 py-0.5 rounded">CLASS 6</span>
+</div>
+<input class="w-full accent-secondary h-2 bg-surface-variant rounded-lg appearance-none cursor-pointer mt-2" max="9" min="1" step="1" type="range" value="6">
+<div class="flex justify-between text-[10px] font-label-md text-on-surface-variant px-1 mt-1">
+<span class="">1 (Dark)</span>
+<span class="">9 (City)</span>
+</div>
+</div>
+<!-- Processing Insights -->
+<div class="bg-surface-container-high border border-outline-variant/30 rounded p-stack-sm mt-stack-sm flex flex-col gap-base">
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-primary text-[16px]">auto_awesome</span>
+<span class="font-label-md text-label-md text-on-surface uppercase tracking-widest">PROCESSING INSIGHTS</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Higher Bortle levels trigger aggressive gradient removal and background neutralization. Star bloat reduction algorithms are prioritized.
+        </p>
+</div>
+</div>
+</section>
+</div>
+</div>
+</main>
+</div>
+
+
+</body></html>

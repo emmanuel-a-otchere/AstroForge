@@ -1,0 +1,449 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>AstroControl - Library</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Inter:wght@400&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "on-background": "#e4e2e2",
+                "primary-container": "#1a1a1a",
+                "surface-container-lowest": "#0e0e0e",
+                "surface": "#131314",
+                "surface-variant": "#343535",
+                "on-secondary-container": "#ffaea3",
+                "surface-container": "#1f2020",
+                "secondary-fixed-dim": "#ffb4a9",
+                "on-tertiary-fixed-variant": "#0039b3",
+                "on-primary": "#313030",
+                "on-secondary-fixed-variant": "#930004",
+                "on-primary-fixed": "#1c1b1b",
+                "error": "#ffb4ab",
+                "on-tertiary-fixed": "#001551",
+                "on-secondary": "#690002",
+                "on-tertiary-container": "#5179ff",
+                "inverse-on-surface": "#303030",
+                "on-surface-variant": "#c4c7c7",
+                "secondary-fixed": "#ffdad5",
+                "outline-variant": "#444748",
+                "background": "#131314",
+                "secondary": "#ffb4a9",
+                "primary-fixed": "#e5e2e1",
+                "surface-tint": "#c8c6c5",
+                "tertiary-fixed-dim": "#b6c4ff",
+                "on-error": "#690005",
+                "on-surface": "#e4e2e2",
+                "on-tertiary": "#002780",
+                "error-container": "#93000a",
+                "surface-container-highest": "#343535",
+                "primary-fixed-dim": "#c8c6c5",
+                "primary": "#c8c6c5",
+                "tertiary-fixed": "#dce1ff",
+                "on-error-container": "#ffdad6",
+                "inverse-primary": "#5f5e5e",
+                "surface-container-low": "#1b1c1c",
+                "surface-dim": "#131314",
+                "on-primary-container": "#848282",
+                "tertiary": "#b6c4ff",
+                "tertiary-container": "#00144d",
+                "secondary-container": "#a50005",
+                "on-secondary-fixed": "#410001",
+                "surface-bright": "#393939",
+                "outline": "#8e9192",
+                "inverse-surface": "#e4e2e2",
+                "on-primary-fixed-variant": "#474746",
+                "surface-container-high": "#2a2a2a"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.125rem",
+                "lg": "0.25rem",
+                "xl": "0.5rem",
+                "full": "0.75rem"
+        },
+        "spacing": {
+                "margin": "24px",
+                "stack-sm": "8px",
+                "stack-lg": "32px",
+                "gutter": "16px",
+                "stack-md": "16px",
+                "base": "4px"
+        },
+        "fontFamily": {
+                "body-lg": [
+                        "Inter"
+                ],
+                "headline-md": [
+                        "Space Grotesk"
+                ],
+                "headline-lg": [
+                        "Space Grotesk"
+                ],
+                "body-md": [
+                        "Inter"
+                ],
+                "label-md": [
+                        "Space Grotesk"
+                ]
+        },
+        "fontSize": {
+                "body-lg": [
+                        "16px",
+                        {
+                                "lineHeight": "24px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "headline-md": [
+                        "24px",
+                        {
+                                "lineHeight": "32px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "headline-lg": [
+                        "32px",
+                        {
+                                "lineHeight": "40px",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "body-md": [
+                        "14px",
+                        {
+                                "lineHeight": "20px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "label-md": [
+                        "12px",
+                        {
+                                "lineHeight": "16px",
+                                "fontWeight": "500"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+<style>
+        body {
+            background-color: #131314;
+            color: #e4e2e2;
+        }
+        /* Stellar Cyan Outer Glow for active focus */
+        .glow-active {
+            box-shadow: 0 0 4px rgba(255, 180, 169, 0.2);
+        }
+        /* Custom scrollbar for technical panels */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #131314;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #343535;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #444748;
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md overflow-hidden">
+<!-- SideNavBar (Left) -->
+<nav class="bg-surface-container-low dark:bg-surface-container-low fixed left-0 top-0 h-full w-[320px] border-r border-outline-variant dark:border-outline-variant flat no shadows flex flex-col py-margin space-y-stack-md z-50">
+<div class="px-margin mb-stack-lg">
+<h1 class="font-headline-md text-headline-md text-primary dark:text-primary tracking-tighter">AstroControl</h1>
+<p class="font-label-md text-label-md text-on-surface-variant mt-1">Observatory v4.2</p>
+</div>
+<div class="flex flex-col flex-1 px-stack-sm">
+<a class="flex items-center px-gutter py-stack-sm mb-base text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant dark:hover:bg-surface-variant transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined mr-stack-sm text-lg">layers</span>
+<span class="font-label-md text-label-md">Channel Map</span>
+</a>
+<a class="flex items-center px-gutter py-stack-sm mb-base text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant dark:hover:bg-surface-variant transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined mr-stack-sm text-lg">palette</span>
+<span class="font-label-md text-label-md">Palettes</span>
+</a>
+<a class="flex items-center px-gutter py-stack-sm mb-base text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant dark:hover:bg-surface-variant transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined mr-stack-sm text-lg">account_tree</span>
+<span class="font-label-md text-label-md">Pipeline</span>
+</a>
+<a class="flex items-center px-gutter py-stack-sm mb-base text-secondary dark:text-secondary border-r-2 border-secondary bg-surface-variant/30 glow-active transition-colors duration-150 rounded-l" href="#">
+<span class="material-symbols-outlined mr-stack-sm text-lg" style="font-variation-settings: 'FILL' 1;">photo_library</span>
+<span class="font-label-md text-label-md">Library</span>
+</a>
+</div>
+<div class="px-margin pb-margin mt-auto flex items-center pt-gutter border-t border-outline-variant/30">
+<img alt="User Profile" class="w-8 h-8 rounded-full border border-outline-variant mr-gutter" data-alt="A futuristic, glowing avatar image suitable for a high-tech observatory software interface, featuring neon cyan and deep purple accents." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBDezzEMOK6vYWpw0Byu-jk08UfPaDwGmzVhopKBRKuU8sG34xJLQRRt6qa1fWqmYrPrFxLB5p-w9S_F2_8PkKryNswfv-2R4J44lgyHWHmegwBrqywSufhH1ypGqFrvhhmiw8F4wCN3W31jsg8zsdeypn_F-U2M5LBgjvK5DqCR1AXqtU0IbcCiOEgjJ4zZ9Tp_ih1itqpuG7nT6pA2ClXAJwuppl96KvvDtej204iRO4g1YT0WWoU2g">
+<div>
+<p class="font-label-md text-label-md text-on-surface">Dr. E. Hubble</p>
+<p class="font-label-md text-label-md text-secondary mt-1">Lead Tech</p>
+</div>
+</div>
+</nav>
+<!-- TopNavBar -->
+<header class="bg-surface-container-highest/80 dark:bg-surface-container-highest/80 fixed top-0 right-0 w-[calc(100%-320px)] backdrop-blur-md border-b border-outline-variant dark:border-outline-variant flat no shadows flex justify-between items-center h-16 px-margin z-40">
+<div class="flex items-center space-x-margin">
+<h2 class="font-headline-md text-headline-md text-primary dark:text-primary">AstroSuite</h2>
+<nav class="hidden md:flex space-x-gutter ml-stack-lg h-full items-end pb-1">
+<a class="font-label-md text-label-md text-on-surface-variant dark:text-on-surface-variant hover:text-on-surface dark:hover:text-on-surface pb-1" href="#">Composition</a>
+<a class="font-label-md text-label-md text-on-surface-variant dark:text-on-surface-variant hover:text-on-surface dark:hover:text-on-surface pb-1" href="#">Analysis</a>
+<a class="font-label-md text-label-md text-on-surface-variant dark:text-on-surface-variant hover:text-on-surface dark:hover:text-on-surface pb-1" href="#">Export</a>
+</nav>
+</div>
+<div class="flex items-center space-x-gutter">
+<button class="text-on-surface-variant hover:text-secondary transition-colors duration-150 p-1">
+<span class="material-symbols-outlined text-xl">sensors</span>
+</button>
+<button class="text-on-surface-variant hover:text-secondary transition-colors duration-150 p-1">
+<span class="material-symbols-outlined text-xl">memory</span>
+</button>
+<button class="text-secondary hover:text-secondary-fixed transition-colors duration-150 p-1 glow-active rounded-full">
+<span class="material-symbols-outlined text-xl">battery_charging_full</span>
+</button>
+</div>
+</header>
+<!-- Main Workspace Area -->
+<main class="ml-[320px] pt-16 h-screen flex flex-col bg-background">
+<!-- Library Toolbar -->
+<div class="bg-surface border-b border-outline-variant px-margin py-gutter flex justify-between items-center z-10 shrink-0">
+<div class="flex space-x-gutter border-b border-outline-variant w-fit pb-1">
+<button class="font-label-md text-label-md text-secondary border-b-2 border-secondary pb-1 px-1 glow-active">All Assets</button>
+<button class="font-label-md text-label-md text-on-surface-variant hover:text-on-surface pb-1 px-1 transition-colors">Raw Data</button>
+<button class="font-label-md text-label-md text-on-surface-variant hover:text-on-surface pb-1 px-1 transition-colors">Processed</button>
+<button class="font-label-md text-label-md text-on-surface-variant hover:text-on-surface pb-1 px-1 transition-colors">Recipes</button>
+</div>
+<div class="flex items-center space-x-stack-sm"><div class="relative mr-gutter">
+<span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
+<input class="bg-surface-variant border border-outline-variant text-on-surface font-label-md text-label-md rounded pl-8 pr-2 py-1.5 focus:border-secondary focus:ring-0 h-8 w-64 transition-colors placeholder:text-on-surface-variant/50" placeholder="Search assets by target, sensor, or date..." type="text">
+</div>
+<div class="relative flex items-center">
+<span class="material-symbols-outlined text-on-surface-variant text-sm absolute left-2 pointer-events-none">sort</span>
+<select class="bg-surface-variant border border-outline-variant text-on-surface font-label-md text-[10px] rounded pl-8 pr-2 py-0 focus:border-secondary focus:ring-0 h-8 w-fit appearance-none cursor-pointer hover:bg-surface-container-highest transition-colors">
+<option value="recent">DATE (RECENT)</option>
+<option value="oldest">DATE (OLDEST)</option>
+<option value="integration">INTEGRATION TIME</option>
+<option value="snr">DATA QUALITY (SNR)</option>
+</select>
+</div><button class="bg-primary/10 text-primary border border-primary/30 px-gutter py-base rounded flex items-center space-x-2 hover:bg-primary/20 transition-colors font-label-md text-label-md h-8">
+<span class="material-symbols-outlined text-sm">checklist</span>
+<span class="">Selection Mode</span>
+</button>
+<button class="bg-surface-variant text-on-surface border border-outline-variant px-stack-sm py-base rounded hover:bg-surface-container-highest transition-colors h-8 w-8 flex items-center justify-center">
+<span class="material-symbols-outlined text-sm">grid_view</span>
+</button>
+</div>
+</div>
+<div class="flex flex-1 overflow-hidden">
+<!-- Grid Area -->
+<div class="flex-1 overflow-y-auto p-margin bg-surface-container-lowest grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-gutter content-start">
+<!-- Card 1 -->
+<div class="bg-surface border border-outline-variant rounded-lg overflow-hidden group hover:border-secondary transition-colors duration-150 relative">
+<div class="absolute top-2 left-2 z-10">
+<input class="form-checkbox h-4 w-4 text-secondary bg-surface-variant border-outline-variant rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity" type="checkbox">
+</div>
+<div class="h-40 w-full bg-surface-variant relative">
+<img alt="M42 Orion Nebula" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" data-alt="A spectacular, high-resolution astronomical image of the M42 Orion Nebula, showcasing deep stellar cyans and majestic nebula purples against a stark midnight background, capturing expert-grade deep space processing." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD-mAfNq3iixAfgYsDFwu_2PwNT8VDsm8VZOH9b3Y7NFs4ZSz4cccXlifbaFB6ppVUxIdCp50HKmolMiKr2pQ5RdPq6CMhdwQMZpwK0PMGqnWj1mfHBOOxFFFu-sQGxVolWfA91-wKOi1Sffnprz4MH4WBfi79YlFXPdqHGgniQfW4cETnTGFWgQE_5HxDxu1N-ikhY8Hc558hcJpajfzC-iUa0twM1q3rWMNbhPX3-_sY_Jlkvv2Rq6Q">
+<div class="absolute bottom-2 right-2 flex space-x-1">
+<span class="bg-surface/80 backdrop-blur text-primary border border-primary/30 px-1.5 py-0.5 rounded font-label-md text-[9px]">FITS</span>
+</div>
+</div>
+<div class="p-stack-sm">
+<div class="flex justify-between items-start mb-1 border-b border-outline-variant pb-1">
+<h3 class="font-label-md text-label-md text-on-surface truncate pr-2">M42_L-PRO_BIN1</h3>
+<div class="w-2 h-2 rounded-full bg-secondary shadow-[0_0_4px_rgba(255,180,169,0.8)] shrink-0 mt-1"></div>
+</div>
+<div class="flex justify-between items-center mt-base">
+<span class="font-label-md text-label-md text-on-surface-variant">8.2h Int.</span>
+<span class="font-label-md text-label-md text-tertiary">ASI6200MM</span>
+</div>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="bg-surface border border-outline-variant rounded-lg overflow-hidden group hover:border-secondary transition-colors duration-150 relative">
+<div class="h-40 w-full bg-surface-variant relative">
+<img alt="Andromeda Galaxy" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" data-alt="A crisp, detailed view of the Andromeda Galaxy (M31), glowing with a bright core and dusty spiral arms, rendered in a professional, scientific low-light UI context with high-contrast data visualization aesthetics." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAiJilVq7LhG4MNKsrIHdGZUc5fkNTVVw0sVk6-CqwrRv9IZDag0Hjkq4AbIh7xaTtUISuc6bCqemahUu2uVvWZ6oq_TOrTjfu79DJaOkJoPZfCabmfESe5mAMYSMQutfradasBCbchAHIKih33Sp2Avr_AmuUEhEy-Yn2lL_Ki2rKZFP_Y2P1MReLUKvJQb1aCuBE4wEz6LU2m5Hg6S7PiiZFj3Zms5Kh2WUl08txzB3PUKs-JyoJjgQ">
+<div class="absolute bottom-2 right-2 flex space-x-1">
+<span class="bg-surface/80 backdrop-blur text-primary border border-primary/30 px-1.5 py-0.5 rounded font-label-md text-[9px]">TIFF</span>
+</div>
+</div>
+<div class="p-stack-sm">
+<div class="flex justify-between items-start mb-1 border-b border-outline-variant pb-1">
+<h3 class="font-label-md text-label-md text-on-surface truncate pr-2">M31_SHO_V2_FINAL</h3>
+<div class="w-2 h-2 rounded-full bg-primary/40 shrink-0 mt-1"></div>
+</div>
+<div class="flex justify-between items-center mt-base">
+<span class="font-label-md text-label-md text-on-surface-variant">14.5h Int.</span>
+<span class="font-label-md text-label-md text-tertiary">ASI2600MC</span>
+</div>
+</div>
+</div>
+<!-- More cards would go here -->
+</div>
+<!-- Technical Filter Sidebar (Right) -->
+<aside class="w-[300px] border-l border-outline-variant bg-surface flex flex-col shrink-0">
+<div class="p-gutter border-b border-outline-variant">
+<h3 class="font-label-md text-label-md text-on-surface">Telemetry Filters</h3>
+</div>
+<div class="p-gutter overflow-y-auto flex-1 space-y-margin"><div class="">
+<label class="font-label-md text-label-md text-on-surface-variant block mb-stack-sm">Timeframe</label>
+<select class="w-full bg-surface-variant border border-outline-variant text-on-surface font-label-md text-label-md rounded p-1.5 focus:border-secondary focus:ring-0 h-8">
+<option>Last 7 Days</option>
+<option>Last 30 Days</option>
+<option>Current Season</option>
+<option>All Time</option>
+</select>
+</div>
+<!-- Integration Time Slider -->
+<div>
+<div class="flex justify-between items-center mb-stack-sm">
+<label class="font-label-md text-label-md text-on-surface-variant">Integration Time</label>
+<span class="font-label-md text-label-md text-secondary">0 - 24h</span>
+</div>
+<div class="relative h-4 flex items-center group">
+<div class="absolute w-full h-[2px] bg-surface-variant rounded"></div>
+<div class="absolute h-[2px] bg-secondary w-2/3 rounded"></div>
+<div class="absolute w-3 h-3 bg-secondary rounded-full left-2/3 -ml-1.5 shadow-[0_0_8px_rgba(255,180,169,0.5)] group-hover:scale-125 transition-transform cursor-pointer"></div>
+</div>
+</div>
+<!-- Object Type -->
+<div>
+<label class="font-label-md text-label-md text-on-surface-variant block mb-stack-sm">Target Class</label>
+<div class="space-y-base">
+<label class="flex items-center space-x-stack-sm cursor-pointer">
+<input checked="" class="form-checkbox h-3.5 w-3.5 text-secondary bg-surface-variant border-outline-variant rounded focus:ring-0 focus:ring-offset-0" type="checkbox">
+<span class="font-label-md text-label-md text-on-surface">Nebula</span>
+</label>
+<label class="flex items-center space-x-stack-sm cursor-pointer">
+<input checked="" class="form-checkbox h-3.5 w-3.5 text-secondary bg-surface-variant border-outline-variant rounded focus:ring-0 focus:ring-offset-0" type="checkbox">
+<span class="font-label-md text-label-md text-on-surface">Galaxy</span>
+</label>
+<label class="flex items-center space-x-stack-sm cursor-pointer">
+<input class="form-checkbox h-3.5 w-3.5 text-secondary bg-surface-variant border-outline-variant rounded focus:ring-0 focus:ring-offset-0" type="checkbox">
+<span class="font-label-md text-label-md text-on-surface">Star Cluster</span>
+</label>
+</div>
+</div><div class="">
+<label class="font-label-md text-label-md text-on-surface-variant block mb-stack-sm">Constellation</label>
+<div class="flex flex-wrap gap-base">
+<span class="px-2 py-0.5 bg-primary/10 border border-primary/30 text-primary font-label-md text-[10px] rounded cursor-pointer hover:bg-primary/20 transition-colors">ORI</span>
+<span class="px-2 py-0.5 bg-surface-variant border border-outline-variant text-on-surface-variant font-label-md text-[10px] rounded cursor-pointer hover:border-secondary transition-colors">AND</span>
+<span class="px-2 py-0.5 bg-surface-variant border border-outline-variant text-on-surface-variant font-label-md text-[10px] rounded cursor-pointer hover:border-secondary transition-colors">CYG</span>
+<span class="px-2 py-0.5 bg-surface-variant border border-outline-variant text-on-surface-variant font-label-md text-[10px] rounded cursor-pointer hover:border-secondary transition-colors">UMA</span>
+</div>
+</div>
+<!-- Quality Score -->
+<div>
+<label class="font-label-md text-label-md text-on-surface-variant block mb-stack-sm">Data Quality (SNR)</label>
+<select class="w-full bg-surface-variant border border-outline-variant text-on-surface font-label-md text-label-md rounded p-1.5 focus:border-secondary focus:ring-0 h-8">
+<option>&gt; 40 dB (Excellent)</option>
+<option>&gt; 30 dB (Good)</option>
+<option>All Data</option>
+</select>
+</div>
+<div class="pt-margin border-t border-outline-variant/30">
+<label class="font-label-md text-label-md text-on-surface block mb-stack-sm uppercase tracking-widest">Metadata Inspector</label>
+<div class="bg-surface-container-lowest border border-outline-variant rounded p-stack-sm space-y-base overflow-y-auto max-h-64"><!-- OBSERVATION GROUP -->
+<div class="mb-stack-sm">
+<div class="font-label-md text-[9px] text-primary/40 mb-base border-b border-outline-variant/30 pb-0.5">OBSERVATION</div>
+<div class="space-y-base">
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Object</span>
+<span class="font-label-md text-label-md text-secondary">M42</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">RA</span>
+<span class="font-label-md text-label-md text-on-surface">05 35 17.3</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">DEC</span>
+<span class="font-label-md text-label-md text-on-surface">-05 23 28</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Date-Obs</span>
+<span class="font-label-md text-label-md text-on-surface">2026-03-15</span>
+</div>
+</div>
+</div>
+<!-- ACQUISITION GROUP -->
+<div class="mb-stack-sm">
+<div class="font-label-md text-[9px] text-primary/40 mb-base border-b border-outline-variant/30 pb-0.5">ACQUISITION</div>
+<div class="space-y-base">
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Exptime</span>
+<span class="font-label-md text-label-md text-primary">300.0s</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Gain</span>
+<span class="font-label-md text-label-md text-on-surface">100</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Offset</span>
+<span class="font-label-md text-label-md text-on-surface">50</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Temp</span>
+<span class="font-label-md text-label-md text-secondary">-10.2°C</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Filter</span>
+<span class="font-label-md text-label-md text-on-surface">L-Pro</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Binning</span>
+<span class="font-label-md text-label-md text-on-surface">1x1</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Focallen</span>
+<span class="font-label-md text-label-md text-on-surface">250mm</span>
+</div>
+</div>
+</div>
+<!-- HARDWARE GROUP -->
+<div class="">
+<div class="font-label-md text-[9px] text-primary/40 mb-base border-b border-outline-variant/30 pb-0.5">HARDWARE</div>
+<div class="space-y-base">
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Instrume</span>
+<span class="font-label-md text-label-md text-on-surface truncate ml-stack-lg">ASI6200MM Pro</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/10 pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Telescop</span>
+<span class="font-label-md text-label-md text-on-surface truncate ml-stack-lg">Askar FRA400</span>
+</div>
+<div class="flex justify-between items-center pb-1">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Mount</span>
+<span class="font-label-md text-label-md text-on-surface truncate ml-stack-lg">ZWO AM5</span>
+</div>
+</div>
+</div></div>
+</div></div>
+</aside>
+</div>
+<!-- Status Bar -->
+<footer class="h-8 bg-surface-container-high border-t border-outline-variant px-gutter flex justify-between items-center shrink-0">
+<div class="flex items-center space-x-stack-sm">
+<span class="w-2 h-2 rounded-full bg-secondary shadow-[0_0_4px_rgba(255,180,169,0.8)]"></span>
+<span class="font-label-md text-[10px] text-on-surface-variant uppercase tracking-widest">NAS Connected</span>
+</div>
+<div class="flex items-center space-x-gutter">
+<div class="w-32 h-1 bg-surface-variant rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[60%]"></div>
+</div>
+<span class="font-label-md text-[10px] text-on-surface-variant">1.2TB / 2.0TB Used</span>
+</div>
+</footer>
+</main>
+
+
+</body></html>

@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Master Lab - ASTROFORGE</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&amp;family=Inter:wght@400&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed": "#111c29",
+                        "on-tertiary-fixed-variant": "#404751",
+                        "surface": "#121414",
+                        "on-primary-fixed-variant": "#410002",
+                        "on-primary-container": "#ffdad6",
+                        "tertiary-fixed-dim": "#c0c7d2",
+                        "primary": "#ffb4ab",
+                        "outline": "#849396",
+                        "error": "#ffb4ab",
+                        "on-background": "#e2e2e2",
+                        "on-secondary-container": "#aeb9ca",
+                        "background": "#121414",
+                        "on-tertiary-fixed": "#151c24",
+                        "surface-container-lowest": "#0c0f0f",
+                        "secondary": "#bcc7d9",
+                        "secondary-fixed": "#d8e3f5",
+                        "cobalt-accent": "#cb4e3d",
+                        "on-surface-variant": "#c4c7c8",
+                        "obsidian-base": "#0c0f0f",
+                        "surface-container-low": "#1a1c1c",
+                        "on-tertiary": "#2a313a",
+                        "primary-fixed": "#ffdad6",
+                        "surface-container-high": "#282a2a",
+                        "surface-variant": "#444748",
+                        "surface-container-highest": "#333535",
+                        "on-surface": "#e2e2e2",
+                        "on-tertiary-container": "#535a63",
+                        "on-error": "#690005",
+                        "inverse-surface": "#e2e2e2",
+                        "deep-navy-surface": "#121414",
+                        "on-primary": "#690005",
+                        "primary-container": "#93000a",
+                        "surface-container": "#1e2020",
+                        "on-secondary-fixed-variant": "#3d4856",
+                        "inverse-on-surface": "#2f3030",
+                        "on-error-container": "#ffdad6",
+                        "outline-variant": "#444748",
+                        "tertiary-fixed": "#dce3ee",
+                        "tertiary": "#e6edf9",
+                        "tertiary-container": "#cad1dc",
+                        "on-secondary": "#26313f",
+                        "surface-bright": "#37393a",
+                        "surface-dim": "#121414",
+                        "primary-fixed-dim": "#ffb4ab",
+                        "inverse-primary": "#93000a",
+                        "error-container": "#93000a",
+                        "secondary-fixed-dim": "#bcc7d9",
+                        "steel-outline": "#444748",
+                        "secondary-container": "#3f4a58",
+                        "on-primary-fixed": "#410002",
+                        "surface-tint": "#ffb4ab"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "1rem",
+                        "lg": "1rem",
+                        "xl": "1rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "lg": "24px",
+                        "unit": "4px",
+                        "safe-area": "24px",
+                        "gutter": "1px",
+                        "md": "16px",
+                        "sm": "8px",
+                        "xs": "4px",
+                        "xl": "40px"
+                    },
+                    "fontFamily": {
+                        "headline-lg-mobile": ["Geist"],
+                        "metadata-sm": ["JetBrains Mono"],
+                        "headline-lg": ["Geist"],
+                        "body-base": ["Geist"],
+                        "label-caps": ["JetBrains Mono"],
+                        "display-xl": ["Geist"],
+                        "data-viz": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "headline-lg-mobile": ["24px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "metadata-sm": ["12px", { "lineHeight": "1.4", "fontWeight": "400" }],
+                        "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "body-base": ["15px", { "lineHeight": "1.6", "letterSpacing": "0.01em", "fontWeight": "400" }],
+                        "label-caps": ["11px", { "lineHeight": "1", "letterSpacing": "0.1em", "fontWeight": "700" }],
+                        "display-xl": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.04em", "fontWeight": "700" }],
+                        "data-viz": ["14px", { "lineHeight": "1.4", "letterSpacing": "0.02em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        /* Custom scrollbar for webkit */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0c0f0f;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #444748;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #cb4e3d;
+        }
+        
+        /* Slider styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            background: #cb4e3d;
+            cursor: pointer;
+            margin-top: -5px;
+            box-shadow: 0 0 8px rgba(203, 78, 61, 0.5);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 2px;
+            cursor: pointer;
+            background: #444748;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+        
+        /* Image comparison slider */
+        .comparison-slider-wrapper {
+            position: relative;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+        }
+        .comparison-slider-image {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .comparison-slider-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 50%;
+            height: 100%;
+            overflow: hidden;
+            border-right: 2px solid #cb4e3d;
+            box-shadow: 2px 0 12px rgba(203, 78, 61, 0.3);
+        }
+        .comparison-slider-handle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            background-color: #0c0f0f;
+            border: 2px solid #cb4e3d;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: ew-resize;
+            z-index: 10;
+            box-shadow: 0 0 12px rgba(203, 78, 61, 0.5);
+        }
+        .comparison-slider-handle .material-symbols-outlined {
+            font-size: 16px;
+            color: #cb4e3d;
+        }
+    </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface h-screen flex overflow-hidden font-body-base">
+<!-- SideNavBar -->
+<nav class="hidden lg:flex flex-col h-full fixed left-0 top-0 w-64 border-r border-steel-outline bg-surface dark:bg-surface z-40">
+<!-- Header -->
+<div class="p-lg border-b border-steel-outline flex items-center gap-sm">
+<div class="w-8 h-8 rounded-full bg-cobalt-accent/20 flex items-center justify-center border border-cobalt-accent">
+<span class="material-symbols-outlined text-cobalt-accent text-[16px]">language</span>
+</div>
+<div>
+<h1 class="font-headline-lg text-cobalt-accent tracking-tighter" style="font-size: 16px;">ASTROFORGE</h1>
+<p class="font-metadata-sm text-metadata-sm text-on-surface-variant">V3.0.4-STABLE</p>
+</div>
+</div>
+<!-- CTA -->
+<div class="p-md">
+<button class="w-full bg-cobalt-accent text-surface-container-lowest py-sm px-md font-label-caps text-label-caps hover:bg-opacity-90 transition-colors duration-100 flex items-center justify-center gap-xs rounded">
+<span class="material-symbols-outlined" style="font-size: 14px;">add</span>
+                NEW CAPTURE
+            </button>
+</div>
+<!-- Navigation Tabs -->
+<ul class="flex-1 flex flex-col gap-unit px-sm py-sm overflow-y-auto">
+<li>
+<a class="flex items-center gap-md px-md py-sm font-label-caps text-label-caps text-on-surface-variant hover:bg-surface-container-high hover:text-cobalt-accent duration-100 ease-in rounded-DEFAULT" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+                    Pipeline
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-md px-md py-sm font-label-caps text-label-caps text-on-surface-variant hover:bg-surface-container-high hover:text-cobalt-accent duration-100 ease-in rounded-DEFAULT" href="#">
+<span class="material-symbols-outlined">folder_special</span>
+                    Library
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-md px-md py-sm font-label-caps text-label-caps text-on-surface-variant hover:bg-surface-container-high hover:text-cobalt-accent duration-100 ease-in rounded-DEFAULT" href="#">
+<span class="material-symbols-outlined">developer_board</span>
+                    Hardware
+                </a>
+</li>
+<li>
+<!-- Active State -->
+<a class="flex items-center gap-md px-md py-sm font-label-caps text-label-caps text-cobalt-accent border-r-2 border-cobalt-accent bg-surface-container-highest duration-100 ease-in rounded-DEFAULT" href="#">
+<span class="material-symbols-outlined" data-weight="fill" style="font-variation-settings: 'FILL' 1;">biotech</span>
+                    Master Lab
+                </a>
+</li>
+</ul>
+<!-- Footer Tabs -->
+<ul class="p-sm border-t border-steel-outline flex flex-col gap-unit">
+<li>
+<a class="flex items-center gap-md px-md py-sm font-label-caps text-label-caps text-on-surface-variant hover:bg-surface-container-high hover:text-cobalt-accent duration-100 ease-in rounded-DEFAULT" href="#">
+<span class="material-symbols-outlined">help</span>
+                    Docs
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-md px-md py-sm font-label-caps text-label-caps text-on-surface-variant hover:bg-surface-container-high hover:text-cobalt-accent duration-100 ease-in rounded-DEFAULT" href="#">
+<span class="material-symbols-outlined">logout</span>
+                    Logout
+                </a>
+</li>
+</ul>
+</nav>
+<!-- Main Workspace -->
+<main class="flex-1 ml-0 lg:ml-64 flex flex-col h-full w-full">
+<!-- TopAppBar (Mobile Only) -->
+<header class="lg:hidden flex justify-between items-center w-full px-md h-16 z-50 bg-surface-container-lowest dark:bg-surface-container-lowest border-b border-steel-outline shadow-[0_0_12px_rgba(203,78,61,0.15)]">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-cobalt-accent">sensors</span>
+<span class="font-headline-lg-mobile tracking-tighter text-cobalt-accent font-bold" style="font-size: 19px;">ASTROFORGE</span>
+</div>
+<div class="flex items-center gap-sm">
+<button class="text-cobalt-accent hover:text-opacity-80 transition-colors duration-100 active:scale-95">
+<span class="material-symbols-outlined">sensors</span>
+</button>
+<button class="text-cobalt-accent hover:text-opacity-80 transition-colors duration-100 active:scale-95">
+<span class="material-symbols-outlined">satellite_alt</span>
+</button>
+<button class="bg-cobalt-accent text-surface-container-lowest px-sm py-xs font-label-caps text-label-caps rounded active:scale-95 transition-transform duration-100">
+                    EXECUTE
+                </button>
+</div>
+</header>
+<!-- Lab Content Canvas -->
+<div class="flex-1 flex flex-col md:flex-row overflow-hidden p-unit gap-gutter bg-surface-container-lowest">
+<!-- Left Panel: Channel Mapping -->
+<aside class="w-full md:w-80 flex-shrink-0 bg-surface border border-steel-outline flex flex-col overflow-y-auto">
+<div class="p-sm border-b border-steel-outline bg-surface-bright flex items-center justify-between sticky top-0 z-10">
+<h2 class="font-label-caps text-label-caps text-on-surface flex items-center gap-xs">
+<span class="material-symbols-outlined text-cobalt-accent" style="font-size: 14px;">tune</span>
+                        CHANNEL MAPPING
+                    </h2>
+<span class="font-metadata-sm text-metadata-sm text-cobalt-accent">NARROWBAND</span>
+</div>
+<div class="p-md flex flex-col gap-md">
+<!-- Palette Presets -->
+<div class="flex flex-col gap-sm">
+<label class="font-metadata-sm text-metadata-sm text-on-surface-variant uppercase tracking-wider">Color Palette</label>
+<div class="grid grid-cols-2 gap-sm">
+<button class="bg-surface-container-high border border-cobalt-accent text-cobalt-accent py-sm px-sm font-label-caps text-label-caps rounded hover:bg-surface-bright transition-colors shadow-[0_0_8px_rgba(203,78,61,0.2)]">
+                                SHO (HUBBLE)
+                            </button>
+<button class="bg-surface border border-steel-outline text-on-surface-variant py-sm px-sm font-label-caps text-label-caps rounded hover:bg-surface-container-high hover:text-on-surface transition-colors">
+                                HOO (BICOLOR)
+                            </button>
+<button class="bg-surface border border-steel-outline text-on-surface-variant py-sm px-sm font-label-caps text-label-caps rounded hover:bg-surface-container-high hover:text-on-surface transition-colors">
+                                HSO
+                            </button>
+<button class="bg-surface border border-steel-outline text-on-surface-variant py-sm px-sm font-label-caps text-label-caps rounded hover:bg-surface-container-high hover:text-on-surface transition-colors">
+                                FORAXX
+                            </button>
+</div>
+</div>
+<!-- Red Channel (SII) -->
+<div class="flex flex-col gap-xs mt-sm p-sm bg-surface-container-lowest border border-steel-outline rounded">
+<div class="flex justify-between items-center mb-xs">
+<span class="font-metadata-sm text-metadata-sm text-error">RED CHANNEL</span>
+<span class="font-data-viz text-data-viz text-on-surface">SII (Sulfur)</span>
+</div>
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-size: 16px;">contrast</span>
+<input class="w-full" max="100" min="0" type="range" value="80"/>
+<span class="font-metadata-sm text-metadata-sm text-cobalt-accent w-8 text-right">80%</span>
+</div>
+<div class="flex items-center gap-sm mt-xs">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-size: 16px;">brightness_6</span>
+<input class="w-full" max="100" min="0" type="range" value="50"/>
+<span class="font-metadata-sm text-metadata-sm text-cobalt-accent w-8 text-right">50%</span>
+</div>
+</div>
+<!-- Green Channel (Ha) -->
+<div class="flex flex-col gap-xs p-sm bg-surface-container-lowest border border-steel-outline rounded">
+<div class="flex justify-between items-center mb-xs">
+<span class="font-metadata-sm text-metadata-sm" style="color: #4ade80;">GREEN CHANNEL</span>
+<span class="font-data-viz text-data-viz text-on-surface">Ha (Hydrogen)</span>
+</div>
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-size: 16px;">contrast</span>
+<input class="w-full" max="100" min="0" type="range" value="100"/>
+<span class="font-metadata-sm text-metadata-sm text-cobalt-accent w-8 text-right">100%</span>
+</div>
+<div class="flex items-center gap-sm mt-xs">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-size: 16px;">brightness_6</span>
+<input class="w-full" max="100" min="0" type="range" value="40"/>
+<span class="font-metadata-sm text-metadata-sm text-cobalt-accent w-8 text-right">40%</span>
+</div>
+</div>
+<!-- Blue Channel (OIII) -->
+<div class="flex flex-col gap-xs p-sm bg-surface-container-lowest border border-steel-outline rounded">
+<div class="flex justify-between items-center mb-xs">
+<span class="font-metadata-sm text-metadata-sm text-cobalt-accent">BLUE CHANNEL</span>
+<span class="font-data-viz text-data-viz text-on-surface">OIII (Oxygen)</span>
+</div>
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-size: 16px;">contrast</span>
+<input class="w-full" max="100" min="0" type="range" value="70"/>
+<span class="font-metadata-sm text-metadata-sm text-cobalt-accent w-8 text-right">70%</span>
+</div>
+<div class="flex items-center gap-sm mt-xs">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-size: 16px;">brightness_6</span>
+<input class="w-full" max="100" min="0" type="range" value="60"/>
+<span class="font-metadata-sm text-metadata-sm text-cobalt-accent w-8 text-right">60%</span>
+</div>
+</div>
+</div>
+</aside>
+<!-- Center Panel: Comparison Viewer -->
+<section class="flex-1 flex flex-col bg-surface border border-steel-outline overflow-hidden relative">
+<div class="p-sm border-b border-steel-outline bg-surface-bright flex items-center justify-between sticky top-0 z-10">
+<h2 class="font-label-caps text-label-caps text-on-surface flex items-center gap-xs">
+<span class="material-symbols-outlined text-cobalt-accent" style="font-size: 14px;">visibility</span>
+                        VIEWPORT
+                    </h2>
+<div class="flex gap-sm">
+<button class="text-on-surface-variant hover:text-cobalt-accent transition-colors"><span class="material-symbols-outlined" style="font-size: 18px;">zoom_in</span></button>
+<button class="text-on-surface-variant hover:text-cobalt-accent transition-colors"><span class="material-symbols-outlined" style="font-size: 18px;">zoom_out</span></button>
+<button class="text-on-surface-variant hover:text-cobalt-accent transition-colors"><span class="material-symbols-outlined" style="font-size: 18px;">center_focus_strong</span></button>
+</div>
+</div>
+<!-- Central Before/After Slider -->
+<div class="flex-1 relative bg-surface-container-lowest">
+<div class="comparison-slider-wrapper" id="comparisonSlider">
+<!-- After Image (Color) -->
+<img alt="Processed Composite" class="comparison-slider-image" data-alt="A highly detailed, vibrant deep space astrophotography image of a nebula in the SHO (Hubble) color palette. The image features sweeping, complex structures of interstellar gas and dust glowing intensely in deep space cobalt, golden yellow, and fiery orange hues against an obsidian black background dotted with sharp, bright stars. High contrast, precise telemetry aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD9dTXFitBJugUUonaOkmXQczkXXQVzZDziFCYxKahT6IP4JaOnGorZ_dcgYEWj6VHYa3zCCCXcciPN7pe3p63wuZhbBty9_SGes0KK_DJhavJMWbzoww6_Rhf4Xy57J-3qW_TX_IFshHyVxJAbW_8heun98A4MIp0DwuQN93DeRpTZmmwwuofUiUF4jofzN_SZzy481OBBZciSPA7JBr6A4xIatTESGMFzl8tcTYHr10YoGVQGJIAMbw"/>
+<!-- Before Image (Mono/Linear) -->
+<div class="comparison-slider-overlay" id="comparisonOverlay">
+<img alt="Raw Linear Data" class="comparison-slider-image w-[200%]" data-alt="A highly detailed, stark monochrome astrophotography image of a nebula in its linear, unstretched state before processing. The image shows faint, ghostly white structures of interstellar gas against a pure obsidian black background, with pinpoint sharp stars. Technical minimalism aesthetic, raw data appearance, high contrast grayscale." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCw6Py3xg3cKkioWiWBlk1I9JJPLa4QL-eYB8xSC_MiAB6UFZbWVhEz7r-9he1uAdXMmd9h51IwEQt6Et1Kn51MQEIjBh5-bj7d12-ddMxHXyy33xy5RAOY29XRtTV2vWKsZVIlapbyhil1-ynhJ7zZORTaiG5oK9_Smj2HIGnrqtMKx_utsSvcbi_xMvn100del27PIiXp1xEDcFnK40PClxX16x32mVzopv15o-cPDtsvXnHtgPZb3w" style="max-width: none; width: calc(100% * 2);"/>
+<div class="absolute top-md left-md bg-surface-container-lowest/80 backdrop-blur border border-steel-outline px-sm py-xs rounded font-label-caps text-label-caps text-on-surface-variant">LINEAR (RAW)</div>
+</div>
+<!-- Slider Handle -->
+<div class="comparison-slider-handle" id="comparisonHandle">
+<span class="material-symbols-outlined">swap_horiz</span>
+</div>
+<div class="absolute top-md right-md bg-surface-container-lowest/80 backdrop-blur border border-cobalt-accent px-sm py-xs rounded font-label-caps text-label-caps text-cobalt-accent shadow-[0_0_8px_rgba(203,78,61,0.3)]">SHO COMPOSITE</div>
+</div>
+</div>
+<!-- Viewport StatusBar -->
+<div class="h-8 border-t border-steel-outline bg-surface-container-lowest flex justify-between items-center px-sm">
+<div class="flex gap-md font-metadata-sm text-metadata-sm text-on-surface-variant">
+<span>X: 2451 Y: 1092</span>
+<span>R: 0.82 G: 0.45 B: 0.12</span>
+</div>
+<div class="flex gap-md font-metadata-sm text-metadata-sm text-on-surface-variant">
+<span class="flex items-center gap-xs"><span class="w-2 h-2 rounded-full bg-cobalt-accent animate-pulse shadow-[0_0_4px_rgba(203,78,61,0.8)]"></span> RENDERING IDLE</span>
+<span>ZOOM: 100%</span>
+</div>
+</div>
+</section>
+<!-- Right Panel: Histogram & Stretch -->
+<aside class="w-full md:w-80 flex-shrink-0 bg-surface border border-steel-outline flex flex-col overflow-y-auto">
+<div class="p-sm border-b border-steel-outline bg-surface-bright flex items-center justify-between sticky top-0 z-10">
+<h2 class="font-label-caps text-label-caps text-on-surface flex items-center gap-xs">
+<span class="material-symbols-outlined text-cobalt-accent" style="font-size: 14px;">bar_chart</span>
+                        HISTOGRAM &amp; STRETCH
+                    </h2>
+</div>
+<div class="p-md flex flex-col gap-md">
+<!-- Histogram Viz -->
+<div class="flex flex-col gap-sm">
+<div class="flex justify-between items-center">
+<label class="font-metadata-sm text-metadata-sm text-on-surface-variant uppercase tracking-wider">Distribution</label>
+<div class="flex gap-xs">
+<button class="w-6 h-6 flex items-center justify-center bg-surface-container-high border border-cobalt-accent text-cobalt-accent rounded text-[10px]">RGB</button>
+<button class="w-6 h-6 flex items-center justify-center bg-surface-container border border-steel-outline text-on-surface-variant rounded text-[10px]">L</button>
+</div>
+</div>
+<!-- Simulated Histogram Graph -->
+<div class="h-32 bg-surface-container-lowest border border-steel-outline rounded relative overflow-hidden flex items-end px-1">
+<!-- Shader placeholder for a dynamic histogram effect, falling back to CSS styling if not supported -->
+<!-- Static fallback visualization -->
+<div class="w-full h-full flex items-end justify-between z-10">
+<div class="w-1/5 h-1/4 bg-error/50 rounded-t-sm mix-blend-screen"></div>
+<div class="w-1/3 h-3/4 bg-green-400/50 rounded-t-sm mix-blend-screen -ml-4"></div>
+<div class="w-1/4 h-1/2 bg-cobalt-accent/50 rounded-t-sm mix-blend-screen -ml-4"></div>
+<div class="w-1/2 h-1/6 bg-surface-variant rounded-t-sm mix-blend-screen"></div>
+</div>
+<!-- Histogram grid lines -->
+<div class="absolute inset-0 border-b border-steel-outline/30 bottom-1/4"></div>
+<div class="absolute inset-0 border-b border-steel-outline/30 bottom-1/2"></div>
+<div class="absolute inset-0 border-b border-steel-outline/30 bottom-3/4"></div>
+<div class="absolute inset-y-0 border-l border-steel-outline/30 left-1/4"></div>
+<div class="absolute inset-y-0 border-l border-steel-outline/30 left-1/2"></div>
+<div class="absolute inset-y-0 border-l border-steel-outline/30 left-3/4"></div>
+</div>
+</div>
+<!-- Non-linear Stretch Controls -->
+<div class="flex flex-col gap-sm border-t border-steel-outline pt-md mt-sm">
+<label class="font-metadata-sm text-metadata-sm text-on-surface-variant uppercase tracking-wider flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px]">graphic_eq</span>
+                            NON-LINEAR STRETCH
+                        </label>
+<div class="flex flex-col gap-xs p-sm bg-surface-container-lowest border border-steel-outline rounded">
+<div class="flex justify-between items-center mb-xs">
+<span class="font-metadata-sm text-metadata-sm text-on-surface">Black Point</span>
+<input class="bg-surface border border-steel-outline text-cobalt-accent font-metadata-sm text-metadata-sm w-16 px-1 py-0.5 rounded focus:border-cobalt-accent focus:ring-1 focus:ring-cobalt-accent focus:outline-none" type="number" value="0.125"/>
+</div>
+<input class="w-full" max="100" min="0" type="range" value="12"/>
+</div>
+<div class="flex flex-col gap-xs p-sm bg-surface-container-lowest border border-steel-outline rounded">
+<div class="flex justify-between items-center mb-xs">
+<span class="font-metadata-sm text-metadata-sm text-on-surface">Midtones (Stretch)</span>
+<input class="bg-surface border border-steel-outline text-cobalt-accent font-metadata-sm text-metadata-sm w-16 px-1 py-0.5 rounded focus:border-cobalt-accent focus:ring-1 focus:ring-cobalt-accent focus:outline-none" type="number" value="0.450"/>
+</div>
+<input class="w-full" max="100" min="0" type="range" value="45"/>
+</div>
+<div class="flex flex-col gap-xs p-sm bg-surface-container-lowest border border-steel-outline rounded">
+<div class="flex justify-between items-center mb-xs">
+<span class="font-metadata-sm text-metadata-sm text-on-surface">White Point</span>
+<input class="bg-surface border border-steel-outline text-cobalt-accent font-metadata-sm text-metadata-sm w-16 px-1 py-0.5 rounded focus:border-cobalt-accent focus:ring-1 focus:ring-cobalt-accent focus:outline-none" type="number" value="0.980"/>
+</div>
+<input class="w-full" max="100" min="0" type="range" value="98"/>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="mt-auto pt-md flex gap-sm">
+<button class="flex-1 bg-surface-container border border-steel-outline text-on-surface py-sm font-label-caps text-label-caps rounded hover:bg-surface-container-high transition-colors">
+                            RESET
+                        </button>
+<button class="flex-1 bg-cobalt-accent/10 border border-cobalt-accent text-cobalt-accent py-sm font-label-caps text-label-caps rounded hover:bg-cobalt-accent hover:text-surface-container-lowest transition-colors shadow-[0_0_8px_rgba(203,78,61,0.2)]">
+                            APPLY STRETCH
+                        </button>
+</div>
+</div>
+</aside>
+</div>
+</main>
+<!-- BottomNavBar (Mobile Only) -->
+<nav class="lg:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-2 bg-surface-container-lowest dark:bg-surface-container-lowest shadow-[0_-4px_12px_rgba(203,78,61,0.2)] rounded-t-lg">
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-cobalt-accent" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+<span class="font-label-caps text-label-caps mt-1">Pipeline</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-cobalt-accent" href="#">
+<span class="material-symbols-outlined">folder_special</span>
+<span class="font-label-caps text-label-caps mt-1">Library</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-cobalt-accent" href="#">
+<span class="material-symbols-outlined">developer_board</span>
+<span class="font-label-caps text-label-caps mt-1">Hardware</span>
+</a>
+<a class="flex flex-col items-center justify-center text-cobalt-accent bg-surface-container-high rounded-xl p-2 shadow-[0_0_8px_rgba(203,78,61,0.3)] active:scale-90 transition-all duration-100" href="#">
+<span class="material-symbols-outlined" data-weight="fill" style="font-variation-settings: 'FILL' 1;">biotech</span>
+<span class="font-label-caps text-label-caps mt-1">Lab</span>
+</a>
+</nav>
+<script>
+        // Simple script for the comparison slider
+        document.addEventListener('DOMContentLoaded', () => {
+            const slider = document.getElementById('comparisonSlider');
+            const overlay = document.getElementById('comparisonOverlay');
+            const handle = document.getElementById('comparisonHandle');
+            
+            let isDragging = false;
+
+            const move = (e) => {
+                if (!isDragging) return;
+                
+                const rect = slider.getBoundingClientRect();
+                const x = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+                let position = ((x - rect.left) / rect.width) * 100;
+                
+                // Keep within bounds
+                position = Math.max(0, Math.min(position, 100));
+                
+                overlay.style.width = `${position}%`;
+                handle.style.left = `${position}%`;
+            };
+
+            const startDrag = () => { isDragging = true; };
+            const stopDrag = () => { isDragging = false; };
+
+            handle.addEventListener('mousedown', startDrag);
+            handle.addEventListener('touchstart', startDrag, { passive: true });
+
+            window.addEventListener('mousemove', move);
+            window.addEventListener('touchmove', move, { passive: true });
+
+            window.addEventListener('mouseup', stopDrag);
+            window.addEventListener('touchend', stopDrag);
+        });
+    </script>
+</body></html>

@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AstroForge - Batch Processing Queue</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;700&amp;family=Inter:wght@400;500;700&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Inter:wght@100..900&amp;family=JetBrains+Mono:wght@100..800&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">tailwind.config = {darkMode: "class", theme: {extend: {colors: {"on-tertiary-fixed": "#000c60", "primary-fixed-dim": "#ffb4a8", "secondary-fixed": "#ffdad5", error: "#ffb4ab", "outline-variant": "#58413e", "tertiary-fixed-dim": "#bcc3ff", "surface-dim": "#121414", "on-background": "#e2e2e2", "on-secondary-fixed-variant": "#6f362e", "on-tertiary-container": "#001586", "on-primary-fixed-variant": "#881e13", "inverse-on-surface": "#2f3131", "secondary-container": "#6f362e", "primary-container": "#ec6653", "error-container": "#93000a", "on-error": "#690005", "on-surface": "#e2e2e2", "on-primary-container": "#5c0100", "tertiary-fixed": "#dfe0ff", "surface-container": "#1e2020", "surface-tint": "#ffb4a8", "surface-container-low": "#1a1c1c", surface: "#121414", secondary: "#ffb4a8", "on-error-container": "#ffdad6", "surface-variant": "#333535", "on-primary-fixed": "#410000", "surface-container-lowest": "#0c0f0f", "on-secondary-container": "#efa196", "on-surface-variant": "#dfbfba", tertiary: "#bcc3ff", "on-tertiary-fixed-variant": "#2839a9", primary: "#ffb4a8", outline: "#a78a86", "primary-fixed": "#ffdad4", "tertiary-container": "#7787f9", "inverse-surface": "#e2e2e2", "secondary-fixed-dim": "#ffb4a8", "surface-bright": "#37393a", "surface-container-highest": "#333535", "surface-container-high": "#282a2b", "inverse-primary": "#a93627", "on-secondary": "#53211a", background: "#121414", "on-primary": "#680301", "on-secondary-fixed": "#380c07", "on-tertiary": "#051c93"}, borderRadius: {DEFAULT: "0.125rem", lg: "0.25rem", xl: "0.5rem", full: "0.75rem"}, spacing: {md: "16px", xs: "4px", "panel-gutter": "1px", xl: "40px", "container-safe": "24px", unit: "4px", lg: "24px", sm: "8px"}, fontFamily: {"metadata-sm": ["JetBrains Mono"], "label-caps": ["JetBrains Mono"], "display-xl": ["Geist"], "headline-lg": ["Geist"], "headline-lg-mobile": ["Geist"], "data-viz": ["JetBrains Mono"], "body-base": ["Geist", "sans-serif"], headline: ["Geist"], display: ["Geist"], body: ["Inter"], label: ["Space Grotesk"]}, fontSize: {"metadata-sm": ["12px", {lineHeight: "1.4", fontWeight: "400"}], "label-caps": ["11px", {lineHeight: "1", letterSpacing: "0.1em", fontWeight: "700"}], "display-xl": ["48px", {lineHeight: "1.1", letterSpacing: "-0.04em", fontWeight: "700"}], "headline-lg": ["32px", {lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "600"}], "headline-lg-mobile": ["24px", {lineHeight: "1.2", fontWeight: "600"}], "data-viz": ["14px", {lineHeight: "1.4", letterSpacing: "0.02em", fontWeight: "500"}], "body-base": ["15px", {lineHeight: "1.6", letterSpacing: "0.01em", fontWeight: "400"}]}}}};</script>
+<style>
+        body {
+            background-color: #0c0f0f;
+            color: #e2e2e2;
+        }
+        
+        .glass-panel {
+            background-color: rgba(18, 20, 20, 0.6);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid #333535;
+        }
+
+        .status-led {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .status-processing {
+            background-color: #cb4e3d;
+            box-shadow: 0 0 4px 1px rgba(203, 78, 61, 0.4);
+            animation: pulse 2s infinite;
+        }
+
+        .status-queued {
+            background-color: #dfbfba;
+        }
+
+        .status-completed {
+            background-color: #7787f9;
+            box-shadow: 0 0 4px 1px rgba(119, 135, 249, 0.4);
+        }
+
+        .status-error {
+            background-color: #ffb4ab;
+            box-shadow: 0 0 4px 1px rgba(255, 180, 171, 0.4);
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .progress-track {
+            background-color: #1e2020;
+            height: 2px;
+            width: 100%;
+            position: relative;
+        }
+
+        .progress-fill {
+            background-color: #cb4e3d;
+            height: 100%;
+            position: absolute;
+            left: 0;
+            top: 0;
+            box-shadow: 0 0 4px 1px rgba(203, 78, 61, 0.2);
+        }
+
+        .btn-primary {
+            background-color: #1e2020;
+            color: #cb4e3d;
+            transition: all 150ms ease-in-out;
+            border: 1px solid #cb4e3d;
+        }
+        
+        .btn-primary:hover {
+            background-color: #cb4e3d;
+            color: #121414;
+        }
+
+        .btn-ghost {
+            border: 1px solid #333535;
+            color: #e2e2e2;
+            transition: all 150ms ease-in-out;
+        }
+
+        .btn-ghost:hover {
+            background-color: #282a2b;
+            border-color: #cb4e3d;
+        }
+        
+        .active-glow {
+            box-shadow: 0 0 4px 1px rgba(203, 78, 61, 0.2);
+            border-color: #cb4e3d;
+        }
+        
+        .sidebar-border {
+            border-right: 1px solid #333535;
+        }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden antialiased font-body-base text-body-base bg-surface-container-lowest text-on-background selection:bg-primary/30">
+<!-- SideNavBar -->
+<nav class="w-[320px] h-screen fixed left-0 top-0 bg-surface-container dark:bg-surface-container border-r border-outline-variant dark:border-outline-variant flex flex-col py-lg px-md z-40">
+<!-- Header -->
+<div class="mb-xl flex items-center gap-sm">
+<div class="w-10 h-10 rounded overflow-hidden border border-outline-variant">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="A macro shot of a sleek, dark metallic server blade with a glowing red LED indicator, illustrating high-performance computing in a moody, low-light environment. The texture is brushed aluminum with a subtle red rim light. Technical, modern aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCq4wlBHC9_POjZDrcEn59zdjMg1ZFXrA8B5-yDut8qUHpFHF7rdKMnsEz3nUdyAHfRtB-c7_mDNF9anWGvHCnguT7sXS2CqmiabQDlgMxv5FA51ZbJ2Wsvhn4R0MrJpAJFbLfUZhHjc0xe1UgQ-QVkg58KyxrEdsYRLjP0cG6Gl0lH6yA2XSQk27m2gff-PWWDiOWdSCgZ2zxWfV_X2pR3n0XRrVXwOGcwkg5lCCvoUX4Ykzc0S6iBcA"/>
+</div>
+<div>
+<h1 class="font-display-xl font-bold text-primary dark:text-primary text-[19.2px] leading-tight tracking-tight">AstroForge</h1>
+<p class="font-metadata-sm text-metadata-sm text-on-surface-variant">v4.2.0-Alpha</p>
+</div>
+</div>
+<!-- CTA -->
+<button class="btn-primary w-full py-sm rounded mb-lg font-label-caps text-label-caps flex items-center justify-center gap-xs transition-all duration-150 ease-in-out">
+<span class="material-symbols-outlined" style="font-size: 16px;">add</span>
+            New Batch
+        </button>
+<!-- Main Navigation -->
+<div class="flex-1 flex flex-col gap-unit">
+<a class="flex items-center gap-md px-md py-sm rounded text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-high dark:hover:bg-surface-container-high transition-colors duration-150 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">dashboard</span>
+<span class="font-data-viz text-data-viz">Workspace</span>
+</a>
+<a class="flex items-center gap-md px-md py-sm rounded text-primary dark:text-primary font-bold border-r-2 border-primary bg-surface-container-high/50 group" href="#">
+<span class="material-symbols-outlined text-primary">account_tree</span>
+<span class="font-data-viz text-data-viz">Pipeline</span>
+</a>
+<a class="flex items-center gap-md px-md py-sm rounded text-on-surface-variant dark:text-primary hover:bg-surface-container-high dark:hover:bg-surface-container-high transition-colors duration-150 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">insights</span>
+<span class="font-data-viz text-data-viz">Telemetry</span>
+</a>
+<a class="flex items-center gap-md px-md py-sm rounded text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-high dark:hover:bg-surface-container-high transition-colors duration-150 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">auto_awesome_motion</span>
+<span class="font-data-viz text-data-viz">Archive</span>
+</a>
+<a class="flex items-center gap-md px-md py-sm rounded text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-high dark:hover:bg-surface-container-high transition-colors duration-150 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">settings</span>
+<span class="font-data-viz text-data-viz">Settings</span>
+</a>
+</div>
+<!-- Footer Navigation -->
+<div class="pt-lg border-t border-outline-variant flex flex-col gap-unit mt-auto">
+<a class="flex items-center gap-md px-md py-sm rounded text-on-surface-variant hover:bg-surface-container-high transition-colors duration-150 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors text-[18px]">help_outline</span>
+<span class="font-metadata-sm text-metadata-sm">Documentation</span>
+</a>
+<a class="flex items-center gap-md px-md py-sm rounded text-on-surface-variant hover:bg-surface-container-high transition-colors duration-150 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors text-[18px]">support_agent</span>
+<span class="font-metadata-sm text-metadata-sm">Support</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="ml-[320px] flex-1 flex flex-col h-screen overflow-hidden bg-surface-container-lowest relative">
+<!-- Header Actions Area -->
+<header class="h-16 border-b border-outline-variant flex items-center justify-between px-lg shrink-0 glass-panel z-10 sticky top-0">
+<h2 class="font-headline-lg text-[20px] font-semibold text-on-surface">Batch Processing Queue</h2>
+<div class="flex items-center gap-md">
+<button class="btn-ghost px-md py-sm rounded font-label-caps text-label-caps flex items-center gap-xs">
+<span class="material-symbols-outlined text-[16px]">play_arrow</span>
+                    Start All
+                </button>
+<button class="btn-ghost px-md py-sm rounded font-label-caps text-label-caps flex items-center gap-xs">
+<span class="material-symbols-outlined text-[16px]">pause</span>
+                    Pause All
+                </button>
+<button class="btn-ghost px-md py-sm rounded font-label-caps text-label-caps flex items-center gap-xs text-on-surface-variant border-transparent hover:border-outline-variant">
+<span class="material-symbols-outlined text-[16px]">clear_all</span>
+                    Clear Completed
+                </button>
+</div>
+</header>
+<!-- Queue List -->
+<div class="flex-1 overflow-y-auto p-lg space-y-md">
+<!-- Active Processing Item -->
+<article class="glass-panel rounded-lg p-md active-glow flex flex-col gap-md transition-all duration-150">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-md">
+<div class="w-12 h-12 bg-surface-container-highest rounded border border-outline-variant flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary text-[24px]">drive_file_rename</span>
+</div>
+<div>
+<h3 class="font-data-viz text-[16px] text-on-surface font-semibold flex items-center gap-sm">
+                                M42 Orion Nebula
+                                <span class="px-2 py-0.5 rounded-full bg-surface-container-high border border-outline-variant font-label-caps text-[9px] text-primary">Priority</span>
+</h3>
+<div class="flex items-center gap-xs mt-1">
+<span class="status-led status-processing"></span>
+<span class="font-metadata-sm text-primary uppercase tracking-widest text-[10px]">Processing</span>
+</div>
+</div>
+</div>
+<div class="flex gap-sm">
+<button class="btn-ghost p-1.5 rounded flex items-center justify-center hover:text-primary transition-colors" title="View Detail">
+<span class="material-symbols-outlined text-[18px]">visibility</span>
+</button>
+<button class="btn-ghost p-1.5 rounded flex items-center justify-center hover:text-primary transition-colors" title="Pause">
+<span class="material-symbols-outlined text-[18px]">pause</span>
+</button>
+</div>
+</div>
+<div class="grid grid-cols-3 gap-md border-t border-outline-variant pt-sm mt-sm">
+<div>
+<p class="font-label-caps text-on-surface-variant text-[10px] mb-1">Current Node</p>
+<p class="font-data-viz text-on-surface text-[13px]">Deconvolution (Lucy-Richardson)</p>
+</div>
+<div>
+<p class="font-label-caps text-on-surface-variant text-[10px] mb-1">Integration Time</p>
+<p class="font-data-viz text-on-surface text-[13px]">12h 45m</p>
+</div>
+<div>
+<p class="font-label-caps text-on-surface-variant text-[10px] mb-1">Frame Count</p>
+<p class="font-data-viz text-on-surface text-[13px]">154 / 200</p>
+</div>
+</div>
+<div class="mt-sm">
+<div class="flex justify-between font-metadata-sm text-[11px] mb-1">
+<span class="text-on-surface-variant">Overall Progress</span>
+<span class="text-primary font-data-viz">77%</span>
+</div>
+<div class="progress-track rounded overflow-hidden">
+<div class="progress-fill" style="width: 77%;"></div>
+</div>
+</div>
+</article>
+<!-- Queued Item -->
+<article class="glass-panel rounded-lg p-md flex flex-col gap-md opacity-80 hover:opacity-100 transition-opacity duration-150">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-md">
+<div class="w-12 h-12 bg-surface-container-highest rounded border border-outline-variant flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-on-surface-variant text-[24px]">scatter_plot</span>
+</div>
+<div>
+<h3 class="font-data-viz text-[16px] text-on-surface font-semibold">M31 Andromeda Galaxy</h3>
+<div class="flex items-center gap-xs mt-1">
+<span class="status-led status-queued"></span>
+<span class="font-metadata-sm text-on-surface-variant uppercase tracking-widest text-[10px]">Queued</span>
+</div>
+</div>
+</div>
+<div class="flex gap-sm">
+<button class="btn-ghost p-1.5 rounded flex items-center justify-center hover:text-primary transition-colors" title="View Detail">
+<span class="material-symbols-outlined text-[18px]">visibility</span>
+</button>
+<button class="btn-ghost p-1.5 rounded flex items-center justify-center hover:text-primary transition-colors" title="Start">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+</div>
+</div>
+<div class="grid grid-cols-3 gap-md border-t border-outline-variant pt-sm mt-sm">
+<div>
+<p class="font-label-caps text-on-surface-variant text-[10px] mb-1">Next Node</p>
+<p class="font-data-viz text-on-surface text-[13px]">Image Calibration</p>
+</div>
+<div>
+<p class="font-label-caps text-on-surface-variant text-[10px] mb-1">Integration Time</p>
+<p class="font-data-viz text-on-surface text-[13px]">8h 30m</p>
+</div>
+<div>
+<p class="font-label-caps text-on-surface-variant text-[10px] mb-1">Frame Count</p>
+<p class="font-data-viz text-on-surface text-[13px]">0 / 120</p>
+</div>
+</div>
+<div class="mt-sm">
+<div class="flex justify-between font-metadata-sm text-[11px] mb-1">
+<span class="text-on-surface-variant">Overall Progress</span>
+<span class="text-on-surface-variant font-data-viz">0%</span>
+</div>
+<div class="progress-track rounded overflow-hidden">
+<div class="progress-fill bg-outline-variant shadow-none" style="width: 0%;"></div>
+</div>
+</div>
+</article>
+<!-- Completed Item -->
+<article class="glass-panel rounded-lg p-md flex flex-col gap-md opacity-70">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-md">
+<div class="w-12 h-12 bg-surface-container-highest rounded border border-outline-variant flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-tertiary-container text-[24px]">check_circle</span>
+</div>
+<div>
+<h3 class="font-data-viz text-[16px] text-on-surface font-semibold">NGC 2237 Rosette Nebula</h3>
+<div class="flex items-center gap-xs mt-1">
+<span class="status-led status-completed"></span>
+<span class="font-metadata-sm text-tertiary-container uppercase tracking-widest text-[10px]">Completed</span>
+</div>
+</div>
+</div>
+<div class="flex gap-sm">
+<button class="btn-ghost p-1.5 rounded flex items-center justify-center hover:text-primary transition-colors" title="View Detail">
+<span class="material-symbols-outlined text-[18px]">visibility</span>
+</button>
+<button class="btn-ghost p-1.5 rounded flex items-center justify-center hover:text-primary transition-colors" title="Rerun">
+<span class="material-symbols-outlined text-[18px]">replay</span>
+</button>
+</div>
+</div>
+<div class="grid grid-cols-3 gap-md border-t border-outline-variant pt-sm mt-sm">
+<div>
+<p class="font-label-caps text-on-surface-variant text-[10px] mb-1">Final Node</p>
+<p class="font-data-viz text-on-surface text-[13px]">Export (TIFF 32-bit)</p>
+</div>
+<div>
+<p class="font-label-caps text-on-surface-variant text-[10px] mb-1">Integration Time</p>
+<p class="font-data-viz text-on-surface text-[13px]">24h 00m</p>
+</div>
+<div>
+<p class="font-label-caps text-on-surface-variant text-[10px] mb-1">Frame Count</p>
+<p class="font-data-viz text-on-surface text-[13px]">450 / 450</p>
+</div>
+</div>
+<div class="mt-sm">
+<div class="flex justify-between font-metadata-sm text-[11px] mb-1">
+<span class="text-on-surface-variant">Overall Progress</span>
+<span class="text-tertiary-container font-data-viz">100%</span>
+</div>
+<div class="progress-track rounded overflow-hidden">
+<div class="progress-fill bg-tertiary-container shadow-none" style="width: 100%;"></div>
+</div>
+</div>
+</article>
+</div>
+</main>
+</body></html>

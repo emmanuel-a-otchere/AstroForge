@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AstroForge - Browse Files</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;700&amp;family=Inter:wght@400;500;700&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&amp;family=Inter:wght@400&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">tailwind.config = {darkMode: "class", theme: {extend: {colors: {"surface-container-high": "#282a2b", "surface-bright": "#37393a", "inverse-surface": "#e2e2e2", "surface-container": "#1e2020", "secondary-container": "#6f362e", "on-primary-fixed-variant": "#881e13", surface: "#121414", "on-tertiary": "#051c93", "tertiary-fixed": "#dfe0ff", outline: "#a78a86", "surface-container-lowest": "#0c0f0f", tertiary: "#bcc3ff", "on-primary": "#680301", "primary-container": "#ec6653", "inverse-primary": "#a93627", "surface-container-highest": "#333535", "on-surface": "#e2e2e2", "error-container": "#93000a", "on-secondary-fixed": "#380c07", error: "#ffb4ab", "surface-container-low": "#1a1c1c", "primary-fixed": "#ffdad4", "surface-variant": "#333535", primary: "#ffb4a8", "on-tertiary-fixed-variant": "#2839a9", "on-error-container": "#ffdad6", background: "#121414", secondary: "#ffb4a8", "on-secondary-fixed-variant": "#6f362e", "on-primary-fixed": "#410000", "secondary-fixed-dim": "#ffb4a8", "on-surface-variant": "#dfbfba", "primary-fixed-dim": "#ffb4a8", "secondary-fixed": "#ffdad5", "surface-tint": "#ffb4a8", "on-primary-container": "#5c0100", "on-tertiary-container": "#001586", "on-secondary-container": "#efa196", "on-tertiary-fixed": "#000c60", "surface-dim": "#121414", "tertiary-container": "#7787f9", "tertiary-fixed-dim": "#bcc3ff", "outline-variant": "#58413e", "on-background": "#e2e2e2", "inverse-on-surface": "#2f3131", "on-secondary": "#53211a", "on-error": "#690005"}, borderRadius: {DEFAULT: "0.125rem", lg: "0.25rem", xl: "0.5rem", full: "0.75rem"}, spacing: {sm: "8px", "panel-gutter": "1px", xl: "40px", unit: "4px", lg: "24px", xs: "4px", md: "16px", "container-safe": "24px"}, fontFamily: {"data-viz": ["JetBrains Mono"], "display-xl": ["Geist"], "body-base": ["Inter"], "label-caps": ["JetBrains Mono"], "headline-lg-mobile": ["Geist"], "headline-lg": ["Geist"], "metadata-sm": ["JetBrains Mono"], headline: ["Geist"], display: ["Geist"], body: ["Inter"], label: ["Space Grotesk"]}, fontSize: {"data-viz": ["14px", {lineHeight: "1.4", letterSpacing: "0.02em", fontWeight: "500"}], "display-xl": ["48px", {lineHeight: "1.1", letterSpacing: "-0.04em", fontWeight: "700"}], "body-base": ["15px", {lineHeight: "1.6", letterSpacing: "0.01em", fontWeight: "400"}], "label-caps": ["11px", {lineHeight: "1", letterSpacing: "0.1em", fontWeight: "700"}], "headline-lg-mobile": ["24px", {lineHeight: "1.2", fontWeight: "600"}], "headline-lg": ["32px", {lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "600"}], "metadata-sm": ["12px", {lineHeight: "1.4", fontWeight: "400"}]}}}};</script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glow-active {
+            box-shadow: 0 0 4px 1px rgba(236, 102, 83, 0.2);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-base text-body-base h-screen overflow-hidden flex flex-col antialiased">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center px-lg w-full sticky top-0 z-50 bg-surface dark:bg-surface w-full h-16 border-b border-outline-variant backdrop-blur-md bg-surface/80 flat no shadows">
+<div class="flex items-center gap-lg">
+<span class="font-headline-lg text-headline-lg tracking-tighter text-primary">AstroForge</span>
+<nav class="hidden md:flex gap-md">
+<a class="text-on-surface-variant font-medium hover:text-primary transition-colors duration-150 cursor-pointer active:opacity-80 transition-all font-label-caps text-label-caps" href="#">Dashboard</a>
+<a class="text-primary font-bold border-b-2 border-primary pb-xs cursor-pointer active:opacity-80 transition-all font-label-caps text-label-caps" href="#">Ingest</a>
+<a class="text-on-surface-variant font-medium hover:text-primary transition-colors duration-150 cursor-pointer active:opacity-80 transition-all font-label-caps text-label-caps" href="#">Calibration</a>
+<a class="text-on-surface-variant font-medium hover:text-primary transition-colors duration-150 cursor-pointer active:opacity-80 transition-all font-label-caps text-label-caps" href="#">Stacking</a>
+</nav>
+</div>
+<div class="flex items-center gap-md">
+<div class="flex gap-sm">
+<button class="p-xs text-on-surface-variant hover:text-primary transition-colors duration-150"><span class="material-symbols-outlined" data-icon="sensors">sensors</span></button>
+<button class="p-xs text-on-surface-variant hover:text-primary transition-colors duration-150"><span class="material-symbols-outlined" data-icon="memory">memory</span></button>
+<button class="p-xs text-on-surface-variant hover:text-primary transition-colors duration-150"><span class="material-symbols-outlined" data-icon="satellite_alt">satellite_alt</span></button>
+</div>
+<button class="px-md py-sm border border-outline-variant text-on-background font-label-caps text-label-caps rounded-DEFAULT hover:bg-surface-variant/50 transition-colors duration-150">Save Session</button>
+<button class="px-md py-sm bg-primary-container text-on-primary-container font-label-caps text-label-caps rounded-DEFAULT hover:opacity-90 transition-opacity">Execute Pipeline</button>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar -->
+<aside class="hidden md:flex flex-col h-full py-lg gap-md bg-surface-container dark:bg-surface-container w-[320px] h-screen border-r border-outline-variant flat no shadows">
+<div class="px-lg flex items-center gap-md mb-md">
+<div class="w-10 h-10 rounded-full bg-surface-variant border border-outline-variant overflow-hidden flex items-center justify-center">
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="satellite">satellite</span>
+</div>
+<div>
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-primary font-bold">AstroForge</h2>
+<p class="font-metadata-sm text-metadata-sm text-on-surface-variant">V2.4.0-PRO</p>
+</div>
+</div>
+<nav class="flex-1 px-sm space-y-unit">
+<a class="flex items-center gap-md px-md py-sm text-primary border-r-2 border-primary bg-secondary-container/20 font-label-caps text-label-caps hover:bg-surface-variant/50 transition-colors duration-150 scale-95 transition-transform duration-150 active:ring-1 active:ring-primary/20" href="#">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+                    Pipeline
+                </a>
+<a class="flex items-center gap-md px-md py-sm text-on-surface-variant font-label-caps text-label-caps hover:bg-surface-variant/50 transition-colors duration-150 scale-95 transition-transform duration-150 active:ring-1 active:ring-primary/20" href="#">
+<span class="material-symbols-outlined" data-icon="handyman">handyman</span>
+                    Toolbox
+                </a>
+<a class="flex items-center gap-md px-md py-sm text-on-surface-variant font-label-caps text-label-caps hover:bg-surface-variant/50 transition-colors duration-150 scale-95 transition-transform duration-150 active:ring-1 active:ring-primary/20" href="#">
+<span class="material-symbols-outlined" data-icon="photo_library">photo_library</span>
+                    Library
+                </a>
+<a class="flex items-center gap-md px-md py-sm text-on-surface-variant font-label-caps text-label-caps hover:bg-surface-variant/50 transition-colors duration-150 scale-95 transition-transform duration-150 active:ring-1 active:ring-primary/20" href="#">
+<span class="material-symbols-outlined" data-icon="settings_input_component">settings_input_component</span>
+                    Hardware
+                </a>
+</nav>
+<div class="px-lg mt-auto">
+<button class="w-full py-sm border border-outline-variant text-on-background font-label-caps text-label-caps rounded-DEFAULT hover:bg-surface-variant/50 transition-colors flex justify-center items-center gap-sm">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+                    New Session
+                </button>
+</div>
+</aside>
+<!-- Main Canvas (Dimmed Background) -->
+<main class="flex-1 relative bg-surface-container-lowest p-lg overflow-y-auto">
+<div class="opacity-30 pointer-events-none filter blur-[2px]">
+<!-- Dummy Background Content to show context before dimming -->
+<h1 class="font-display-xl text-display-xl mb-xl">Data Ingestion</h1>
+<div class="grid grid-cols-2 gap-lg">
+<div class="p-lg border border-outline-variant bg-surface-container rounded-DEFAULT h-64 flex items-center justify-center">
+<span class="text-on-surface-variant font-label-caps text-label-caps">Drop Target A</span>
+</div>
+<div class="p-lg border border-outline-variant bg-surface-container rounded-DEFAULT h-64 flex items-center justify-center">
+<span class="text-on-surface-variant font-label-caps text-label-caps">Drop Target B</span>
+</div>
+</div>
+</div>
+</main>
+</div>
+<!-- Modal Overlay (File Picker) -->
+<div class="fixed inset-0 z-[100] flex items-center justify-center bg-surface-container-lowest/80 backdrop-blur-md p-lg">
+<!-- File Picker Panel -->
+<div class="w-full max-w-4xl bg-surface-container border border-outline-variant rounded-DEFAULT flex flex-col h-[716px] shadow-2xl overflow-hidden">
+<!-- Modal Header -->
+<div class="flex items-center justify-between p-md border-b border-outline-variant bg-surface-container-highest">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary" data-icon="folder_open">folder_open</span>
+<h2 class="font-label-caps text-label-caps text-on-background">Select Source Data</h2>
+</div>
+<div class="flex items-center gap-md">
+<span class="font-metadata-sm text-metadata-sm text-on-surface-variant">/volumes/astro_data/M42_Orion/</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors p-xs"><span class="material-symbols-outlined text-[18px]" data-icon="close">close</span></button>
+</div>
+</div>
+<!-- Toolbar -->
+<div class="flex items-center gap-md p-sm border-b border-outline-variant bg-surface-container-low">
+<button class="p-xs text-on-surface-variant hover:text-on-background"><span class="material-symbols-outlined text-[20px]" data-icon="arrow_upward">arrow_upward</span></button>
+<div class="h-4 w-px bg-outline-variant"></div>
+<div class="flex gap-sm">
+<button class="px-sm py-xs border border-primary text-primary font-label-caps text-label-caps rounded-sm bg-primary/10">All Files</button>
+<button class="px-sm py-xs border border-outline-variant text-on-surface-variant font-label-caps text-label-caps rounded-sm hover:border-on-surface-variant">.FITS</button>
+<button class="px-sm py-xs border border-outline-variant text-on-surface-variant font-label-caps text-label-caps rounded-sm hover:border-on-surface-variant">.XISF</button>
+<button class="px-sm py-xs border border-outline-variant text-on-surface-variant font-label-caps text-label-caps rounded-sm hover:border-on-surface-variant">.CR2</button>
+</div>
+<div class="ml-auto relative">
+<span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-on-surface-variant text-[16px]" data-icon="search">search</span>
+<input class="bg-surface-container-highest border border-outline-variant rounded-sm pl-8 pr-sm py-xs font-metadata-sm text-metadata-sm text-on-background w-48 focus:border-primary focus:ring-0 focus:outline-none placeholder-on-surface-variant" placeholder="Filter..." type="text"/>
+</div>
+</div>
+<!-- File List area -->
+<div class="flex-1 overflow-y-auto p-sm">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-outline-variant/50">
+<th class="font-label-caps text-label-caps text-on-surface-variant p-sm w-8"></th>
+<th class="font-label-caps text-label-caps text-on-surface-variant p-sm">Name</th>
+<th class="font-label-caps text-label-caps text-on-surface-variant p-sm">Date Modified</th>
+<th class="font-label-caps text-label-caps text-on-surface-variant p-sm">Type</th>
+<th class="font-label-caps text-label-caps text-on-surface-variant p-sm text-right">Size</th>
+</tr>
+</thead>
+<tbody class="font-metadata-sm text-metadata-sm">
+<!-- Row 1: Selected -->
+<tr class="border-b border-outline-variant/20 bg-primary/5 hover:bg-primary/10 cursor-pointer group">
+<td class="p-sm text-center">
+<span class="material-symbols-outlined text-primary text-[18px]" data-icon="check_box" data-weight="fill">check_box</span>
+</td>
+<td class="p-sm flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary text-[18px]" data-icon="image">image</span>
+<span class="text-on-background font-data-viz text-data-viz glow-active p-xs rounded-sm">Light_600s_BIN1_001.fits</span>
+</td>
+<td class="p-sm text-on-surface-variant">2023-11-14 02:23:10</td>
+<td class="p-sm text-on-surface-variant">FITS Image</td>
+<td class="p-sm text-on-surface-variant text-right">32.4 MB</td>
+</tr>
+<!-- Row 2 -->
+<tr class="border-b border-outline-variant/20 hover:bg-surface-variant/30 cursor-pointer">
+<td class="p-sm text-center">
+<span class="material-symbols-outlined text-on-surface-variant text-[18px]" data-icon="check_box_outline_blank">check_box_outline_blank</span>
+</td>
+<td class="p-sm flex items-center gap-sm">
+<span class="material-symbols-outlined text-on-surface-variant text-[18px]" data-icon="image">image</span>
+<span class="text-on-surface">Light_600s_BIN1_002.fits</span>
+</td>
+<td class="p-sm text-on-surface-variant">2023-11-14 02:33:15</td>
+<td class="p-sm text-on-surface-variant">FITS Image</td>
+<td class="p-sm text-on-surface-variant text-right">32.4 MB</td>
+</tr>
+<!-- Row 3 -->
+<tr class="border-b border-outline-variant/20 hover:bg-surface-variant/30 cursor-pointer">
+<td class="p-sm text-center">
+<span class="material-symbols-outlined text-on-surface-variant text-[18px]" data-icon="check_box_outline_blank">check_box_outline_blank</span>
+</td>
+<td class="p-sm flex items-center gap-sm">
+<span class="material-symbols-outlined text-on-surface-variant text-[18px]" data-icon="image">image</span>
+<span class="text-on-surface">Light_600s_BIN1_003.fits</span>
+</td>
+<td class="p-sm text-on-surface-variant">2023-11-14 02:43:20</td>
+<td class="p-sm text-on-surface-variant">FITS Image</td>
+<td class="p-sm text-on-surface-variant text-right">32.4 MB</td>
+</tr>
+<!-- Row 4 Directory -->
+<tr class="border-b border-outline-variant/20 hover:bg-surface-variant/30 cursor-pointer">
+<td class="p-sm text-center">
+<span class="material-symbols-outlined text-on-surface-variant text-[18px] opacity-50" data-icon="check_box_outline_blank">check_box_outline_blank</span>
+</td>
+<td class="p-sm flex items-center gap-sm">
+<span class="material-symbols-outlined text-tertiary-fixed-dim text-[18px]" data-icon="folder" data-weight="fill">folder</span>
+<span class="text-on-surface">Flats_BIN1</span>
+</td>
+<td class="p-sm text-on-surface-variant">2023-11-15 08:12:00</td>
+<td class="p-sm text-on-surface-variant">Directory</td>
+<td class="p-sm text-on-surface-variant text-right">--</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Footer Actions -->
+<div class="p-md border-t border-outline-variant bg-surface-container-highest flex justify-between items-center">
+<div class="font-metadata-sm text-metadata-sm text-on-surface-variant">
+                    1 item selected <span class="mx-xs">|</span> 32.4 MB total
+                </div>
+<div class="flex gap-md">
+<button class="px-lg py-sm border border-outline-variant text-on-background font-label-caps text-label-caps rounded-DEFAULT hover:bg-surface-variant/50 transition-colors">Cancel</button>
+<button class="px-lg py-sm bg-primary text-on-primary font-label-caps text-label-caps rounded-DEFAULT hover:opacity-90 transition-opacity font-bold">Import (1)</button>
+</div>
+</div>
+</div>
+</div>
+</body></html>

@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AstroForge - Global Resource Manager</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;700&amp;family=Inter:wght@400;500;700&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">tailwind.config = {darkMode: "class", theme: {extend: {colors: {primary: "#ffb4a8", error: "#ffb4ab", "error-container": "#93000a", "on-error-container": "#ffdad6", secondary: "#ffb4a8", "surface-dim": "#121414", "surface-container": "#1e2020", "on-background": "#e2e2e2", "on-primary-container": "#5c0100", "secondary-fixed-dim": "#ffb4a8", "on-secondary": "#53211a", "inverse-primary": "#a93627", "on-tertiary-fixed-variant": "#2839a9", "tertiary-container": "#7787f9", "surface-container-highest": "#333535", "on-error": "#690005", "on-primary-fixed": "#410000", "secondary-fixed": "#ffdad5", background: "#121414", "inverse-surface": "#e2e2e2", "on-primary": "#680301", "tertiary-fixed": "#dfe0ff", "on-secondary-container": "#efa196", "surface-bright": "#37393a", "on-secondary-fixed-variant": "#6f362e", surface: "#121414", "on-surface-variant": "#dfbfba", "on-tertiary-container": "#001586", tertiary: "#bcc3ff", "secondary-container": "#6f362e", "primary-fixed-dim": "#ffb4a8", "surface-container-low": "#1a1c1c", "on-primary-fixed-variant": "#881e13", "primary-fixed": "#ffdad4", "inverse-on-surface": "#2f3131", "surface-variant": "#333535", "surface-container-high": "#282a2b", "on-surface": "#e2e2e2", "on-secondary-fixed": "#380c07", "outline-variant": "#58413e", outline: "#a78a86", "on-tertiary-fixed": "#000c60", "surface-container-lowest": "#0c0f0f", "on-tertiary": "#051c93", "tertiary-fixed-dim": "#bcc3ff", "surface-tint": "#ffb4a8", "primary-container": "#ec6653"}, borderRadius: {DEFAULT: "0.125rem", lg: "0.25rem", xl: "0.5rem", full: "0.75rem"}, spacing: {"panel-gutter": "1px", sm: "8px", xl: "40px", lg: "24px", "container-safe": "24px", unit: "4px", xs: "4px", md: "16px"}, fontFamily: {"body-base": ["Inter"], "metadata-sm": ["JetBrains Mono"], "data-viz": ["JetBrains Mono"], "headline-lg-mobile": ["Geist"], "label-caps": ["JetBrains Mono"], "headline-lg": ["Geist"], "display-xl": ["Geist"], headline: ["Geist"], display: ["Geist"], body: ["Inter"], label: ["Space Grotesk"]}, fontSize: {"body-base": ["15px", {lineHeight: "1.6", letterSpacing: "0.01em", fontWeight: "400"}], "metadata-sm": ["12px", {lineHeight: "1.4", fontWeight: "400"}], "data-viz": ["14px", {lineHeight: "1.4", letterSpacing: "0.02em", fontWeight: "500"}], "headline-lg-mobile": ["24px", {lineHeight: "1.2", fontWeight: "600"}], "label-caps": ["11px", {lineHeight: "1", letterSpacing: "0.1em", fontWeight: "700"}], "headline-lg": ["32px", {lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "600"}], "display-xl": ["48px", {lineHeight: "1.1", letterSpacing: "-0.04em", fontWeight: "700"}]}}}};</script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-surface');
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: theme('colors.surface-container-highest');
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: theme('colors.outline-variant');
+        }
+
+        /* Glitch effect for active state */
+        .glow-active {
+            box-shadow: 0 0 8px 0px rgba(255, 180, 168, 0.2);
+            border-color: theme('colors.primary');
+        }
+        
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            background: theme('colors.primary');
+            cursor: pointer;
+            margin-top: -5px;
+            box-shadow: 0 0 4px rgba(255, 180, 168, 0.5);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 2px;
+            cursor: pointer;
+            background: theme('colors.surface-variant');
+            border-radius: 1px;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+<!-- JSON Component: SideNavBar -->
+<nav class="hidden md:flex w-[320px] h-full fixed left-0 top-0 border-r border-outline-variant bg-surface-container-low dark:bg-surface-container-low flex-col h-screen py-lg z-20">
+<!-- Header -->
+<div class="px-md mb-xl flex items-center gap-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-highest flex items-center justify-center overflow-hidden border border-outline-variant">
+<span class="material-symbols-outlined text-primary text-[18px]" data-icon="account_circle">account_circle</span>
+</div>
+<div>
+<h1 class="font-headline-lg text-headline-lg text-primary tracking-tighter text-[20px]">AstroForge</h1>
+<p class="font-metadata-sm text-metadata-sm text-on-surface-variant uppercase tracking-widest text-[10px]">V2.4.0-PRO</p>
+</div>
+</div>
+<!-- CTA -->
+<div class="px-md mb-lg">
+<button class="w-full bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-colors duration-150 rounded py-sm px-md font-label-caps text-label-caps flex items-center justify-center gap-xs active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[16px]" data-icon="add">add</span>
+                NEW SESSION
+            </button>
+</div>
+<!-- Main Navigation -->
+<div class="flex-1 px-md flex flex-col gap-xs">
+<a class="flex items-center gap-sm px-sm py-[6px] rounded hover:bg-surface-container-highest transition-colors duration-150 text-on-surface-variant font-medium active:scale-95 transition-transform group" href="#">
+<span class="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors" data-icon="account_tree">account_tree</span>
+<span class="font-label-caps text-label-caps">Pipeline</span>
+</a>
+<a class="flex items-center gap-sm px-sm py-[6px] rounded hover:bg-surface-container-highest transition-colors duration-150 text-on-surface-variant font-medium active:scale-95 transition-transform group" href="#">
+<span class="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors" data-icon="folder_zip">folder_zip</span>
+<span class="font-label-caps text-label-caps">Library</span>
+</a>
+<a class="flex items-center gap-sm px-sm py-[6px] rounded hover:bg-surface-container-highest transition-colors duration-150 text-on-surface-variant font-medium active:scale-95 transition-transform group" href="#">
+<span class="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors" data-icon="wb_sunny">wb_sunny</span>
+<span class="font-label-caps text-label-caps">Environment</span>
+</a>
+<a class="flex items-center gap-sm px-sm py-[6px] rounded hover:bg-surface-container-highest transition-colors duration-150 text-on-surface-variant font-medium active:scale-95 transition-transform group" href="#">
+<span class="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors" data-icon="query_stats">query_stats</span>
+<span class="font-label-caps text-label-caps">Inspector</span>
+</a>
+</div>
+<!-- Footer Navigation -->
+<div class="px-md mt-auto pt-lg border-t border-outline-variant/30 flex flex-col gap-xs">
+<!-- Active State: Settings -->
+<a class="flex items-center gap-sm px-sm py-[6px] rounded hover:bg-surface-container-highest transition-colors duration-150 text-primary font-bold border-r-2 border-primary bg-secondary-container/20 active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined text-[18px]" data-icon="settings">settings</span>
+<span class="font-label-caps text-label-caps">Settings</span>
+</a>
+<a class="flex items-center gap-sm px-sm py-[6px] rounded hover:bg-surface-container-highest transition-colors duration-150 text-on-surface-variant font-medium active:scale-95 transition-transform group" href="#">
+<span class="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors" data-icon="help_outline">help_outline</span>
+<span class="font-label-caps text-label-caps">Support</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col md:ml-[320px] h-screen bg-background relative overflow-hidden">
+<!-- JSON Component: TopAppBar -->
+<header class="fixed top-0 right-0 left-0 md:left-[320px] h-16 bg-surface/80 backdrop-blur-xl border-b border-outline-variant flex justify-between items-center px-lg w-full z-10">
+<!-- Mobile Brand (Hidden on Desktop) -->
+<div class="md:hidden flex items-center gap-sm">
+<span class="font-headline-lg-mobile text-headline-lg-mobile font-bold text-primary">AstroForge</span>
+</div>
+<!-- Breadcrumbs / Context (Desktop) -->
+<div class="hidden md:flex items-center gap-xs font-metadata-sm text-metadata-sm text-on-surface-variant">
+<span class="hover:text-primary cursor-pointer transition-colors">System</span>
+<span class="material-symbols-outlined text-[14px] opacity-50" data-icon="chevron_right">chevron_right</span>
+<span class="hover:text-primary cursor-pointer transition-colors">Settings</span>
+<span class="material-symbols-outlined text-[14px] opacity-50" data-icon="chevron_right">chevron_right</span>
+<span class="text-on-surface">Resource Manager</span>
+</div>
+<!-- Desktop Top Navigation Links -->
+<nav class="hidden md:flex items-center gap-lg h-full">
+<a class="h-full flex items-center text-on-surface-variant hover:text-primary transition-colors font-body-base text-body-base border-b-2 border-transparent hover:border-primary/50" href="#">Workspaces</a>
+<a class="h-full flex items-center text-on-surface-variant hover:text-primary transition-colors font-body-base text-body-base border-b-2 border-transparent hover:border-primary/50" href="#">Recent</a>
+<a class="h-full flex items-center text-on-surface-variant hover:text-primary transition-colors font-body-base text-body-base border-b-2 border-transparent hover:border-primary/50" href="#">Staging</a>
+</nav>
+<!-- Trailing Actions -->
+<div class="flex items-center gap-md">
+<div class="flex items-center gap-sm border-r border-outline-variant/30 pr-md">
+<button class="w-8 h-8 rounded hover:bg-surface-variant text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]" data-icon="notifications">notifications</span>
+</button>
+<button class="w-8 h-8 rounded hover:bg-surface-variant text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]" data-icon="cloud_upload">cloud_upload</span>
+</button>
+</div>
+<div class="hidden sm:flex items-center gap-xs">
+<button class="px-sm py-xs border border-outline-variant text-on-surface hover:text-primary hover:border-primary transition-colors font-label-caps text-label-caps rounded">EXPORT</button>
+<button class="px-sm py-xs bg-primary text-on-primary hover:bg-primary-container transition-colors font-label-caps text-label-caps rounded">PROCESS</button>
+</div>
+</div>
+</header>
+<!-- Scrollable Canvas -->
+<div class="flex-1 overflow-y-auto pt-[80px] p-md md:p-lg">
+<div class="max-w-7xl mx-auto flex flex-col gap-lg">
+<!-- Page Title -->
+<div class="mb-sm">
+<h2 class="font-headline-lg text-headline-lg text-on-surface">Global Resource Manager</h2>
+<p class="font-body-base text-body-base text-on-surface-variant mt-xs">System Health &amp; Resource Allocation Dashboard</p>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-lg auto-rows-min">
+<!-- TOP ROW: Thermal & Quick Stats (Spans 12, Subgrid 4 cols) -->
+<div class="col-span-1 md:col-span-12 grid grid-cols-2 md:grid-cols-4 gap-md">
+<!-- Stat 1: CPU Temp -->
+<div class="bg-surface-container p-md rounded border border-outline-variant/50 relative overflow-hidden group">
+<div class="absolute inset-0 bg-gradient-to-br from-error/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="flex justify-between items-start mb-sm">
+<span class="font-label-caps text-label-caps text-on-surface-variant">CPU THERMAL</span>
+<span class="material-symbols-outlined text-[16px] text-error" data-icon="device_thermostat">device_thermostat</span>
+</div>
+<div class="flex items-baseline gap-xs">
+<span class="font-display-xl text-display-xl text-on-surface tracking-tighter">72°</span>
+<span class="font-metadata-sm text-metadata-sm text-on-surface-variant">C</span>
+</div>
+<div class="mt-sm h-1 w-full bg-surface-variant rounded-full overflow-hidden">
+<div class="h-full bg-error w-[72%]"></div>
+</div>
+</div>
+<!-- Stat 2: GPU Temp -->
+<div class="bg-surface-container p-md rounded border border-outline-variant/50 relative overflow-hidden group">
+<div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="flex justify-between items-start mb-sm">
+<span class="font-label-caps text-label-caps text-on-surface-variant">GPU THERMAL</span>
+<span class="material-symbols-outlined text-[16px] text-primary" data-icon="device_thermostat">device_thermostat</span>
+</div>
+<div class="flex items-baseline gap-xs">
+<span class="font-display-xl text-display-xl text-on-surface tracking-tighter">64°</span>
+<span class="font-metadata-sm text-metadata-sm text-on-surface-variant">C</span>
+</div>
+<div class="mt-sm h-1 w-full bg-surface-variant rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[64%]"></div>
+</div>
+</div>
+<!-- Stat 3: Fan Speed -->
+<div class="bg-surface-container p-md rounded border border-outline-variant/50 relative overflow-hidden group">
+<div class="flex justify-between items-start mb-sm">
+<span class="font-label-caps text-label-caps text-on-surface-variant">COOLING SYS</span>
+<span class="material-symbols-outlined text-[16px] text-tertiary animate-spin" data-icon="mode_fan" style="animation-duration: 3s;">mode_fan</span>
+</div>
+<div class="flex items-baseline gap-xs">
+<span class="font-display-xl text-display-xl text-on-surface tracking-tighter">2400</span>
+<span class="font-metadata-sm text-metadata-sm text-on-surface-variant">RPM</span>
+</div>
+<div class="mt-sm text-tertiary font-metadata-sm text-metadata-sm">Profile: Aggressive</div>
+</div>
+<!-- Stat 4: Power Draw -->
+<div class="bg-surface-container p-md rounded border border-outline-variant/50 relative overflow-hidden group">
+<div class="flex justify-between items-start mb-sm">
+<span class="font-label-caps text-label-caps text-on-surface-variant">TOTAL DRAW</span>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="bolt">bolt</span>
+</div>
+<div class="flex items-baseline gap-xs">
+<span class="font-display-xl text-display-xl text-on-surface tracking-tighter">450</span>
+<span class="font-metadata-sm text-metadata-sm text-on-surface-variant">W</span>
+</div>
+<div class="mt-sm text-on-surface-variant font-metadata-sm text-metadata-sm border-t border-outline-variant/30 pt-xs mt-xs">Peak: 520W</div>
+</div>
+</div>
+<!-- MIDDLE ROW LEFT: CPU Allocation (Spans 8) -->
+<div class="col-span-1 md:col-span-8 bg-surface-container border border-outline-variant rounded flex flex-col">
+<div class="p-md border-b border-outline-variant/50 flex justify-between items-center">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-[18px] text-primary" data-icon="memory">memory</span>
+<h3 class="font-label-caps text-label-caps text-on-surface">CPU THREAD ALLOCATION</h3>
+</div>
+<span class="font-data-viz text-data-viz text-on-surface-variant">24/32 CORES ACTIVE</span>
+</div>
+<div class="p-md flex-1 flex flex-col gap-lg">
+<!-- Sliders -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-x-lg gap-y-md">
+<!-- BG Tasks -->
+<div>
+<div class="flex justify-between items-end mb-xs">
+<label class="font-metadata-sm text-metadata-sm text-on-surface-variant">Background Tasks</label>
+<span class="font-data-viz text-data-viz text-primary">8 Thr</span>
+</div>
+<div class="relative pt-sm">
+<input class="w-full" max="32" min="2" type="range" value="8"/>
+</div>
+</div>
+<!-- Active Processing -->
+<div>
+<div class="flex justify-between items-end mb-xs">
+<label class="font-metadata-sm text-metadata-sm text-on-surface-variant">Active Pipeline</label>
+<span class="font-data-viz text-data-viz text-primary">16 Thr</span>
+</div>
+<div class="relative pt-sm">
+<input class="w-full" max="32" min="4" type="range" value="16"/>
+</div>
+</div>
+</div>
+<!-- Visualization Area -->
+<div class="mt-auto bg-surface-dim rounded border border-outline-variant/30 h-[120px] relative overflow-hidden flex items-end p-[1px]">
+<!-- Fake Graph Bars -->
+<div class="flex w-full h-full items-end gap-[2px] opacity-70">
+<div class="w-full bg-primary/20 h-[30%] hover:bg-primary/40 transition-colors"></div>
+<div class="w-full bg-primary/30 h-[45%] hover:bg-primary/50 transition-colors"></div>
+<div class="w-full bg-primary/20 h-[25%] hover:bg-primary/40 transition-colors"></div>
+<div class="w-full bg-primary/50 h-[60%] hover:bg-primary/70 transition-colors glow-active"></div>
+<div class="w-full bg-primary/80 h-[90%] hover:bg-primary transition-colors"></div>
+<div class="w-full bg-primary/60 h-[75%] hover:bg-primary/80 transition-colors"></div>
+<div class="w-full bg-primary/40 h-[50%] hover:bg-primary/60 transition-colors"></div>
+<div class="w-full bg-primary/30 h-[35%] hover:bg-primary/50 transition-colors"></div>
+<div class="w-full bg-primary/20 h-[20%] hover:bg-primary/40 transition-colors"></div>
+<div class="w-full bg-primary/40 h-[45%] hover:bg-primary/60 transition-colors"></div>
+<div class="w-full bg-primary/60 h-[70%] hover:bg-primary/80 transition-colors"></div>
+<div class="w-full bg-primary/70 h-[85%] hover:bg-primary transition-colors"></div>
+</div>
+<!-- Overlay Grid -->
+<div class="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none"></div>
+</div>
+</div>
+</div>
+<!-- MIDDLE ROW RIGHT: GPU Management (Spans 4) -->
+<div class="col-span-1 md:col-span-4 bg-surface-container border border-outline-variant rounded flex flex-col">
+<div class="p-md border-b border-outline-variant/50 flex justify-between items-center">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-[18px] text-tertiary" data-icon="developer_board">developer_board</span>
+<h3 class="font-label-caps text-label-caps text-on-surface">VRAM ALLOCATION</h3>
+</div>
+</div>
+<div class="p-md flex-1 flex flex-col">
+<div class="flex items-baseline gap-sm mb-lg">
+<span class="font-headline-lg text-headline-lg text-on-surface">14.2</span>
+<span class="font-metadata-sm text-metadata-sm text-on-surface-variant">/ 24 GB USED</span>
+</div>
+<!-- VRAM Stack Bar -->
+<div class="h-4 w-full flex rounded-sm overflow-hidden mb-md border border-outline-variant/30">
+<div class="h-full bg-tertiary w-[40%]" title="AI Denoise"></div>
+<div class="h-full bg-primary w-[25%]" title="Super-Res"></div>
+<div class="h-full bg-surface-variant w-[10%]" title="UI Render"></div>
+<div class="h-full bg-transparent w-[25%]"></div>
+</div>
+<!-- Legend -->
+<div class="flex flex-col gap-sm">
+<div class="flex items-center justify-between group">
+<div class="flex items-center gap-sm">
+<div class="w-2 h-2 rounded-full bg-tertiary"></div>
+<span class="font-metadata-sm text-metadata-sm text-on-surface">AI Denoise Buffer</span>
+</div>
+<span class="font-data-viz text-data-viz text-on-surface-variant group-hover:text-tertiary transition-colors">9.6 GB</span>
+</div>
+<div class="flex items-center justify-between group">
+<div class="flex items-center gap-sm">
+<div class="w-2 h-2 rounded-full bg-primary"></div>
+<span class="font-metadata-sm text-metadata-sm text-on-surface">Super-Res Context</span>
+</div>
+<span class="font-data-viz text-data-viz text-on-surface-variant group-hover:text-primary transition-colors">6.0 GB</span>
+</div>
+<div class="flex items-center justify-between group">
+<div class="flex items-center gap-sm">
+<div class="w-2 h-2 rounded-full bg-surface-variant"></div>
+<span class="font-metadata-sm text-metadata-sm text-on-surface">UI &amp; Viewport</span>
+</div>
+<span class="font-data-viz text-data-viz text-on-surface-variant">2.4 GB</span>
+</div>
+</div>
+<div class="mt-auto pt-md border-t border-outline-variant/30">
+<div class="flex justify-between items-end mb-xs">
+<label class="font-metadata-sm text-metadata-sm text-on-surface-variant">Global VRAM Limit</label>
+<span class="font-data-viz text-data-viz text-on-surface">90%</span>
+</div>
+<div class="relative pt-xs">
+<input class="w-full" max="100" min="50" type="range" value="90"/>
+</div>
+</div>
+</div>
+</div>
+<!-- BOTTOM ROW: Pipeline & RAM (Spans 12, Subgrid) -->
+<div class="col-span-1 md:col-span-12 grid grid-cols-1 md:grid-cols-3 gap-md">
+<!-- RAM Control (Span 1) -->
+<div class="bg-surface-container border border-outline-variant rounded p-md flex flex-col">
+<div class="flex items-center gap-sm mb-lg">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant" data-icon="storage">storage</span>
+<h3 class="font-label-caps text-label-caps text-on-surface">SYSTEM MEMORY</h3>
+</div>
+<div class="space-y-lg">
+<div>
+<div class="flex justify-between items-end mb-xs">
+<label class="font-metadata-sm text-metadata-sm text-on-surface-variant">Data Cache Limit</label>
+<span class="font-data-viz text-data-viz text-on-surface">64 GB</span>
+</div>
+<div class="relative pt-xs">
+<input class="w-full" max="128" min="16" type="range" value="64"/>
+</div>
+</div>
+<div>
+<div class="flex justify-between items-end mb-xs">
+<label class="font-metadata-sm text-metadata-sm text-on-surface-variant">Tile Buffer Size</label>
+<span class="font-data-viz text-data-viz text-on-surface">4096 px</span>
+</div>
+<div class="flex gap-xs mt-sm">
+<button class="flex-1 py-xs border border-outline-variant text-on-surface-variant hover:border-primary hover:text-primary transition-colors font-metadata-sm text-metadata-sm rounded-sm">2048</button>
+<button class="flex-1 py-xs border border-primary text-primary bg-primary/10 font-metadata-sm text-metadata-sm rounded-sm glow-active">4096</button>
+<button class="flex-1 py-xs border border-outline-variant text-on-surface-variant hover:border-primary hover:text-primary transition-colors font-metadata-sm text-metadata-sm rounded-sm">8192</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Pipeline Priority (Span 2) -->
+<div class="col-span-1 md:col-span-2 bg-surface-container border border-outline-variant rounded flex flex-col">
+<div class="p-md border-b border-outline-variant/50 flex justify-between items-center">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant" data-icon="low_priority">low_priority</span>
+<h3 class="font-label-caps text-label-caps text-on-surface">PIPELINE PRIORITY QUEUE</h3>
+</div>
+<span class="px-xs py-[2px] bg-primary/20 text-primary font-metadata-sm text-metadata-sm rounded border border-primary/30">3 ACTIVE</span>
+</div>
+<div class="flex-1 p-md flex flex-col gap-sm overflow-y-auto">
+<!-- Queue Item 1 -->
+<div class="flex items-center justify-between p-sm border border-outline-variant/30 rounded bg-surface-dim/50 hover:border-primary/50 transition-colors group">
+<div class="flex items-center gap-md">
+<!-- Status Indicator -->
+<div class="w-2 h-2 rounded-full bg-primary" style="box-shadow: 0 0 6px #ffb4a8;"></div>
+<div>
+<div class="font-body-base text-body-base text-on-surface">M42_Orion_Integration_LHaRGB</div>
+<div class="font-metadata-sm text-metadata-sm text-on-surface-variant">Step: Starless Alignment (42%)</div>
+</div>
+</div>
+<div class="flex items-center gap-sm">
+<span class="font-data-viz text-data-viz text-on-surface-variant mr-md">02:14:33 REMAINING</span>
+<!-- Segmented Toggle -->
+<div class="flex bg-surface-variant rounded-sm p-[2px]">
+<button class="px-sm py-xs bg-surface-container-low text-on-surface font-metadata-sm text-metadata-sm rounded-sm shadow-sm border border-outline-variant/30">High Perf</button>
+<button class="px-sm py-xs text-on-surface-variant hover:text-on-surface font-metadata-sm text-metadata-sm rounded-sm transition-colors">Background</button>
+</div>
+</div>
+</div>
+<!-- Queue Item 2 -->
+<div class="flex items-center justify-between p-sm border border-outline-variant/30 rounded bg-surface-dim/50 hover:border-outline transition-colors group">
+<div class="flex items-center gap-md">
+<div class="w-2 h-2 rounded-full bg-surface-variant"></div>
+<div>
+<div class="font-body-base text-body-base text-on-surface">NGC7000_Mosaic_Panel_A</div>
+<div class="font-metadata-sm text-metadata-sm text-on-surface-variant">Status: Queued for Denoise</div>
+</div>
+</div>
+<div class="flex items-center gap-sm">
+<span class="font-data-viz text-data-viz text-on-surface-variant opacity-50 mr-md">--:--:-- REMAINING</span>
+<!-- Segmented Toggle -->
+<div class="flex bg-surface-variant rounded-sm p-[2px]">
+<button class="px-sm py-xs text-on-surface-variant hover:text-on-surface font-metadata-sm text-metadata-sm rounded-sm transition-colors">High Perf</button>
+<button class="px-sm py-xs bg-surface-container-low text-on-surface font-metadata-sm text-metadata-sm rounded-sm shadow-sm border border-outline-variant/30">Background</button>
+</div>
+</div>
+</div>
+<!-- Queue Item 3 -->
+<div class="flex items-center justify-between p-sm border border-outline-variant/30 rounded bg-surface-dim/50 hover:border-outline transition-colors group">
+<div class="flex items-center gap-md">
+<div class="w-2 h-2 rounded-full bg-surface-variant"></div>
+<div>
+<div class="font-body-base text-body-base text-on-surface">Calibration_Masters_Gen2</div>
+<div class="font-metadata-sm text-metadata-sm text-on-surface-variant">Status: Paused (User)</div>
+</div>
+</div>
+<div class="flex items-center gap-sm">
+<!-- Segmented Toggle -->
+<div class="flex bg-surface-variant rounded-sm p-[2px] opacity-50 pointer-events-none">
+<button class="px-sm py-xs text-on-surface-variant font-metadata-sm text-metadata-sm rounded-sm">High Perf</button>
+<button class="px-sm py-xs bg-surface-container-low text-on-surface font-metadata-sm text-metadata-sm rounded-sm border border-outline-variant/30">Background</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

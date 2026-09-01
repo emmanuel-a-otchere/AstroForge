@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ASTROFORGE - Hardware Setup</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#ffb4a9",
+                        "surface-tint": "#ffb4a9",
+                        "on-primary": "#552119",
+                        "primary-container": "#72362c",
+                        "on-primary-container": "#ffdad5",
+                        "secondary": "#e7bdb7",
+                        "on-secondary": "#442926",
+                        "secondary-container": "#5d3f3b",
+                        "on-secondary-container": "#ffdad5",
+                        "tertiary": "#d5c3aa",
+                        "on-tertiary": "#392e1d",
+                        "tertiary-container": "#504432",
+                        "on-tertiary-container": "#f2dfc5",
+                        "error": "#ffb4ab",
+                        "on-error": "#690005",
+                        "error-container": "#93000a",
+                        "on-error-container": "#ffdad6",
+                        "background": "#121414",
+                        "on-background": "#e2e2e2",
+                        "surface": "#121414",
+                        "on-surface": "#e2e2e2",
+                        "surface-variant": "#4d4442",
+                        "on-surface-variant": "#d0c4c2",
+                        "outline": "#998f8d",
+                        "outline-variant": "#4d4442",
+                        "shadow": "#000000",
+                        "scrim": "#000000",
+                        "inverse-surface": "#e2e2e2",
+                        "inverse-on-surface": "#303030",
+                        "inverse-primary": "#8f4c41",
+                        "primary-fixed": "#ffdad5",
+                        "on-primary-fixed": "#3b0904",
+                        "primary-fixed-dim": "#ffb4a9",
+                        "on-primary-fixed-variant": "#72362c",
+                        "secondary-fixed": "#ffdad5",
+                        "on-secondary-fixed": "#2c1512",
+                        "secondary-fixed-dim": "#e7bdb7",
+                        "on-secondary-fixed-variant": "#5d3f3b",
+                        "tertiary-fixed": "#f2dfc5",
+                        "on-tertiary-fixed": "#231a0a",
+                        "tertiary-fixed-dim": "#d5c3aa",
+                        "on-tertiary-fixed-variant": "#504432",
+                        "surface-dim": "#121414",
+                        "surface-bright": "#37393a",
+                        "surface-container-lowest": "#0c0f0f",
+                        "surface-container-low": "#1a1c1c",
+                        "surface-container": "#1e2020",
+                        "surface-container-high": "#282a2a",
+                        "surface-container-highest": "#333535",
+                        "brand-accent": "#cb4e3d"
+                    },
+                    "borderRadius": {
+                        "none": "0",
+                        "sm": "0.125rem",
+                        "DEFAULT": "0.25rem",
+                        "md": "0.375rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "2xl": "1rem",
+                        "3xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "sans": ["Geist", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .material-symbols-outlined[data-weight="fill"] {
+            font-variation-settings: 'FILL' 1;
+        }
+        
+        /* Custom scrollbar for webkit */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: theme('colors.surface-container-lowest');
+        }
+        ::-webkit-scrollbar-thumb {
+            background: theme('colors.outline-variant');
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: theme('colors.brand-accent');
+        }
+
+        .glow-accent {
+            box-shadow: 0 0 12px rgba(203, 78, 61, 0.3);
+        }
+    </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface font-sans h-screen overflow-hidden flex flex-col antialiased">
+<!-- TopAppBar -->
+<header class="bg-surface-container-lowest docked full-width top-0 border-b border-outline-variant shadow-[0_0_12px_rgba(203,78,61,0.15)] flex justify-between items-center w-full px-4 h-16 z-50 shrink-0">
+<div class="flex items-center gap-4">
+<span class="font-sans text-2xl font-bold tracking-tighter text-brand-accent uppercase">ASTROFORGE</span>
+</div>
+<div class="flex-1 flex justify-center max-w-md hidden md:flex">
+<div class="relative w-full max-w-xs text-on-surface-variant group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px]">search</span>
+<input class="w-full bg-surface-container border border-outline-variant rounded pl-9 pr-4 py-1.5 font-mono text-[11px] font-bold uppercase tracking-widest focus:outline-none focus:border-brand-accent focus:ring-1 focus:ring-brand-accent transition-colors" placeholder="Command Palette..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-on-surface-variant hover:text-brand-accent hover:bg-surface-container-high transition-colors duration-100 rounded active:scale-95">
+<span class="material-symbols-outlined">sensors</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-brand-accent hover:bg-surface-container-high transition-colors duration-100 rounded active:scale-95">
+<span class="material-symbols-outlined">satellite_alt</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-brand-accent hover:bg-surface-container-high transition-colors duration-100 rounded active:scale-95">
+<span class="material-symbols-outlined">settings_input_component</span>
+</button>
+<button class="ml-4 px-4 py-1.5 bg-brand-accent text-white font-mono text-[11px] font-bold uppercase tracking-widest rounded hover:bg-primary transition-colors flex items-center gap-2 active:scale-95">
+                EXECUTE <span class="material-symbols-outlined text-[16px]">play_arrow</span>
+</button>
+<div class="ml-4 h-8 w-8 rounded-full bg-surface-bright border border-outline-variant overflow-hidden">
+<img alt="Chief Operator Avatar" class="w-full h-full object-cover" data-alt="A futuristic avatar of a chief system operator in a deep space monitoring facility. The avatar is highly stylized, wearing a sleek, dark high-tech suit with subtle glowing cyan accents. The background is a blurred array of complex data screens in a dimly lit, obsidian-toned command center. The lighting is cold and precise, emphasizing a professional, hyper-functional aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuATj82Ly5LrJOxcgS28c_Q3BKeCpQD8a-yt4MfdXDh2dSB0RlgeSxjXuc4xkhhDZLI5HlrOYG3SkfYx8fsjtz8mKCs0wrhz7bNPyLSUf5riWHPCNs4slZiPhUebiY74aGtt-52pne-RwxAstfV05dDP6iOVJ45ycBIFCxyD7UDzUeMgUgBoag4NRhlQ3jwdXmRDF3OH-eYXSidj8Pel5eJVdaQw2wDClKzM5Md4TpTC04JDbyWRBdI7Xw"/>
+</div>
+</div>
+</header>
+<!-- Main Layout -->
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar (Desktop) -->
+<aside class="bg-surface-container fixed left-0 top-0 h-full w-64 border-r border-outline-variant hidden md:flex flex-col z-40 pt-16">
+<div class="p-4 border-b border-outline-variant flex items-center gap-3">
+<div class="h-10 w-10 rounded bg-surface-container-lowest border border-brand-accent/30 flex items-center justify-center glow-accent">
+<span class="material-symbols-outlined text-brand-accent">rocket_launch</span>
+</div>
+<div>
+<div class="font-mono text-[11px] font-bold uppercase tracking-widest text-brand-accent">ASTROFORGE</div>
+<div class="font-mono text-xs text-on-surface-variant">V3.0.4-STABLE</div>
+</div>
+</div>
+<nav class="flex-1 py-4 flex flex-col gap-1 px-2">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-on-surface-variant hover:bg-surface-container-high hover:text-brand-accent duration-100 ease-in" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest">Pipeline</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-on-surface-variant hover:bg-surface-container-high hover:text-brand-accent duration-100 ease-in" href="#">
+<span class="material-symbols-outlined">folder_special</span>
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest">Library</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-brand-accent border-r-2 border-brand-accent bg-surface-container-highest duration-100 ease-in glow-accent relative" href="#">
+<span class="material-symbols-outlined text-brand-accent">developer_board</span>
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest">Hardware</span>
+<div class="absolute right-2 w-1.5 h-1.5 rounded-full bg-brand-accent animate-pulse"></div>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-on-surface-variant hover:bg-surface-container-high hover:text-brand-accent duration-100 ease-in" href="#">
+<span class="material-symbols-outlined">biotech</span>
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest">Master Lab</span>
+</a>
+</nav>
+<div class="p-4 border-t border-outline-variant">
+<button class="w-full py-2 bg-transparent border border-brand-accent text-brand-accent font-mono text-[11px] font-bold uppercase tracking-widest rounded hover:bg-brand-accent/10 transition-colors flex justify-center items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">add</span> NEW CAPTURE
+                </button>
+</div>
+<div class="p-2 border-t border-outline-variant flex flex-col gap-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:bg-surface-container-high hover:text-brand-accent font-mono text-xs" href="#">
+<span class="material-symbols-outlined text-[16px]">help</span> Docs
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:bg-surface-container-high hover:text-error font-mono text-xs" href="#">
+<span class="material-symbols-outlined text-[16px]">logout</span> Logout
+                </a>
+</div>
+</aside>
+<!-- Canvas -->
+<main class="flex-1 md:ml-64 bg-surface-container-lowest flex flex-col overflow-y-auto p-4 gap-4 h-[calc(100vh-4rem)]">
+<!-- Header -->
+<div class="flex items-center justify-between">
+<div>
+<h1 class="font-sans text-3xl font-semibold tracking-tight">Hardware Setup</h1>
+<p class="font-mono text-xs text-on-surface-variant mt-1">Environmental telemetry &amp; optical configuration.</p>
+</div>
+<div class="flex items-center gap-3">
+<div class="flex items-center gap-2 px-3 py-1 bg-surface-container border border-outline-variant rounded">
+<div class="w-2 h-2 rounded-full bg-brand-accent animate-pulse"></div>
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest text-brand-accent">SYSTEM ONLINE</span>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4 flex-1 min-h-0">
+<!-- Main Central Visual (M42) -->
+<div class="xl:col-span-2 bg-surface-container border border-outline-variant rounded flex flex-col overflow-hidden relative">
+<div class="px-4 py-2 border-b border-outline-variant bg-surface-bright flex justify-between items-center">
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest">OPTICAL FEED</span>
+<div class="flex gap-2">
+<button class="text-on-surface-variant hover:text-brand-accent"><span class="material-symbols-outlined text-[18px]">fullscreen</span></button>
+</div>
+</div>
+<div class="flex-1 relative bg-black flex items-center justify-center overflow-hidden group">
+<!-- Simulated Reticle / HUD Elements -->
+<div class="absolute inset-0 pointer-events-none z-10 p-4 flex flex-col justify-between">
+<div class="flex justify-between w-full">
+<div class="w-8 h-8 border-t-2 border-l-2 border-brand-accent/50"></div>
+<div class="w-8 h-8 border-t-2 border-r-2 border-brand-accent/50"></div>
+</div>
+<div class="flex justify-center">
+<div class="w-32 h-32 border border-brand-accent/30 rounded-full flex items-center justify-center">
+<div class="w-1 h-1 bg-brand-accent rounded-full"></div>
+</div>
+</div>
+<div class="flex justify-between w-full">
+<div class="w-8 h-8 border-b-2 border-l-2 border-brand-accent/50"></div>
+<div class="w-8 h-8 border-b-2 border-r-2 border-brand-accent/50"></div>
+</div>
+</div>
+<!-- Reference Image -->
+<div class="absolute inset-0 w-full h-full opacity-80" data-alt="A highly detailed, deep space astrophotography image of the M42 Orion Nebula. The image is rendered with a technical, high-contrast aesthetic suitable for a telemetry dashboard. Deep blacks dominate the background, while the nebula itself exhibits glowing, ethereal structures in muted cyans, deep blues, and subtle magenta tones. The lighting simulates a raw sensor feed with slight film grain, emphasizing scientific realism over artistic embellishment." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAj9gJ13uDW4Iv5XLg9AA-TFkeK7ofgZq-g6tEjKlIZkddaobyqLNmBH-z4wE6kjvHd_ZPCU2RZc2PCm4wuZzeGOvbG7XKLzqHZpcuLgQsyYWLfpQ2WrgGMIlsO8ICMLS1VrM9wKIpFo83HtKJF5BFTgOh_wc4XqbJDt2QI1YJQlmWtqDaz8cWtvsjZEzYTuwxDRoayQq0r7TFFZM2y9S8Pxm1vpNtPtGzxoZ9pvOMWExNZLxBmYuYD7g')"></div>
+<!-- Overlay telemetry -->
+<div class="absolute bottom-4 left-4 font-mono text-sm font-medium tracking-wide text-brand-accent bg-surface-container-lowest/80 px-2 py-1 rounded border border-outline-variant">
+                            RA: 05h 35m 17s | DEC: -05° 23′ 28″
+                        </div>
+</div>
+</div>
+<!-- Right Panel: Environment & Filters -->
+<div class="bg-surface-container border border-outline-variant rounded flex flex-col overflow-y-auto">
+<div class="px-4 py-2 border-b border-outline-variant bg-surface-bright">
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest">ENVIRONMENTAL PROFILE</span>
+</div>
+<div class="p-4 flex flex-col gap-6">
+<!-- Bortle Scale -->
+<div>
+<div class="flex justify-between items-end mb-2">
+<label class="font-mono text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">SKY QUALITY (BORTLE)</label>
+<span class="font-mono text-sm font-medium tracking-wide text-brand-accent">Class 4</span>
+</div>
+<div class="h-2 w-full bg-surface-container-lowest rounded-full overflow-hidden flex">
+<div class="h-full bg-secondary-fixed/30 flex-1"></div>
+<div class="h-full bg-secondary-fixed/50 flex-1"></div>
+<div class="h-full bg-tertiary-fixed-dim/70 flex-1"></div>
+<div class="h-full bg-brand-accent flex-1 glow-accent relative">
+<div class="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-3 bg-white rounded-sm"></div>
+</div>
+<div class="h-full bg-surface-variant flex-1"></div>
+<div class="h-full bg-surface-variant flex-1"></div>
+<div class="h-full bg-surface-variant flex-1"></div>
+<div class="h-full bg-surface-variant flex-1"></div>
+<div class="h-full bg-surface-variant flex-1"></div>
+</div>
+<div class="flex justify-between mt-1 font-mono text-xs text-outline">
+<span>1 (Dark)</span>
+<span>9 (City)</span>
+</div>
+</div>
+<hr class="border-outline-variant"/>
+<!-- Filter Wheel -->
+<div>
+<label class="font-mono text-[11px] font-bold uppercase tracking-widest text-on-surface-variant block mb-3">ACTIVE FILTER SLOT</label>
+<div class="grid grid-cols-2 gap-2">
+<button class="bg-surface-container-lowest border border-outline-variant rounded p-2 text-left hover:border-brand-accent transition-colors">
+<div class="font-mono text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">SLOT 1</div>
+<div class="font-mono text-sm font-medium tracking-wide mt-1">Luminance</div>
+</button>
+<button class="bg-surface-container-high border border-brand-accent rounded p-2 text-left glow-accent relative overflow-hidden">
+<div class="absolute inset-0 bg-brand-accent/10"></div>
+<div class="font-mono text-[11px] font-bold uppercase tracking-widest text-brand-accent relative z-10">SLOT 2</div>
+<div class="font-mono text-sm font-medium tracking-wide mt-1 relative z-10">H-Alpha 7nm</div>
+</button>
+<button class="bg-surface-container-lowest border border-outline-variant rounded p-2 text-left hover:border-brand-accent transition-colors">
+<div class="font-mono text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">SLOT 3</div>
+<div class="font-mono text-sm font-medium tracking-wide mt-1">OIII 6.5nm</div>
+</button>
+<button class="bg-surface-container-lowest border border-outline-variant rounded p-2 text-left hover:border-brand-accent transition-colors">
+<div class="font-mono text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">SLOT 4</div>
+<div class="font-mono text-sm font-medium tracking-wide mt-1">SII 6.5nm</div>
+</button>
+</div>
+</div>
+<hr class="border-outline-variant"/>
+<!-- Atmosphere -->
+<div>
+<label class="font-mono text-[11px] font-bold uppercase tracking-widest text-on-surface-variant block mb-3">ATMOSPHERICS</label>
+<div class="space-y-3">
+<div class="flex justify-between items-center p-2 bg-surface-container-lowest border border-outline-variant rounded">
+<span class="font-mono text-xs">Seeing</span>
+<span class="font-mono text-sm font-medium tracking-wide text-brand-accent">1.2" (Good)</span>
+</div>
+<div class="flex justify-between items-center p-2 bg-surface-container-lowest border border-outline-variant rounded">
+<span class="font-mono text-xs">Transparency</span>
+<span class="font-mono text-sm font-medium tracking-wide text-primary-fixed">Above Avg</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Technical Panel -->
+<div class="bg-surface-container border border-outline-variant rounded h-40 shrink-0 flex flex-col">
+<div class="px-4 py-2 border-b border-outline-variant bg-surface-bright flex justify-between items-center h-8">
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest">SENSOR METADATA SYNC</span>
+<button class="font-mono text-xs text-brand-accent hover:underline">SYNC NOW</button>
+</div>
+<div class="flex-1 p-4 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+<!-- Gain Control -->
+<div class="flex flex-col gap-2">
+<div class="flex justify-between">
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">GAIN (e-/ADU)</span>
+<span class="font-mono text-sm font-medium tracking-wide text-brand-accent">120</span>
+</div>
+<div class="relative w-full h-6 flex items-center">
+<div class="absolute w-full h-0.5 bg-outline-variant rounded"></div>
+<div class="absolute h-0.5 bg-brand-accent rounded" style="width: 40%;"></div>
+<div class="absolute w-3 h-4 bg-surface-container-lowest border-2 border-brand-accent cursor-pointer shadow-[0_0_8px_rgba(203,78,61,0.4)]" style="left: 40%; transform: translateX(-50%);"></div>
+</div>
+<div class="flex justify-between font-mono text-xs text-outline">
+<span>0</span>
+<span>Unity</span>
+<span>300</span>
+</div>
+</div>
+<!-- Offset Control -->
+<div class="flex flex-col gap-2">
+<div class="flex justify-between">
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">OFFSET</span>
+<span class="font-mono text-sm font-medium tracking-wide text-brand-accent">30</span>
+</div>
+<div class="relative w-full h-6 flex items-center">
+<div class="absolute w-full h-0.5 bg-outline-variant rounded"></div>
+<div class="absolute h-0.5 bg-brand-accent rounded" style="width: 20%;"></div>
+<div class="absolute w-3 h-4 bg-surface-container-lowest border-2 border-brand-accent cursor-pointer shadow-[0_0_8px_rgba(203,78,61,0.4)]" style="left: 20%; transform: translateX(-50%);"></div>
+</div>
+<div class="flex justify-between font-mono text-xs text-outline">
+<span>0</span>
+<span>50</span>
+<span>100</span>
+</div>
+</div>
+<!-- Temperature -->
+<div class="flex flex-col gap-2">
+<div class="flex justify-between">
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">COOLING SETPOINT</span>
+<span class="font-mono text-sm font-medium tracking-wide text-brand-accent">-10.0 °C</span>
+</div>
+<div class="flex items-center gap-4 bg-surface-container-lowest p-2 border border-outline-variant rounded">
+<div class="flex-1 flex flex-col">
+<span class="font-mono text-xs text-outline">Current Temp</span>
+<span class="font-mono text-sm font-medium tracking-wide">-9.8 °C</span>
+</div>
+<div class="flex-1 flex flex-col border-l border-outline-variant pl-4">
+<span class="font-mono text-xs text-outline">Power</span>
+<span class="font-mono text-sm font-medium tracking-wide text-primary-fixed">45%</span>
+</div>
+<div class="w-8 h-8 rounded-full border-2 border-brand-accent flex items-center justify-center bg-brand-accent/10">
+<span class="material-symbols-outlined text-brand-accent text-[16px]">ac_unit</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+<!-- BottomNavBar (Mobile) -->
+<nav class="lg:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-2 bg-surface-container-lowest docked full-width rounded-t-lg border-t border-outline-variant shadow-[0_-4px_12px_rgba(203,78,61,0.2)] pb-6">
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-brand-accent" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest mt-1">Pipeline</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-brand-accent" href="#">
+<span class="material-symbols-outlined">folder_special</span>
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest mt-1">Library</span>
+</a>
+<a class="flex flex-col items-center justify-center text-brand-accent bg-surface-container-high rounded-xl p-2 shadow-[0_0_8px_rgba(203,78,61,0.3)] active:scale-90 transition-all duration-100" href="#">
+<span class="material-symbols-outlined" data-weight="fill">developer_board</span>
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest mt-1">Hardware</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-brand-accent" href="#">
+<span class="material-symbols-outlined">biotech</span>
+<span class="font-mono text-[11px] font-bold uppercase tracking-widest mt-1">Lab</span>
+</a>
+</nav>
+</body></html>

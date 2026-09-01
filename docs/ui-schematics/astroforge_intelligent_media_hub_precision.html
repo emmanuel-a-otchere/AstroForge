@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ASTROFORGE - Intelligent Media Hub</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-lowest": "#0c0f0f",
+                        "on-error-container": "#ffdad6",
+                        "on-primary-fixed": "#3b0905",
+                        "on-secondary": "#ffffff",
+                        "tertiary-container": "#7a7768",
+                        "error": "#ffb4ab",
+                        "secondary": "#d4c4b5",
+                        "on-background": "#e1e3e3",
+                        "outline-variant": "#414948",
+                        "background": "#121414",
+                        "on-secondary-fixed-variant": "#5a4d42",
+                        "on-secondary-fixed": "#2b1c12",
+                        "on-primary": "#ffffff",
+                        "inverse-primary": "#cb4e3d",
+                        "on-tertiary-fixed-variant": "#484639",
+                        "on-secondary-container": "#ffede0",
+                        "tertiary-fixed-dim": "#cbc7b6",
+                        "obsidian-base": "#0c0f0f",
+                        "on-primary-fixed-variant": "#711f13",
+                        "surface-tint": "#cb4e3d",
+                        "primary": "#cb4e3d",
+                        "outline": "#8a9392",
+                        "on-tertiary-fixed": "#1d1b10",
+                        "surface-container-high": "#2b2d2d",
+                        "on-tertiary-container": "#ffffff",
+                        "surface-container-highest": "#363838",
+                        "surface-container": "#1e2020",
+                        "tertiary-fixed": "#e8e3d1",
+                        "on-tertiary": "#343226",
+                        "on-error": "#690005",
+                        "on-surface": "#e1e3e3",
+                        "surface-variant": "#404948",
+                        "primary-container": "#a73323",
+                        "secondary-container": "#5f5145",
+                        "tertiary": "#cbc7b6",
+                        "deep-navy-surface": "#121414",
+                        "on-surface-variant": "#bec9c8",
+                        "surface-dim": "#121414",
+                        "error-container": "#93000a",
+                        "secondary-fixed": "#f2dfd0",
+                        "surface-bright": "#37393a",
+                        "cobalt-accent": "#cb4e3d",
+                        "secondary-fixed-dim": "#d4c4b5",
+                        "surface-container-low": "#1a1c1c",
+                        "steel-outline": "#414948",
+                        "primary-fixed-dim": "#ffb4a9",
+                        "inverse-on-surface": "#2f3131",
+                        "inverse-surface": "#e1e3e3",
+                        "primary-fixed": "#ffdad5",
+                        "on-primary-container": "#ffffff",
+                        "surface": "#121414"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "lg": "24px",
+                        "unit": "4px",
+                        "safe-area": "24px",
+                        "gutter": "1px",
+                        "md": "16px",
+                        "sm": "8px",
+                        "xs": "4px",
+                        "xl": "40px"
+                    },
+                    "fontFamily": {
+                        "headline-lg-mobile": ["Geist"],
+                        "metadata-sm": ["JetBrains Mono"],
+                        "headline-lg": ["Geist"],
+                        "body-base": ["Geist"],
+                        "label-caps": ["Geist"],
+                        "display-xl": ["Geist"],
+                        "data-viz": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "headline-lg-mobile": ["24px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "metadata-sm": ["12px", { "lineHeight": "1.4", "fontWeight": "400" }],
+                        "headline-lg": ["26px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "body-base": ["15px", { "lineHeight": "1.6", "letterSpacing": "0.01em", "fontWeight": "400" }],
+                        "label-caps": ["11px", { "lineHeight": "1", "letterSpacing": "0.1em", "fontWeight": "700" }],
+                        "display-xl": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.04em", "fontWeight": "700" }],
+                        "data-viz": ["14px", { "lineHeight": "1.4", "letterSpacing": "0.02em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<style>
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-400-normal.woff2') format('woff2');
+            font-weight: 400;
+            font-style: normal;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-600-normal.woff2') format('woff2');
+            font-weight: 600;
+            font-style: normal;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-700-normal.woff2') format('woff2');
+            font-weight: 700;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0c0f0f;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #414948;
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #cb4e3d;
+        }
+
+        .luminescent-glow {
+            box-shadow: 0 0 12px rgba(203, 78, 61, 0.3);
+        }
+    </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface font-body-base text-body-base h-screen overflow-hidden flex flex-col md:flex-row">
+<!-- TopAppBar (Mobile Only) -->
+<header class="md:hidden bg-surface-container-lowest dark:bg-surface-container-lowest border-b border-steel-outline shadow-[0_0_12px_rgba(203,78,61,0.15)] flex justify-between items-center w-full px-md h-16 z-50">
+<div class="flex items-center gap-unit">
+<span class="material-symbols-outlined text-cobalt-accent">satellite_alt</span>
+<h1 class="font-headline-lg-mobile text-[19px] font-semibold tracking-tighter text-cobalt-accent">ASTROFORGE</h1>
+</div>
+<div class="flex items-center gap-md text-on-surface-variant">
+<span class="material-symbols-outlined hover:text-cobalt-accent cursor-pointer">sensors</span>
+<span class="material-symbols-outlined hover:text-cobalt-accent cursor-pointer">settings_input_component</span>
+<img alt="Chief Operator Avatar" class="w-8 h-8 rounded-full border border-steel-outline object-cover" data-alt="A futuristic avatar of a chief operator, rendered in a high-tech minimalist style. The portrait features deep obsidian shadows and intense, cool-toned cyan highlights reflecting off advanced ocular augments, set against a dark void background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCgvnkzoa00A0Y9S2EM7o_iCmB1RixJ2w07eLEJWir8RqtnaC9f5zEToRh7C_NKtmrd-ryuXc-ZwvWjZ4zsRPgyHUNK4zp9RQ3tDslT_koRswtJ39fjoLAmo3hAs2vhjrRJN0UbP_RcwqLfd9lexHXtYvpk5iSaPT331EnJMeS0bIBzd98_cbNPBj5nrpTiLkRjeTim-8yVVco1dIF4q8Vo4vuTWMyQiUZH49wOMmDZ965LdSkH2ASRVg"/>
+</div>
+</header>
+<!-- SideNavBar (Desktop Only) -->
+<nav class="hidden md:flex bg-deep-navy-surface dark:bg-deep-navy-surface border-r border-steel-outline fixed left-0 top-0 h-full w-64 flex-col z-50">
+<div class="p-md border-b border-steel-outline flex items-center gap-md">
+<div class="w-10 h-10 rounded-full border border-cobalt-accent flex items-center justify-center bg-surface-container-lowest relative overflow-hidden">
+<span class="material-symbols-outlined text-cobalt-accent text-lg">public</span>
+<div class="absolute inset-0 bg-cobalt-accent/10 animate-pulse"></div>
+</div>
+<div>
+<h1 class="font-headline-lg text-[26px] font-semibold text-cobalt-accent tracking-tighter leading-none">ASTROFORGE</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant mt-1">V3.0.4-STABLE</p>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto py-md flex flex-col gap-unit">
+<a class="flex items-center gap-md px-md py-sm text-on-surface-variant hover:bg-surface-container-high hover:text-cobalt-accent transition-colors duration-100 ease-in" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+<span class="font-label-caps text-label-caps">Pipeline</span>
+</a>
+<a class="flex items-center gap-md px-md py-sm text-cobalt-accent border-r-2 border-cobalt-accent bg-surface-container-highest transition-colors duration-100 ease-in" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">folder_special</span>
+<span class="font-label-caps text-label-caps font-bold">Library</span>
+</a>
+<a class="flex items-center gap-md px-md py-sm text-on-surface-variant hover:bg-surface-container-high hover:text-cobalt-accent transition-colors duration-100 ease-in" href="#">
+<span class="material-symbols-outlined">developer_board</span>
+<span class="font-label-caps text-label-caps">Hardware</span>
+</a>
+<a class="flex items-center gap-md px-md py-sm text-on-surface-variant hover:bg-surface-container-high hover:text-cobalt-accent transition-colors duration-100 ease-in" href="#">
+<span class="material-symbols-outlined">biotech</span>
+<span class="font-label-caps text-label-caps">Master Lab</span>
+</a>
+</div>
+<div class="p-md border-t border-steel-outline flex flex-col gap-unit">
+<button class="w-full bg-cobalt-accent text-on-primary font-label-caps text-label-caps py-sm rounded-sm hover:bg-primary transition-colors flex items-center justify-center gap-unit shadow-[0_0_12px_rgba(203,78,61,0.2)]">
+<span class="material-symbols-outlined text-[16px]">add</span> NEW CAPTURE
+            </button>
+<div class="flex justify-between mt-sm">
+<a class="text-on-surface-variant hover:text-cobalt-accent flex items-center gap-unit" href="#"><span class="material-symbols-outlined text-[16px]">help</span><span class="font-label-caps text-label-caps">Docs</span></a>
+<a class="text-on-surface-variant hover:text-cobalt-accent flex items-center gap-unit" href="#"><span class="material-symbols-outlined text-[16px]">logout</span><span class="font-label-caps text-label-caps">Logout</span></a>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-full md:ml-64 w-full bg-surface-container-lowest">
+<!-- Toolbar / Header -->
+<div class="h-16 border-b border-steel-outline bg-deep-navy-surface flex items-center justify-between px-md shrink-0">
+<div class="flex items-center gap-md">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">search</span>
+<input class="bg-surface-container-lowest border border-steel-outline rounded-sm pl-xl pr-md py-sm text-metadata-sm font-metadata-sm text-on-surface focus:outline-none focus:border-cobalt-accent focus:ring-1 focus:ring-cobalt-accent w-64 md:w-96 transition-all" placeholder="QUERY FITS ARCHIVE..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-unit">
+<button class="flex items-center gap-xs px-sm py-xs border border-steel-outline bg-surface-container text-on-surface-variant rounded-sm hover:border-cobalt-accent hover:text-cobalt-accent transition-colors font-label-caps text-label-caps">
+<span class="material-symbols-outlined text-[16px]">filter_list</span> FILTER
+                </button>
+<button class="flex items-center gap-xs px-sm py-xs border border-steel-outline bg-surface-container text-on-surface-variant rounded-sm hover:border-cobalt-accent hover:text-cobalt-accent transition-colors font-label-caps text-label-caps">
+<span class="material-symbols-outlined text-[16px]">sort</span> SORT: DATE
+                </button>
+<div class="w-px h-6 bg-steel-outline mx-xs"></div>
+<button class="text-cobalt-accent bg-surface-container p-xs rounded-sm border border-cobalt-accent luminescent-glow">
+<span class="material-symbols-outlined text-[18px]">grid_view</span>
+</button>
+<button class="text-on-surface-variant hover:text-cobalt-accent p-xs">
+<span class="material-symbols-outlined text-[18px]">view_list</span>
+</button>
+</div>
+</div>
+<!-- Layout Grid -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Library Grid (Left) -->
+<div class="flex-1 overflow-y-auto p-gutter bg-surface-container-lowest grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-gutter content-start">
+<!-- Grid Item 1 (Active) -->
+<div class="relative bg-deep-navy-surface border border-cobalt-accent group cursor-pointer h-48 flex flex-col luminescent-glow z-10">
+<div class="absolute inset-0 bg-cobalt-accent/5 pointer-events-none"></div>
+<div class="flex-1 relative overflow-hidden bg-surface-container-lowest">
+<img alt="FITS preview" class="absolute inset-0 w-full h-full object-cover opacity-80" data-alt="A deep space nebula captured through a specialized narrowband filter, rendered in a striking monochrome astrophotography style. Wisps of interstellar gas form intricate, delicate structures against an absolute black void. The image has a scientific, high-contrast, technical appearance." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAg2gSNTUhDnRcigJT_dTPnLcWWmeYfjnIOMjMA_WSa4o0Lad_Lhz-sDMwjMz0ueFAyBASqaOe5yPikEkMFksEQ6kLh97sWDljVH5lV94uAYIn9KkZ95flOvfwLb9NRo8fqv25kQj6K-W90MoWTl4orvzqAaBEFyGLIR6DkucSx7noO3vSdABQZ1XSJ0HXfLj2ncy8GLoP-ETTCg8uWHORt8SObk7b7_udYnJ-W210L5qrZiqmzAt3aLQ"/>
+<div class="absolute top-sm left-sm bg-surface-container-lowest/80 border border-cobalt-accent px-xs py-[2px] rounded-sm flex items-center gap-xs backdrop-blur-sm">
+<div class="w-1.5 h-1.5 rounded-full bg-cobalt-accent animate-pulse"></div>
+<span class="font-metadata-sm text-metadata-sm text-cobalt-accent text-[9px]">LOCKED</span>
+</div>
+</div>
+<div class="h-12 border-t border-steel-outline bg-deep-navy-surface px-sm py-xs flex flex-col justify-center">
+<div class="font-metadata-sm text-metadata-sm text-on-surface truncate">NGC-7293_Ha_001.fits</div>
+<div class="flex justify-between items-center mt-[2px]">
+<span class="font-label-caps text-label-caps text-on-surface-variant text-[9px]">2048x2048 • 16-BIT</span>
+<span class="font-metadata-sm text-metadata-sm text-outline text-[10px]">12.4 MB</span>
+</div>
+</div>
+</div>
+<!-- Grid Item 2 -->
+<div class="relative bg-deep-navy-surface border border-steel-outline group cursor-pointer h-48 flex flex-col hover:border-cobalt-accent/50 transition-colors">
+<div class="flex-1 relative overflow-hidden bg-surface-container-lowest">
+<img alt="FITS preview" class="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:opacity-80 transition-opacity" data-alt="A raw, noisy astronomical image showing a dense star field in monochrome. The stars appear as sharp, varying points of light against a deep black background. The image has a raw, unprocessed technical quality typical of raw sensor data." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDKxsmIC6db3uYkbsfP7W_7Rmh39G7Xu9HwJ8PTJnoBPKv6Gybc7sX-90eTNpma9GaDtkkhTjEUxQvYXxJSZ_OEWhpIRpDr2xW_2CxLqnOX-tHBjU-z1uhdL-YHHTIxQb7dQqjoK6UPHVlKpW-aekVdXnNsrAqFa_JRAeA335valxyrZ1--oYk0R3pjZsR1_omSVSL5WdYYkqbGEWyAbDF8cJlemBV9cs73OfJXl3uPBkU6S_jF0xpqIg"/>
+</div>
+<div class="h-12 border-t border-steel-outline bg-deep-navy-surface px-sm py-xs flex flex-col justify-center">
+<div class="font-metadata-sm text-metadata-sm text-on-surface truncate">M31_Lum_042.fits</div>
+<div class="flex justify-between items-center mt-[2px]">
+<span class="font-label-caps text-label-caps text-on-surface-variant text-[9px]">4096x4096 • 16-BIT</span>
+<span class="font-metadata-sm text-metadata-sm text-outline text-[10px]">32.1 MB</span>
+</div>
+</div>
+</div>
+<!-- Grid Item 3 -->
+<div class="relative bg-deep-navy-surface border border-steel-outline group cursor-pointer h-48 flex flex-col hover:border-cobalt-accent/50 transition-colors">
+<div class="flex-1 relative overflow-hidden bg-surface-container-lowest flex items-center justify-center">
+<span class="material-symbols-outlined text-outline text-xl opacity-50">broken_image</span>
+</div>
+<div class="h-12 border-t border-steel-outline bg-deep-navy-surface px-sm py-xs flex flex-col justify-center">
+<div class="font-metadata-sm text-metadata-sm text-error truncate">CALIB_DARK_999.fits</div>
+<div class="flex justify-between items-center mt-[2px]">
+<span class="font-label-caps text-label-caps text-error text-[9px]">CORRUPTED HEADER</span>
+<span class="font-metadata-sm text-metadata-sm text-outline text-[10px]">--</span>
+</div>
+</div>
+</div>
+<!-- Grid Item 4 -->
+<div class="relative bg-deep-navy-surface border border-steel-outline group cursor-pointer h-48 flex flex-col hover:border-cobalt-accent/50 transition-colors">
+<div class="flex-1 relative overflow-hidden bg-surface-container-lowest">
+<img alt="FITS preview" class="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:opacity-80 transition-opacity" data-alt="A monochrome image of a spiral galaxy, faint and delicate, captured against the absolute darkness of space. The spiral arms are barely visible, conveying a sense of deep, distant observation. High-contrast scientific aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCGn5i85RMGr2P4hkOAXy_RunhTLyTVBypUZG2kWncS5gPXZ-cJiRsH0fHqNUziQfYChv3_PyyNKdxg6cLuCNIOTNnO8m2TLoIQZKvwvwysujVpGzyje4GMd_CxTxxY1oBuJWw9QC1dMRjCCiJXIjWzBo_NJRETFGfuu9915qaxWoMaK1MGTKyH13gH7aZToOIF8PkmrVq1XOqmJxi1_f4VstBcO17zka0truXx_RmUap3_FDYOs1zHQA"/>
+</div>
+<div class="h-12 border-t border-steel-outline bg-deep-navy-surface px-sm py-xs flex flex-col justify-center">
+<div class="font-metadata-sm text-metadata-sm text-on-surface truncate">M51_OIII_012.fits</div>
+<div class="flex justify-between items-center mt-[2px]">
+<span class="font-label-caps text-label-caps text-on-surface-variant text-[9px]">2048x2048 • 16-BIT</span>
+<span class="font-metadata-sm text-metadata-sm text-outline text-[10px]">12.4 MB</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Inspector Panel (Right) -->
+<aside class="hidden lg:flex w-96 bg-surface-bright border-l border-steel-outline flex-col shrink-0 z-20">
+<div class="h-12 border-b border-steel-outline flex items-center justify-between px-md bg-deep-navy-surface">
+<span class="font-label-caps text-label-caps text-cobalt-accent flex items-center gap-xs">
+<span class="material-symbols-outlined text-[16px]">info</span> METADATA INSPECTOR
+                    </span>
+<button class="text-on-surface-variant hover:text-cobalt-accent">
+<span class="material-symbols-outlined text-[18px]">close</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto bg-deep-navy-surface">
+<!-- Preview -->
+<div class="w-full h-48 bg-surface-container-lowest border-b border-steel-outline relative">
+<img alt="Active FITS preview" class="w-full h-full object-cover opacity-90" data-alt="A close-up, high-contrast monochrome astrophotography shot of a nebula, filling the frame. The image emphasizes the granular texture of raw sensor data, with sharp stellar points and subtle gaseous filaments. Illuminated by a cool, technical aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCgfjhNcmHYISnRQ1gG1xaCZnhQuZNSIucPtt6GpNkQqoB4OE-FhRUTwWJBumwCMeNIWfgTn9lXuaeGotFG3xsuFLulvh498FO_R86CwLyhgvhtlELnuPgD7z6Daq6YZky99DGVsFDxCiXTdKQGMXbINe9DT89Pb6HyurnY76QSbtM2e17Wz4XBbDu7X-aswToYyvLO2bt4ddpfIFd-Sim-Kfyl8vbcga1eq16ZF5VZ7Nn9sqfIpgarLQ"/>
+<div class="absolute bottom-sm right-sm bg-surface-container-lowest/80 border border-steel-outline px-sm py-xs rounded-sm backdrop-blur-md">
+<span class="material-symbols-outlined text-on-surface-variant text-[16px] cursor-pointer hover:text-cobalt-accent">zoom_in</span>
+</div>
+</div>
+<!-- Telemetry Data -->
+<div class="p-md flex flex-col gap-sm">
+<div class="flex flex-col gap-unit">
+<span class="font-label-caps text-label-caps text-on-surface-variant">FILENAME</span>
+<span class="font-metadata-sm text-metadata-sm text-on-surface bg-surface-container-lowest p-sm border border-steel-outline rounded-sm break-all">NGC-7293_Ha_001.fits</span>
+</div>
+<!-- Technical Sliders -->
+<div class="mt-sm border border-steel-outline rounded-sm bg-surface-container-lowest p-sm">
+<div class="flex justify-between items-center mb-xs">
+<span class="font-label-caps text-label-caps text-cobalt-accent">HISTOGRAM STRETCH</span>
+<span class="font-metadata-sm text-metadata-sm text-on-surface-variant text-[10px]">AUTO</span>
+</div>
+<div class="h-12 w-full flex items-end gap-[1px] mb-sm opacity-70">
+<!-- Fake Histogram -->
+<div class="w-full h-full flex items-end gap-[1px]">
+<div class="w-1 flex-1 bg-surface-variant h-[10%]"></div>
+<div class="w-1 flex-1 bg-surface-variant h-[20%]"></div>
+<div class="w-1 flex-1 bg-cobalt-accent/50 h-[50%]"></div>
+<div class="w-1 flex-1 bg-cobalt-accent h-[80%]"></div>
+<div class="w-1 flex-1 bg-cobalt-accent/80 h-[100%]"></div>
+<div class="w-1 flex-1 bg-cobalt-accent/40 h-[40%]"></div>
+<div class="w-1 flex-1 bg-surface-variant h-[15%]"></div>
+<div class="w-1 flex-1 bg-surface-variant h-[5%]"></div>
+</div>
+</div>
+<div class="relative w-full h-2 bg-surface-variant rounded-full mb-xs">
+<div class="absolute left-[20%] right-[60%] h-full bg-cobalt-accent opacity-30 rounded-full"></div>
+<div class="absolute left-[20%] top-1/2 -translate-y-1/2 w-2 h-4 bg-cobalt-accent cursor-ew-resize"></div>
+<div class="absolute right-[60%] top-1/2 -translate-y-1/2 w-2 h-4 bg-cobalt-accent cursor-ew-resize"></div>
+</div>
+</div>
+<!-- FITS Header Table -->
+<div class="mt-md">
+<span class="font-label-caps text-label-caps text-on-surface-variant border-b border-steel-outline block pb-xs mb-xs">PRIMARY HEADER</span>
+<table class="w-full text-left border-collapse">
+<tbody class="font-metadata-sm text-metadata-sm text-[11px]">
+<tr class="border-b border-steel-outline/50 hover:bg-surface-container-high">
+<td class="py-xs pr-sm text-cobalt-accent w-1/3">SIMPLE</td>
+<td class="py-xs text-on-surface">T</td>
+</tr>
+<tr class="border-b border-steel-outline/50 bg-surface-container-lowest hover:bg-surface-container-high">
+<td class="py-xs pr-sm text-cobalt-accent w-1/3">BITPIX</td>
+<td class="py-xs text-on-surface">16</td>
+</tr>
+<tr class="border-b border-steel-outline/50 hover:bg-surface-container-high">
+<td class="py-xs pr-sm text-cobalt-accent w-1/3">NAXIS</td>
+<td class="py-xs text-on-surface">2</td>
+</tr>
+<tr class="border-b border-steel-outline/50 bg-surface-container-lowest hover:bg-surface-container-high">
+<td class="py-xs pr-sm text-cobalt-accent w-1/3">NAXIS1</td>
+<td class="py-xs text-on-surface">2048</td>
+</tr>
+<tr class="border-b border-steel-outline/50 hover:bg-surface-container-high">
+<td class="py-xs pr-sm text-cobalt-accent w-1/3">EXPTIME</td>
+<td class="py-xs text-on-surface">300.0</td>
+</tr>
+<tr class="border-b border-steel-outline/50 bg-surface-container-lowest hover:bg-surface-container-high">
+<td class="py-xs pr-sm text-cobalt-accent w-1/3">FILTER</td>
+<td class="py-xs text-on-surface">'H-Alpha'</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Action Footer -->
+<div class="p-md border-t border-steel-outline bg-deep-navy-surface flex gap-sm">
+<button class="flex-1 bg-surface-container-lowest border border-cobalt-accent text-cobalt-accent font-label-caps text-label-caps py-sm rounded-sm hover:bg-cobalt-accent/10 transition-colors">
+                        EXPORT
+                    </button>
+<button class="flex-1 bg-surface-variant border border-steel-outline text-on-surface-variant font-label-caps text-label-caps py-sm rounded-sm hover:bg-surface-container-high transition-colors">
+                        DELETE
+                    </button>
+</div>
+</aside>
+</div>
+</main>
+<!-- BottomNavBar (Mobile Only) -->
+<nav class="lg:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-2 bg-surface-container-lowest border-t border-steel-outline rounded-t-lg shadow-[0_-4px_12px_rgba(203,78,61,0.2)]">
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-cobalt-accent transition-all duration-100" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+<span class="font-label-caps text-label-caps mt-1">Pipeline</span>
+</a>
+<a class="flex flex-col items-center justify-center text-cobalt-accent bg-surface-container-high rounded-xl p-2 shadow-[0_0_8px_rgba(203,78,61,0.3)] active:scale-90 transition-all duration-100" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">folder_special</span>
+<span class="font-label-caps text-label-caps mt-1">Library</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-cobalt-accent transition-all duration-100" href="#">
+<span class="material-symbols-outlined">developer_board</span>
+<span class="font-label-caps text-label-caps mt-1">Hardware</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-cobalt-accent transition-all duration-100" href="#">
+<span class="material-symbols-outlined">biotech</span>
+<span class="font-label-caps text-label-caps mt-1">Lab</span>
+</a>
+</nav>
+</body></html>

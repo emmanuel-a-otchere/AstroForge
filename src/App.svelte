@@ -265,7 +265,7 @@
           <span class="analyzing-hint">Reading FITS headers and EXIF data</span>
         </div>
       {:else}
-        <InitialDialog {analysis} onConfirm={handleInitialConfirm} onCancel={backToSelectFiles} />
+        <InitialDialog analysis={analysisResult} onConfirm={handleInitialConfirm} onCancel={backToSelectFiles} />
       {/if}
     {:else if currentStep === "review-frames"}
       <ClassificationDialog

@@ -1,0 +1,212 @@
+<script lang="ts">
+  import { onMount, onDestroy } from "svelte";
+  import { WebGLRenderer, type PreviewParams, type ViewportState } from "../lib/gl-renderer";
+
+  export let params: PreviewParams = {
+    blackPoint: 0,
+    midtones: 0.25,
+    highlights: 1,
+    strength: 0,
+    scnrStrength: 0,
+    scnrMethod: 0,
+  };
+  export let renderMode: "identity" | "mtf" | "scnr" | "difference" | "composite" = "mtf";
+  export let compareMode: boolean = false;
+  export let imageData: ImageData | null = null;
+  export let floatData: { width: number; height: number; data: Float32Array } | null = null;
+
+  let canvas: HTMLCanvasElement;
+  let renderer: WebGLRenderer | null = null;
+  let container: HTMLDivElement;
+  let isPanning = false;
+  let panStart = { x: 0, y: 0 };
+  let viewport: ViewportState = { zoom: 1, panX: 0, panY: 0 };
+  let showOriginal = false;
+
+  function handleResize() {
+    if (!renderer || !container) return;
+    const rect = container.getBoundingClientRect();
+    renderer.resize(rect.width, rect.height);
+    renderer.refit();
+    renderer.render(renderMode);
+  }
+
+  function handleMouseDown(e: MouseEvent) {
+    isPanning = true;
+    panStart = { x: e.clientX, y: e.clientY };
+  }
+
+  function handleMouseMove(e: MouseEvent) {
+    if (!isPanning || !renderer) return;
+    const dx = (e.clientX - panStart.x) / canvas.width;
+    const dy = (e.clientY - panStart.y) / canvas.height;
+    viewport.panX += dx * 0.5;
+    viewport.panY -= dy * 0.5;
+    renderer.setViewport(viewport);
+    renderer.render(renderMode);
+    panStart = { x: e.clientX, y: panStart.y };
+    panStart = { x: e.clientX, y: e.clientY };
+  }
+
+  function handleMouseUp() {
+    isPanning = false;
+  }
+
+  function handleWheel(e: WheelEvent) {
+    e.preventDefault();
+    if (!renderer) return;
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    viewport.zoom = Math.max(0.05, Math.min(50, viewport.zoom * factor));
+    renderer.setViewport(viewport);
+    renderer.render(renderMode);
+  }
+
+  function handleDoubleClick() {
+    if (!renderer) return;
+    viewport = { zoom: 1, panX: 0, panY: 0 };
+    renderer.setViewport(viewport);
+    renderer.refit();
+    renderer.render(renderMode);
+  }
+
+  function handleCompareDown() {
+    showOriginal = true;
+    if (renderer) renderer.render("identity");
+  }
+
+  function handleCompareUp() {
+    showOriginal = false;
+    if (renderer) renderer.render(renderMode);
+  }
+
+  $: if (renderer && params) {
+    renderer.setParams(params);
+    renderer.requestDebouncedRender(renderMode);
+  }
+
+  $: if (renderer && imageData) {
+    renderer.setImageFromImageData(imageData);
+    renderer.refit();
+    renderer.render(renderMode);
+  }
+
+  $: if (renderer && floatData) {
+    renderer.setImageData(floatData.width, floatData.height, floatData.data);
+    renderer.refit();
+    renderer.render(renderMode);
+  }
+
+  $: if (renderer && compareMode !== undefined) {
+    renderer.render(showOriginal ? "identity" : renderMode);
+  }
+
+  onMount(() => {
+    try {
+      renderer = new WebGLRenderer(canvas);
+      handleResize();
+      const ro = new ResizeObserver(handleResize);
+      ro.observe(container);
+      return () => ro.disconnect();
+    } catch (e) {
+      console.error("WebGL init failed:", e);
+    }
+  });
+
+  onDestroy(() => {
+    renderer?.destroy();
+  });
+</script>
+
+<div class="preview-container" bind:this={container}>
+  <canvas
+    bind:this={canvas}
+    on:mousedown={handleMouseDown}
+    on:mousemove={handleMouseMove}
+    on:mouseup={handleMouseUp}
+    on:mouseleave={handleMouseUp}
+    on:wheel={handleWheel}
+    on:dblclick={handleDoubleClick}
+    class="preview-canvas"
+  ></canvas>
+
+  <button
+    class="compare-btn"
+    on:mousedown={handleCompareDown}
+    on:mouseup={handleCompareUp}
+    on:mouseleave={handleCompareUp}
+    on:touchstart={handleCompareDown}
+    on:touchend={handleCompareUp}
+    type="button"
+    title="Hold to compare with original"
+  >
+    Hold to Compare
+  </button>
+
+  <div class="viewport-info">
+    Zoom: {(viewport.zoom * 100).toFixed(0)}%
+  </div>
+</div>
+
+<style>
+  .preview-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .preview-canvas {
+    display: block;
+    cursor: grab;
+    width: 100%;
+    height: 100%;
+  }
+
+  .preview-canvas:active {
+    cursor: grabbing;
+  }
+
+  .compare-btn {
+    position: absolute;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.375rem 1rem;
+    background: rgba(15, 23, 42, 0.85);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    backdrop-filter: blur(8px);
+    transition: background 0.15s ease;
+  }
+
+  .compare-btn:hover {
+    background: rgba(30, 41, 59, 0.95);
+  }
+
+  .compare-btn:active {
+    background: var(--accent);
+    color: var(--bg-primary);
+  }
+
+  .viewport-info {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    padding: 0.25rem 0.625rem;
+    background: rgba(15, 23, 42, 0.85);
+    color: var(--text-muted);
+    border-radius: 0.25rem;
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+    backdrop-filter: blur(8px);
+  }
+</style>

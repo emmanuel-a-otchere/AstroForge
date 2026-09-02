@@ -1,3 +1,15 @@
+<!--
+  App.svelte — workflow orchestrator.
+
+  Delegates shell rendering to <AppShell> + a per-step mode wrapper.
+  Each existing screen-card (file-select-panel, InitialDialog,
+  ClassificationDialog, PreviewCanvas + WizardBottomSheet, etc.) renders
+  inside its mode's snippet. The mode is chosen by `currentStep` via
+  layout-mode.ts (context-driven) plus any manual override the user
+  picks in the header's mode switcher.
+
+  Uses Svelte 5 snippets for passing content to mode components.
+-->
 <script lang="ts">
   import { probeGpu, type GpuCapability } from "./lib/gpu";
   import { analyzeFiles, type AnalysisResult } from "./lib/image-analysis";
@@ -7,15 +19,26 @@
   import WizardBottomSheet from "./components/WizardBottomSheet.svelte";
   import NodeSidebar from "./components/NodeSidebar.svelte";
   import ParameterSidebar from "./components/ParameterSidebar.svelte";
+  import ScreenCard from "./components/ScreenCard.svelte";
+  import AppShell from "./components/AppShell.svelte";
+  import ModeA from "./components/ModeA.svelte";
+  import ModeB from "./components/ModeB.svelte";
+  import ModeC from "./components/ModeC.svelte";
+  import ModeD from "./components/ModeD.svelte";
   import {
     initSession,
     sessionStore,
     activeStepIndex,
   } from "./lib/pipeline-store";
+  import {
+    setStage,
+    currentLayoutMode,
+    type AppStage,
+  } from "./lib/layout-mode";
   import type { PreviewParams } from "./lib/gl-renderer";
 
-  let showForgeMode = false;
-  let isTransitioning = false;
+  let showForgeMode = $state(false);
+  let isTransitioning = $state(false);
 
   function toggleForgeMode() {
     isTransitioning = true;
@@ -25,44 +48,46 @@
     }, 300);
   }
 
-  type WorkflowStep = "landing" | "select-files" | "session-setup" | "review-frames" | "processing";
+  type WorkflowStep = AppStage;
 
-  let gpuCapability: GpuCapability = "canvas2d";
-  let gpuChecked = false;
-  let currentStep: WorkflowStep = "landing";
-  let selectedFiles: File[] = [];
+  let currentStep: WorkflowStep = $state("landing");
+  let selectedFiles: File[] = $state([]);
   let classificationFrames: Array<{
     path: string;
     frame_type: string;
     exptime: number | null;
     filter: string | null;
     anomalies: string[];
-  }> = [];
-  let sessionData: { targetName: string; cameraType: string; focalLength: number | null; lightsOnly: boolean; includeDithering: boolean; objectType: string } | null = null;
-  let analysisResult: AnalysisResult | null = null;
-  let analyzing = false;
+  }> = $state([]);
+  let sessionData: {
+    targetName: string;
+    cameraType: string;
+    focalLength: number | null;
+    lightsOnly: boolean;
+    includeDithering: boolean;
+    objectType: string;
+  } | null = $state(null);
+  let analysisResult: AnalysisResult | null = $state(null);
+  let analyzing = $state(false);
 
-  let previewParams: PreviewParams = {
+  let previewParams: PreviewParams = $state({
     blackPoint: 0,
     midtones: 0.25,
     highlights: 1,
     strength: 0,
     scnrStrength: 0,
     scnrMethod: 0,
-  };
+  });
 
-  let renderMode: "identity" | "mtf" | "scnr" | "difference" | "composite" = "mtf";
+  let renderMode: "identity" | "mtf" | "scnr" | "difference" | "composite" =
+    $state("mtf");
 
-  function init() {
-    gpuCapability = probeGpu();
-    gpuChecked = true;
-  }
+  // Keep the layout-mode store in sync with the workflow step.
+  $effect(() => {
+    setStage(currentStep);
+  });
 
-  if (document.readyState !== "loading") {
-    init();
-  } else {
-    document.addEventListener("DOMContentLoaded", init, { once: true });
-  }
+  let currentMode = $derived($currentLayoutMode);
 
   function goToSelectFiles() {
     currentStep = "select-files";
@@ -71,7 +96,7 @@
   function handleFileSelect(event: Event) {
     const input = event.target as HTMLInputElement;
     if (input.files) {
-      selectedFiles = Array.from(input.files).filter(f =>
+      selectedFiles = Array.from(input.files).filter((f) =>
         /\.(fits|fit|tif|tiff|png|jpg|jpeg|dng|cr2|nef|arw)$/i.test(f.name)
       );
     }
@@ -80,7 +105,7 @@
   function handleDrop(event: DragEvent) {
     event.preventDefault();
     if (event.dataTransfer?.files) {
-      selectedFiles = Array.from(event.dataTransfer.files).filter(f =>
+      selectedFiles = Array.from(event.dataTransfer.files).filter((f) =>
         /\.(fits|fit|tif|tiff|png|jpg|jpeg|dng|cr2|nef|arw)$/i.test(f.name)
       );
     }
@@ -115,7 +140,7 @@
   }) {
     sessionData = data;
     if (analysisResult) {
-      classificationFrames = analysisResult.frames.map(f => ({
+      classificationFrames = analysisResult.frames.map((f) => ({
         path: f.fileName,
         frame_type: f.frameType,
         exptime: f.exposureTime,
@@ -123,7 +148,7 @@
         anomalies: [],
       }));
     } else {
-      classificationFrames = selectedFiles.map(f => ({
+      classificationFrames = selectedFiles.map((f) => ({
         path: f.name,
         frame_type: guessFrameType(f.name),
         exptime: null,
@@ -169,103 +194,63 @@
     previewParams = { ...previewParams, ...params };
   }
 
-  $: stepIdx = $activeStepIndex;
-  $: isStretchStage = $sessionStore?.pipelineGraph.nodes[stepIdx]?.type === "stretch";
-  $: renderMode = isStretchStage ? "mtf" : "identity";
+  let stepIdx = $derived($activeStepIndex);
+  let isStretchStage = $derived(
+    $sessionStore?.pipelineGraph.nodes[stepIdx]?.type === "stretch"
+  );
+  let derivedRenderMode = $derived(isStretchStage ? "mtf" as const : "identity" as const);
+  $effect(() => {
+    renderMode = derivedRenderMode;
+  });
 
-  const steps: { id: WorkflowStep; label: string; icon: string }[] = [
-    { id: "select-files", label: "Load Files", icon: "1" },
-    { id: "session-setup", label: "Session Info", icon: "2" },
-    { id: "review-frames", label: "Review", icon: "3" },
-    { id: "processing", label: "Process", icon: "4" },
-  ];
-
-  function stepIndex(): number {
-    return steps.findIndex(s => s.id === currentStep);
-  }
-
-  $: fileCount = selectedFiles.length;
-  $: lightCount = classificationFrames.filter(f => f.frame_type === "LIGHT").length;
-  $: darkCount = classificationFrames.filter(f => f.frame_type === "DARK").length;
-  $: flatCount = classificationFrames.filter(f => f.frame_type === "FLAT").length;
-  $: biasCount = classificationFrames.filter(f => f.frame_type === "BIAS").length;
+  let fileCount = $derived(selectedFiles.length);
+  let lightCount = $derived(
+    classificationFrames.filter((f) => f.frame_type === "LIGHT").length
+  );
+  let darkCount = $derived(
+    classificationFrames.filter((f) => f.frame_type === "DARK").length
+  );
+  let flatCount = $derived(
+    classificationFrames.filter((f) => f.frame_type === "FLAT").length
+  );
+  let biasCount = $derived(
+    classificationFrames.filter((f) => f.frame_type === "BIAS").length
+  );
 </script>
 
-<main class="app">
-  <header class="app-header">
-    <button class="logo" on:click={backToLanding} type="button">
-      <svg width="32" height="32" viewBox="0 0 64 64" fill="none">
-        <circle cx="32" cy="32" r="20" stroke="currentColor" stroke-width="2.5" fill="none"/>
-        <circle cx="32" cy="32" r="6" fill="currentColor"/>
-        <path d="M32 6 L32 14 M32 50 L32 58 M6 32 L14 32 M50 32 L58 32" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-      <span class="app-name">AstroForge</span>
-    </button>
-    <div class="gpu-badge" class:gpu-checked={gpuChecked}>
-      {#if gpuChecked}
-        GPU: {gpuCapability === "webgpu" ? "WebGPU" : "WebGL"}
-      {:else}
-        Detecting GPU...
-      {/if}
-    </div>
-  </header>
-
-  {#if currentStep !== "landing" && currentStep !== "processing"}
-    <nav class="step-bar">
-      {#each steps as step, i}
-        <div class="step" class:active={currentStep === step.id} class:done={i < stepIndex()}>
-          <span class="step-num">{i < stepIndex() ? "✓" : step.icon}</span>
-          <span class="step-label">{step.label}</span>
-        </div>
-        {#if i < steps.length - 1}
-          <div class="step-connector" class:done={i < stepIndex()}></div>
-        {/if}
-      {/each}
-    </nav>
-  {/if}
-
-  <section class="workspace">
-    {#if currentStep === "landing"}
-      <div class="workspace-empty">
-        <h1 class="text-display-xl">AstroForge</h1>
-        <p class="tagline text-body">Raw telescope data to publication-ready images</p>
-        <div class="version text-metadata">v0.1.0 — Full Pipeline</div>
-        <button class="btn-start" on:click={goToSelectFiles}>
-          <span class="material-symbols-outlined">upload</span>
-          Load Your Data
-        </button>
-        <p class="hint text-metadata">Select FITS, TIFF, PNG, JPEG, or DNG files from your telescope</p>
-      </div>
-    {:else if currentStep === "select-files"}
-      <div class="file-select-panel">
-        <h2 class="text-headline-mobile">Select your image files</h2>
-        <p class="subtitle text-body">Choose the raw frames from your imaging session. You can drag and drop or browse.</p>
+<AppShell currentStage={currentStep}>
+  {#if currentMode === "a"}
+    <ModeA>
+      <ScreenCard kicker="01 · Load Files" title="Select your image files">
+        <p class="subtitle">
+          Choose the raw frames from your imaging session. You can drag and drop or browse.
+        </p>
 
         <div
           class="drop-zone"
           role="region"
           aria-label="File drop zone"
-          on:drop={handleDrop}
-          on:dragover={handleDragOver}
+          ondrop={handleDrop}
+          ondragover={handleDragOver}
           class:has-files={fileCount > 0}
         >
           {#if fileCount === 0}
             <div class="drop-empty">
               <span class="material-symbols-outlined drop-icon">cloud_upload</span>
-              <p class="text-body">Drag and drop your files here</p>
-              <span class="drop-hint text-metadata">FITS, TIFF, PNG, JPEG, DNG</span>
+              <p>Drag and drop your files here</p>
+              <span class="drop-hint">FITS, TIFF, PNG, JPEG, DNG</span>
             </div>
           {:else}
             <div class="file-list-header">
-              <span class="text-body">{fileCount} file{fileCount !== 1 ? "s" : ""} selected</span>
-              <button class="btn-clear" on:click={clearFiles}>Clear all</button>
+              <span>{fileCount} file{fileCount !== 1 ? "s" : ""} selected</span>
+              <button class="btn-clear" onclick={clearFiles}>Clear all</button>
             </div>
             <div class="file-list">
               {#each selectedFiles as file}
                 <div class="file-item">
                   <span class="material-symbols-outlined file-icon">description</span>
-                  <span class="file-name text-body" title={file.name}>{file.name}</span>
-                  <span class="file-size text-metadata">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                  <span class="file-name" title={file.name}>{file.name}</span>
+                  <span class="file-size">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
                 </div>
               {/each}
             </div>
@@ -278,262 +263,96 @@
             type="file"
             multiple
             accept=".fits,.fit,.tif,.tiff,.png,.jpg,.jpeg,.dng,.cr2,.nef,.arw"
-            on:change={handleFileSelect}
+            onchange={handleFileSelect}
             hidden
           />
         </label>
 
+        {#snippet footer()}
         <div class="actions">
-          <button class="btn-secondary" on:click={backToLanding}>Cancel</button>
-          <button class="btn-primary" disabled={fileCount === 0} on:click={proceedToSessionSetup}>
+          <button class="btn-secondary" onclick={backToLanding}>Cancel</button>
+          <button
+            class="btn-primary"
+            disabled={fileCount === 0}
+            onclick={proceedToSessionSetup}
+          >
             Continue
           </button>
         </div>
-      </div>
-    {:else if currentStep === "session-setup"}
-      {#if analyzing}
-        <div class="analyzing-panel">
-          <div class="analyzing-spinner"></div>
-          <p class="text-body">Analyzing your files...</p>
-          <span class="text-metadata analyzing-hint">Reading FITS headers and EXIF data</span>
+        {/snippet}
+      </ScreenCard>
+    </ModeA>
+  {:else if currentMode === "b" && currentStep === "landing"}
+    <ModeB>
+      {#snippet canvas()}
+      <div class="landing-canvas">
+        <div class="landing-hero">
+          <h1 class="text-display-xl">AstroForge</h1>
+          <p class="tagline">Raw telescope data to publication-ready images</p>
+          <div class="version">v0.1.0 — Full Pipeline</div>
+          <button class="btn-start" onclick={goToSelectFiles}>
+            <span class="material-symbols-outlined">upload</span>
+            Load Your Data
+          </button>
+          <p class="hint">Select FITS, TIFF, PNG, JPEG, or DNG files from your telescope</p>
         </div>
-      {:else}
-        <InitialDialog analysis={analysisResult} onConfirm={handleInitialConfirm} onCancel={backToSelectFiles} />
-      {/if}
-    {:else if currentStep === "review-frames"}
-      <ClassificationDialog
-        frames={classificationFrames}
-        onConfirm={handleClassificationConfirm}
-        onReclassify={handleReclassify}
-      />
-    {:else if currentStep === "processing"}
-      <div class="processing-workspace" class:forge={showForgeMode} class:transitioning={isTransitioning}>
+      </div>
+      {/snippet}
+
+      {#snippet workflow()}
+      <ScreenCard kicker="Welcome" title="Start here">
+        <p class="landing-card-hint">
+          Your recent sessions live in the gallery on the left. Pick one to
+          continue, or load new data to begin a fresh workflow.
+        </p>
+        <button class="btn-primary full-width" onclick={goToSelectFiles}>
+          Load new files
+        </button>
+      </ScreenCard>
+      {/snippet}
+    </ModeB>
+  {:else if currentMode === "b" && currentStep === "processing"}
+    <ModeB>
+      {#snippet canvas()}
+      <div class="processing-canvas">
         {#if showForgeMode}
           <div class="forge-layout">
             <NodeSidebar />
             <div class="forge-canvas-area">
-              <PreviewCanvas
-                params={previewParams}
-                {renderMode}
-              />
+              <PreviewCanvas params={previewParams} {renderMode} />
             </div>
-            <ParameterSidebar
-              {previewParams}
-              onParamsChange={handleParamsChange}
-            />
           </div>
         {:else}
-          <PreviewCanvas
-            params={previewParams}
-            {renderMode}
-          />
-          <WizardBottomSheet
-            {previewParams}
-            onParamsChange={handleParamsChange}
-          />
+          <PreviewCanvas params={previewParams} {renderMode} />
         {/if}
-
-        <button class="forge-toggle" on:click={toggleForgeMode} type="button" title="Toggle between guided and expert view">
+        <button
+          class="forge-toggle"
+          onclick={toggleForgeMode}
+          type="button"
+          title="Toggle between guided and expert view"
+        >
           <span class="material-symbols-outlined">{showForgeMode ? "view_agenda" : "account_tree"}</span>
           <span class="toggle-label">{showForgeMode ? "Guided" : "Pipeline"}</span>
         </button>
       </div>
-    {/if}
-  </section>
+      {/snippet}
 
-  {#if currentStep !== "processing"}
-    <footer class="app-footer">
-      <span class="text-metadata">AstroForge v0.1.0</span>
-      <span class="text-metadata">Full Pipeline — Deep Sky, Planetary & Lunar</span>
-    </footer>
+      {#snippet workflow()}
+      {#if showForgeMode}
+        <ParameterSidebar {previewParams} onParamsChange={handleParamsChange} />
+      {:else}
+        <WizardBottomSheet {previewParams} onParamsChange={handleParamsChange} />
+      {/if}
+      {/snippet}
+    </ModeB>
+  {:else if currentMode === "c"}
+    <ModeC />
+  {:else if currentMode === "d"}
+    <ModeD />
   {/if}
-</main>
+</AppShell>
 
 <style>
-  .app {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    background: var(--background);
-  }
-
-  .app-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 var(--sp-lg);
-    height: 3.5rem;
-    background: var(--surface-container);
-    border-bottom: 1px solid var(--outline-variant);
-    flex-shrink: 0;
-  }
-
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 0.625rem;
-    color: var(--cobalt-accent);
-    cursor: pointer;
-    background: none;
-    border: none;
-  }
-
-  .app-name {
-    font-family: var(--font-display);
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--on-surface);
-    letter-spacing: var(--ls-headline);
-  }
-
-  .gpu-badge {
-    font-family: var(--font-data);
-    font-size: var(--text-metadata);
-    color: var(--on-surface-variant);
-    padding: 4px 12px;
-    border-radius: var(--radius-md);
-    background: var(--surface-container-high);
-  }
-
-  .gpu-badge.gpu-checked {
-    color: var(--success);
-  }
-
-  .step-bar {
-    display: flex;
-    align-items: center;
-    padding: var(--sp-sm) var(--sp-lg);
-    background: var(--surface-container);
-    border-bottom: 1px solid var(--outline-variant);
-    flex-shrink: 0;
-  }
-
-  .step {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-sm);
-    color: var(--on-surface-variant);
-    font-size: var(--text-metadata);
-    white-space: nowrap;
-  }
-
-  .step.active {
-    color: var(--cobalt-accent);
-  }
-
-  .step.done {
-    color: var(--success);
-  }
-
-  .step-num {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: 50%;
-    background: var(--surface-container-high);
-    font-size: 0.75rem;
-    font-weight: 600;
-    border: 1px solid var(--outline-variant);
-  }
-
-  .step.active .step-num {
-    background: var(--cobalt-accent);
-    color: var(--surface);
-    border-color: var(--cobalt-accent);
-  }
-
-  .step.done .step-num {
-    background: var(--success);
-    color: var(--surface);
-    border-color: var(--success);
-  }
-
-  .step-connector {
-    width: 2rem;
-    height: 1px;
-    background: var(--outline-variant);
-    margin: 0 var(--sp-sm);
-  }
-
-  .step-connector.done {
-    background: var(--success);
-  }
-
-  .workspace {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--background);
-    position: relative;
-    overflow: auto;
-  }
-
-  .workspace-empty {
-    text-align: center;
-  }
-
-  .workspace-empty h1 {
-    color: var(--cobalt-accent);
-    margin-bottom: var(--sp-xs);
-  }
-
-  .tagline {
-    color: var(--on-surface-variant);
-    margin-bottom: var(--sp-sm);
-  }
-
-  .version {
-    color: var(--on-surface-variant);
-    padding: 4px 12px;
-    border-radius: var(--radius-md);
-    background: var(--surface-container);
-    display: inline-block;
-    margin-bottom: var(--sp-lg);
-  }
-
-  .btn-start {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-sm);
-    padding: 12px 32px;
-    background: var(--cobalt-accent);
-    color: var(--surface);
-    border: none;
-    border-radius: var(--radius-lg);
-    font-family: var(--font-body);
-    font-size: var(--text-body);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-  }
-
-  .btn-start:hover {
-    background: var(--primary-container);
-    box-shadow: 0 0 16px rgba(203, 78, 61, 0.3);
-  }
-
-  .btn-start .material-symbols-outlined {
-    font-size: 20px;
-  }
-
-  .hint {
-    margin-top: var(--sp-sm);
-    color: var(--on-surface-variant);
-  }
-
-  .file-select-panel {
-    width: 560px;
-    max-width: 90vw;
-    padding: var(--sp-lg);
-  }
-
-  .file-select-panel h2 {
-    margin-bottom: var(--sp-xs);
-  }
-
   .subtitle {
     color: var(--on-surface-variant);
     margin-bottom: var(--sp-md);
@@ -686,98 +505,126 @@
     background: var(--surface-container-highest);
   }
 
-  .analyzing-panel {
+  .btn-primary.full-width {
+    width: 100%;
+    margin-top: var(--sp-md);
+  }
+
+  /* ── Landing (Mode B center canvas) ───────────────────────────────────── */
+  .landing-canvas {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--sp-xl);
+  }
+
+  .landing-hero {
     text-align: center;
+    max-width: 480px;
+  }
+
+  .text-display-xl {
+    font-family: var(--font-display);
+    font-size: var(--text-display-xl);
+    font-weight: 700;
+    letter-spacing: var(--ls-display);
+    color: var(--cobalt-accent);
+    margin-bottom: var(--sp-xs);
+    line-height: var(--lh-display);
+  }
+
+  .tagline {
+    color: var(--on-surface-variant);
+    margin-bottom: var(--sp-sm);
+    font-family: var(--font-body);
+  }
+
+  .version {
+    color: var(--on-surface-variant);
+    padding: 4px 12px;
+    border-radius: var(--radius-default);
+    background: var(--surface-container);
+    display: inline-block;
+    margin-bottom: var(--sp-lg);
+    font-family: var(--font-data);
+    font-size: var(--text-metadata);
+  }
+
+  .btn-start {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-sm);
+    padding: 12px 32px;
+    background: var(--cobalt-accent);
+    color: var(--surface);
+    border: none;
+    border-radius: var(--radius-lg);
+    font-family: var(--font-body);
+    font-size: var(--text-body);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .btn-start:hover {
+    background: var(--primary-container);
+    box-shadow: 0 0 16px rgba(203, 78, 61, 0.3);
+  }
+
+  .btn-start .material-symbols-outlined {
+    font-size: 20px;
+  }
+
+  .hint {
+    margin-top: var(--sp-sm);
     color: var(--on-surface-variant);
   }
 
-  .analyzing-spinner {
-    width: 2.5rem;
-    height: 2.5rem;
-    border: 3px solid var(--outline-variant);
-    border-top-color: var(--cobalt-accent);
-    border-radius: 50%;
-    margin: 0 auto var(--sp-sm);
-    animation: spin 0.8s linear infinite;
-  }
-
-  .analyzing-panel p {
-    color: var(--on-surface);
-    margin-bottom: 4px;
-  }
-
-  .analyzing-hint {
+  .landing-card-hint {
     color: var(--on-surface-variant);
+    margin-bottom: var(--sp-md);
+    line-height: var(--lh-body);
   }
 
-  .processing-workspace {
-    position: absolute;
-    inset: 0;
+  /* ── Processing (Mode B center canvas) ─────────────────────────────────── */
+  .processing-canvas {
+    flex: 1;
+    position: relative;
     display: flex;
     flex-direction: column;
   }
 
-  .processing-workspace.transitioning > * {
-    opacity: 0.3;
-    transition: opacity var(--transition-slow);
-  }
-
   .forge-layout {
-    display: flex;
     flex: 1;
-    height: 100%;
-    overflow: hidden;
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 0;
   }
 
   .forge-canvas-area {
-    flex: 1;
-    position: relative;
     overflow: hidden;
-    background: var(--surface-container-lowest);
   }
 
   .forge-toggle {
     position: absolute;
-    top: var(--sp-md);
-    left: var(--sp-md);
-    display: flex;
+    bottom: var(--sp-md);
+    right: var(--sp-md);
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    background: rgba(18, 20, 20, 0.85);
-    color: var(--on-surface);
+    gap: var(--sp-sm);
+    padding: 8px 12px;
+    background: var(--surface-container-high);
     border: 1px solid var(--outline-variant);
-    border-radius: var(--radius-full);
-    font-family: var(--font-data);
-    font-size: var(--text-label);
-    font-weight: 700;
-    letter-spacing: var(--ls-label);
-    text-transform: uppercase;
+    border-radius: var(--radius-default);
+    color: var(--on-surface);
     cursor: pointer;
-    backdrop-filter: blur(8px);
-    z-index: 30;
-    transition: all var(--transition-fast);
+    font-family: var(--font-data);
+    font-size: var(--text-metadata);
+    z-index: 5;
   }
 
   .forge-toggle:hover {
     border-color: var(--cobalt-accent);
-    color: var(--cobalt-accent);
-    box-shadow: 0 0 8px rgba(203, 78, 61, 0.2);
-  }
-
-  .forge-toggle .material-symbols-outlined {
-    font-size: 18px;
-  }
-
-  .app-footer {
-    display: flex;
-    justify-content: space-between;
-    padding: 0 var(--sp-lg);
-    height: 2.5rem;
-    background: var(--surface-container);
-    border-top: 1px solid var(--outline-variant);
-    color: var(--on-surface-variant);
-    align-items: center;
-    flex-shrink: 0;
   }
 </style>

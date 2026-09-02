@@ -205,8 +205,12 @@ pub fn apply_transform(image: &F32Image, transform: &AffineTransform) -> F32Imag
     for ch in 0..image.channels() {
         for y in 0..height {
             for x in 0..width {
-                let src_x = x as f64 - transform.dx;
-                let src_y = y as f64 - transform.dy;
+                // Forward warp: for output pixel (x, y), read from the source
+                // location the content moved *from*. With dx = +1 the source is
+                // x + 1 (the content shifted right by 1, so what is now at x was
+                // at x + 1 in the original).
+                let src_x = x as f64 + transform.dx;
+                let src_y = y as f64 + transform.dy;
                 let sx = src_x.round() as i64;
                 let sy = src_y.round() as i64;
                 if sx >= 0 && sx < width as i64 && sy >= 0 && sy < height as i64 {

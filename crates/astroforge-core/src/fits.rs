@@ -263,7 +263,10 @@ fn find_data_offset(data: &[u8]) -> Result<usize, FitsError> {
         let block_end = (offset + HEADER_BLOCK_SIZE).min(data.len());
         let block = &data[offset..block_end];
         for i in (0..block.len()).step_by(HEADER_RECORD_SIZE) {
-            let record = &block[i..i.min(block.len())];
+            // Read a full record (80 bytes) when there are enough bytes left;
+            // truncate the final partial record in the last block.
+            let record_end = (i + HEADER_RECORD_SIZE).min(block.len());
+            let record = &block[i..record_end];
             let record_str = String::from_utf8_lossy(record);
             if record_str.starts_with("END") {
                 return Ok(offset + HEADER_BLOCK_SIZE);

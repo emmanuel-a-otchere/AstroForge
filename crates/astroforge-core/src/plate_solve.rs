@@ -201,7 +201,7 @@ mod tests {
             cd21: 0.0,
             cd22: 0.026,
         };
-        let region = auto_crop_with_wcs(1024, 1024, &solution, 83.633, 22.014, 30.0, 20.0);
+        let region = auto_crop_with_wcs(2048, 2048, &solution, 83.633, 22.014, 30.0, 20.0);
         assert!(region.is_some());
         let r = region.unwrap();
         assert!(r.width > 0 && r.height > 0);

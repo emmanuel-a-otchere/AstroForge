@@ -22,7 +22,7 @@ impl SessionStore {
         name: &str,
         target_type: Option<&str>,
     ) -> Result<String, SessionError> {
-        let id = format!("proj_{}", timestamp());
+        let id = format!("proj_{}_{}", timestamp(), unique_nonce());
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO projects (id, name, target_type) VALUES (?1, ?2, ?3)",
@@ -37,7 +37,7 @@ impl SessionStore {
         source_dir: Option<&str>,
         verbosity: &str,
     ) -> Result<String, SessionError> {
-        let id = format!("sess_{}", timestamp());
+        let id = format!("sess_{}_{}", timestamp(), unique_nonce());
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO sessions (id, project_id, source_dir, verbosity, status) VALUES (?1, ?2, ?3, ?4, 'created')",
@@ -174,6 +174,15 @@ fn timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+// Monotonic counter for IDs that are created within the same millisecond
+// (which the system clock cannot disambiguate). Combined with the timestamp,
+// it guarantees uniqueness even when two sessions/projects are created back-to-back.
+fn unique_nonce() -> u32 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NONCE: AtomicU32 = AtomicU32::new(0);
+    NONCE.fetch_add(1, Ordering::Relaxed)
 }
 
 #[cfg(test)]

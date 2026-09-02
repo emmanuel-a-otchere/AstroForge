@@ -124,7 +124,10 @@ mod tests {
         let mut img = F32Image::new(w, h, 1);
         for y in 0..h {
             for x in 0..w {
-                img[(0, y, x)] = if (x + y) % 2 == 0 { 200.0 } else { 0.0 };
+                // Vertical edge down the middle: left half 0, right half 200.
+                // This produces strong horizontal gradients at the edge, which
+                // the Laplacian-style sharpness metric actually picks up.
+                img[(0, y, x)] = if x < w / 2 { 0.0 } else { 200.0 };
             }
         }
         img

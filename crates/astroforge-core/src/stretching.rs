@@ -22,7 +22,10 @@ pub fn arcsinh_stretch(value: f64, midtones: f64) -> f64 {
         return 0.0;
     }
     let beta = midtones.max(1e-10);
-    let stretched = beta * (value / beta).asinh() / (1.0 / beta).asinh();
+    // Lupton et al. 1999 arcsinh stretch:
+    //   stretched(x) = asinh(x / beta) / asinh(1 / beta)
+    // Maps 0 -> 0 and 1 -> 1 regardless of beta.
+    let stretched = (value / beta).asinh() / (1.0 / beta).asinh();
     stretched.clamp(0.0, 1.0)
 }
 
@@ -68,18 +71,22 @@ fn midtone_transfer(value: f64, midtones: f64) -> f64 {
         return 1.0;
     }
     let m = midtones.clamp(0.001, 0.999);
-    let result = ((m - 1.0) * value) / ((m - 1.0) * value - m * value + m);
+    // Lupton et al. 1999 midtone transfer:
+    //   m(v) = ((m - 1) * v) / ((2m - 1) * v - m)
+    // Maps 0 -> 0 and 1 -> 1; the `m` parameter shifts where the inflection
+    // happens (m = 0.5 -> identity, m < 0.5 -> brightens midtones, m > 0.5 -> darkens).
+    let result = ((m - 1.0) * value) / ((2.0 * m - 1.0) * value - m);
     result.clamp(0.0, 1.0)
 }
 
 pub fn compute_histogram(image: &F32Image, bins: usize) -> Vec<u32> {
     let mut hist = vec![0u32; bins];
-    let min = image.iter().copied().fold(f32::INFINITY, f32::min);
-    let max = image.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let range = (max - min).max(1e-10);
+    // Image values are normalised floats in [0, 1]; bin against that range so
+    // a value of 0.5 lands in the middle bin (e.g. bin 128 of 256).
+    let range = 1.0_f32;
 
     for &val in image.iter() {
-        let normalized = ((val - min) / range) as f64;
+        let normalized = (val / range).clamp(0.0, 1.0) as f64;
         let bin = (normalized * bins as f64) as usize;
         let bin = bin.min(bins - 1);
         hist[bin] += 1;

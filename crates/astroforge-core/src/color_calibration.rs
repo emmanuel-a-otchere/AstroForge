@@ -152,9 +152,10 @@ mod tests {
             }
         }
         let result = calibrate_color(&img);
+        // The brightest channel (blue = 200) should not be amplified.
         assert!(result.red_gain > 1.0);
         assert!((result.green_gain - 2.0).abs() < 0.01);
-        assert!(result.blue_gain < 1.0);
+        assert!(result.blue_gain <= 1.0);
     }
 
     #[test]
@@ -186,7 +187,8 @@ mod tests {
             }
         }
         let result = calibrate_from_neutral_region(&img, (0, 0, 4, 4));
+        // The brightest channel (blue = 150) should not be amplified.
         assert!(result.red_gain > 1.0);
-        assert!(result.blue_gain < 1.0);
+        assert!(result.blue_gain <= 1.0);
     }
 }

@@ -10,12 +10,12 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import ScreenCard from "./ScreenCard.svelte";
-  import { getGallery, type GalleryItem } from "../lib/gallery";
+  import { galleryStore, type GalleryItem } from "../lib/gallery";
 
   let { children }: { children?: Snippet } = $props();
 
   let activeItem: GalleryItem | null = $state(
-    getGallery().find((it: GalleryItem) => it.status === "completed") ?? getGallery()[0] ?? null
+    $galleryStore.find((it: GalleryItem) => it.status === "completed") ?? $galleryStore[0] ?? null
   );
   let activeTab: "stretch" | "denoise" | "histogram" | "color" | "sharpen" =
     $state("stretch");
@@ -221,7 +221,7 @@
 
   <aside class="refine-sessions">
     <div class="refine-sessions-label label-caps">Pick session</div>
-    {#each getGallery().filter((it: GalleryItem) => it.status === "completed") as item}
+    {#each $galleryStore.filter((it: GalleryItem) => it.status === "completed") as item}
       <button
         type="button"
         class="refine-session-chip"

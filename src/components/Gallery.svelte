@@ -9,7 +9,7 @@
     columns=3  -> reserved for future wide contexts
 -->
 <script lang="ts">
-  import { getGallery, filterByTab, type GalleryItem, type GalleryTab } from "../lib/gallery";
+  import { galleryStore, filterByTab, type GalleryItem, type GalleryTab } from "../lib/gallery";
 
   let {
     columns = 1,
@@ -23,11 +23,11 @@
 
   let activeTab: GalleryTab = $state("recent");
 
-  let visibleItems: GalleryItem[] = $derived(filterByTab(getGallery(), activeTab));
+  let visibleItems: GalleryItem[] = $derived(filterByTab($galleryStore, activeTab));
   let counts = $derived({
-    recent: getGallery().length,
-    processing: getGallery().filter((i: GalleryItem) => i.status === "processing").length,
-    completed: getGallery().filter((i: GalleryItem) => i.status === "completed").length,
+    recent: $galleryStore.length,
+    processing: $galleryStore.filter((i) => i.status === "processing").length,
+    completed: $galleryStore.filter((i) => i.status === "completed").length,
   });
 
   function pickItem(item: GalleryItem) {

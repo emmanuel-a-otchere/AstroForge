@@ -24,7 +24,7 @@
 
 <div class="mode-b">
   <aside class="mode-b-rail">
-    <Gallery variantLayout="rail" maxTiles={8} />
+    <Gallery columns={1} />
   </aside>
 
   <main class="mode-b-canvas">

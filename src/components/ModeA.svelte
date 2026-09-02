@@ -18,7 +18,7 @@
 <div class="mode-a">
   <!-- Persistent canvas area behind the overlay -->
   <div class="mode-a-canvas">
-    <Gallery variantLayout="grid" maxTiles={6} />
+    <Gallery columns={2} />
   </div>
 
   <!-- Overlay card slot -->

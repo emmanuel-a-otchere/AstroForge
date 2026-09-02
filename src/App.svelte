@@ -23,6 +23,8 @@
   import AppShell from "./components/AppShell.svelte";
   import ModeA from "./components/ModeA.svelte";
   import ModeB from "./components/ModeB.svelte";
+  import ModeC from "./components/ModeC.svelte";
+  import ModeD from "./components/ModeD.svelte";
   import {
     initSession,
     sessionStore,
@@ -343,6 +345,10 @@
       {/if}
       {/snippet}
     </ModeB>
+  {:else if currentMode === "c"}
+    <ModeC />
+  {:else if currentMode === "d"}
+    <ModeD />
   {/if}
 </AppShell>
 

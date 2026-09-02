@@ -77,11 +77,21 @@ let cachedItems: GalleryItem[] | null = null;
  * Async to match the eventual rusqlite-backed API. Returns the gallery
  * items in display order (most-recent first).
  */
-export async function loadGallery(): Promise<GalleryItem[]> {
+/**
+ * Sync accessor — useful for components that need immediate access
+ * (ModeC, ModeD). Same cached list as loadGallery(); the async version
+ * is preferred for first-load since it lets us await the rusqlite path
+ * in Phase 4.
+ */
+export function getGallery(): GalleryItem[] {
   if (cachedItems === null) {
     cachedItems = [...PLACEHOLDER_ITEMS];
   }
   return cachedItems;
+}
+
+export async function loadGallery(): Promise<GalleryItem[]> {
+  return getGallery();
 }
 
 /**

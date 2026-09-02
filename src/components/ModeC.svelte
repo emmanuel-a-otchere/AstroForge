@@ -349,7 +349,7 @@
     align-items: flex-start;
     gap: var(--sp-md);
     padding: var(--sp-md);
-    background: rgba(255, 180, 168, 0.08);
+    background: var(--tile-glow-warm-dim);
     border: 1px solid var(--primary-container);
     border-radius: var(--radius-default);
   }
@@ -404,12 +404,12 @@
   }
 
   .stage-done {
-    border-color: rgba(185, 240, 197, 0.3);
+    border-color: var(--success-border-dim);
   }
 
   .stage-active {
     border-color: var(--cobalt-accent);
-    background: rgba(203, 78, 61, 0.08);
+    background: var(--glow-cobalt-dim);
   }
 
   .stage-index {
@@ -432,7 +432,7 @@
   }
 
   .stage-done .stage-status {
-    color: #b9f0c5;
+    color: var(--success-fg);
   }
 
   .stage-active .stage-status {

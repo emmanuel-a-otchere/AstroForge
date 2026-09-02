@@ -390,8 +390,8 @@
     width: 100%;
     aspect-ratio: 3 / 2;
     background:
-      radial-gradient(circle at 25% 30%, rgba(255, 180, 168, 0.18), transparent 50%),
-      radial-gradient(circle at 80% 70%, rgba(123, 162, 219, 0.18), transparent 50%),
+      radial-gradient(circle at 25% 30%, var(--tile-glow-warm-strong), transparent 50%),
+      radial-gradient(circle at 80% 70%, var(--tile-glow-cool-strong), transparent 50%),
       var(--surface-container-high);
     border-radius: var(--radius-sm);
     display: flex;
@@ -495,6 +495,6 @@
 
   .refine-session-chip.active {
     border-color: var(--cobalt-accent);
-    background: rgba(203, 78, 61, 0.12);
+    background: var(--overlay-card);
   }
 </style>

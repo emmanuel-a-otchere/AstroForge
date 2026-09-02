@@ -59,17 +59,17 @@
     background:
       radial-gradient(
         ellipse at 30% 20%,
-        rgba(203, 78, 61, 0.18),
+        var(--glow-cobalt-soft),
         transparent 60%
       ),
       radial-gradient(
         ellipse at 70% 80%,
-        rgba(187, 195, 255, 0.12),
+        var(--tile-glow-cool-strong),
         transparent 60%
       ),
       radial-gradient(
         ellipse at 50% 50%,
-        rgba(40, 42, 43, 0.4),
+        var(--canvas-glow-mid),
         transparent 70%
       );
     transition: opacity var(--transition-slow);
@@ -79,12 +79,12 @@
     position: absolute;
     inset: 0;
     background-image:
-      radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.6) 0.5px, transparent 1px),
-      radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.5) 0.5px, transparent 1px),
-      radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.4) 0.5px, transparent 1px),
-      radial-gradient(circle at 85% 25%, rgba(255, 255, 255, 0.5) 0.5px, transparent 1px),
-      radial-gradient(circle at 15% 70%, rgba(255, 255, 255, 0.4) 0.5px, transparent 1px),
-      radial-gradient(circle at 60% 15%, rgba(255, 255, 255, 0.35) 0.5px, transparent 1px);
+      radial-gradient(circle at 20% 30%, var(--star-color-100) 0.5px, transparent 1px),
+      radial-gradient(circle at 70% 60%, var(--star-color-83) 0.5px, transparent 1px),
+      radial-gradient(circle at 40% 80%, var(--star-color-67) 0.5px, transparent 1px),
+      radial-gradient(circle at 85% 25%, var(--star-color-83) 0.5px, transparent 1px),
+      radial-gradient(circle at 15% 70%, var(--star-color-67) 0.5px, transparent 1px),
+      radial-gradient(circle at 60% 15%, var(--star-color-58) 0.5px, transparent 1px);
     transition: opacity var(--transition-slow);
   }
 
@@ -94,12 +94,12 @@
     background:
       radial-gradient(
         ellipse at 30% 20%,
-        rgba(203, 78, 61, 0.32),
+        var(--canvas-mode-d-warm),
         transparent 60%
       ),
       radial-gradient(
         ellipse at 70% 80%,
-        rgba(187, 195, 255, 0.24),
+        var(--tile-glow-cool-strong),
         transparent 60%
       );
   }

@@ -199,7 +199,7 @@
     border-radius: 50%;
     background: var(--cobalt-accent);
     cursor: pointer;
-    box-shadow: 0 0 6px rgba(203, 78, 61, 0.3);
+    box-shadow: 0 0 6px var(--glow-cobalt-strong);
   }
 
   .slider::-moz-range-thumb {

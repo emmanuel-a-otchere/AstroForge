@@ -569,7 +569,7 @@
 
   .btn-start:hover {
     background: var(--primary-container);
-    box-shadow: 0 0 16px rgba(203, 78, 61, 0.3);
+    box-shadow: 0 0 16px var(--glow-cobalt-strong);
   }
 
   .btn-start .material-symbols-outlined {

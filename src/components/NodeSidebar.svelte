@@ -138,7 +138,7 @@
   .node-card.active {
     border-color: var(--cobalt-accent);
     background: var(--surface-container-high);
-    box-shadow: 0 0 8px rgba(203, 78, 61, 0.2);
+    box-shadow: 0 0 8px var(--glow-cobalt-mid);
   }
 
   .node-card.completed {

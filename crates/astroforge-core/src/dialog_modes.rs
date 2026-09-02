@@ -1,4 +1,3 @@
-use crate::image::F32Image;
 use crate::mvp_pipeline::{DialogMode, Verbosity};
 use serde::{Deserialize, Serialize};
 
@@ -57,11 +56,19 @@ pub fn get_verbosity_params(verbosity: &Verbosity) -> Vec<&'static str> {
     match verbosity {
         Verbosity::Beginner => vec!["auto"],
         Verbosity::Intermediate => vec!["preview", "metrics", "ok_adjust_skip"],
-        Verbosity::Expert => vec!["full_params", "histogram", "advanced_controls", "save_preset"],
+        Verbosity::Expert => vec![
+            "full_params",
+            "histogram",
+            "advanced_controls",
+            "save_preset",
+        ],
     }
 }
 
-pub fn save_preset(name: &str, params: &std::collections::HashMap<String, serde_json::Value>) -> serde_json::Value {
+pub fn save_preset(
+    name: &str,
+    params: &std::collections::HashMap<String, serde_json::Value>,
+) -> serde_json::Value {
     serde_json::json!({
         "name": name,
         "params": params,
@@ -89,7 +96,10 @@ mod tests {
         let dialog = create_manual_dialog("stacking", params);
         assert_eq!(dialog.mode, DialogMode::Manual);
         assert_eq!(dialog.verbosity, Verbosity::Expert);
-        assert!(matches!(dialog.user_decision, Some(UserDecision::Adjust(_))));
+        assert!(matches!(
+            dialog.user_decision,
+            Some(UserDecision::Adjust(_))
+        ));
     }
 
     #[test]

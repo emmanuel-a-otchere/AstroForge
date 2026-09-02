@@ -41,15 +41,13 @@ pub fn plate_solve(
 ) -> PlateSolveResult {
     match backend {
         PlateSolveBackend::Astap => solve_with_astap(_image_data, _focal_length_mm, _pixel_size_um),
-        PlateSolveBackend::AstrometryNet => solve_with_astrometry(_image_data, _focal_length_mm, _pixel_size_um),
+        PlateSolveBackend::AstrometryNet => {
+            solve_with_astrometry(_image_data, _focal_length_mm, _pixel_size_um)
+        }
     }
 }
 
-fn solve_with_astap(
-    _image_data: &[u8],
-    focal_length: f64,
-    pixel_size: f64,
-) -> PlateSolveResult {
+fn solve_with_astap(_image_data: &[u8], _focal_length: f64, _pixel_size: f64) -> PlateSolveResult {
     PlateSolveResult {
         solution: None,
         backend: PlateSolveBackend::Astap,
@@ -132,9 +130,9 @@ pub struct StarAnnotation {
 }
 
 pub fn annotate_stars(
-    solution: &WcsSolution,
-    image_width: usize,
-    image_height: usize,
+    _solution: &WcsSolution,
+    _image_width: usize,
+    _image_height: usize,
 ) -> Vec<StarAnnotation> {
     Vec::new()
 }
@@ -203,7 +201,7 @@ mod tests {
             cd21: 0.0,
             cd22: 0.026,
         };
-        let region = auto_crop_with_wcs(1024, 1024, &solution, 83.633, 22.014, 30.0, 20.0);
+        let region = auto_crop_with_wcs(2048, 2048, &solution, 83.633, 22.014, 30.0, 20.0);
         assert!(region.is_some());
         let r = region.unwrap();
         assert!(r.width > 0 && r.height > 0);

@@ -71,8 +71,16 @@ pub fn extract_oiii(image: &F32Image) -> F32Image {
     let mut result = F32Image::new(width, height, 1);
     for y in 0..height {
         for x in 0..width {
-            let blue = if image.channels() > 2 { image[(2, y, x)] } else { 0.0 };
-            let green = if image.channels() > 1 { image[(1, y, x)] } else { 0.0 };
+            let blue = if image.channels() > 2 {
+                image[(2, y, x)]
+            } else {
+                0.0
+            };
+            let green = if image.channels() > 1 {
+                image[(1, y, x)]
+            } else {
+                0.0
+            };
             result[(0, y, x)] = (blue + green) / 2.0;
         }
     }
@@ -165,10 +173,7 @@ pub fn scnr_magenta(image: &F32Image, amount: f32) -> F32Image {
     result
 }
 
-pub fn normalize_channel_ratio(
-    image: &F32Image,
-    target_ratios: (f32, f32, f32),
-) -> F32Image {
+pub fn normalize_channel_ratio(image: &F32Image, target_ratios: (f32, f32, f32)) -> F32Image {
     let mut result = image.clone();
     if result.channels() < 3 {
         return result;
@@ -221,18 +226,42 @@ mod tests {
 
     #[test]
     fn test_narrowband_filter_detection() {
-        assert_eq!(NarrowbandFilter::from_filter_name("Ha"), NarrowbandFilter::Ha);
-        assert_eq!(NarrowbandFilter::from_filter_name("OIII"), NarrowbandFilter::OIII);
-        assert_eq!(NarrowbandFilter::from_filter_name("SII"), NarrowbandFilter::SII);
-        assert_eq!(NarrowbandFilter::from_filter_name("L"), NarrowbandFilter::Unknown);
+        assert_eq!(
+            NarrowbandFilter::from_filter_name("Ha"),
+            NarrowbandFilter::Ha
+        );
+        assert_eq!(
+            NarrowbandFilter::from_filter_name("OIII"),
+            NarrowbandFilter::OIII
+        );
+        assert_eq!(
+            NarrowbandFilter::from_filter_name("SII"),
+            NarrowbandFilter::SII
+        );
+        assert_eq!(
+            NarrowbandFilter::from_filter_name("L"),
+            NarrowbandFilter::Unknown
+        );
     }
 
     #[test]
     fn test_detect_narrowband() {
         let groups = vec![
-            LightGroup { filter: "Ha".into(), binning: 1, frame_paths: vec![] },
-            LightGroup { filter: "OIII".into(), binning: 1, frame_paths: vec![] },
-            LightGroup { filter: "L".into(), binning: 1, frame_paths: vec![] },
+            LightGroup {
+                filter: "Ha".into(),
+                binning: 1,
+                frame_paths: vec![],
+            },
+            LightGroup {
+                filter: "OIII".into(),
+                binning: 1,
+                frame_paths: vec![],
+            },
+            LightGroup {
+                filter: "L".into(),
+                binning: 1,
+                frame_paths: vec![],
+            },
         ];
         let narrowband = detect_narrowband(&groups);
         assert_eq!(narrowband.len(), 2);
@@ -241,14 +270,24 @@ mod tests {
     #[test]
     fn test_is_narrowband_session() {
         let groups = vec![
-            LightGroup { filter: "Ha".into(), binning: 1, frame_paths: vec![] },
-            LightGroup { filter: "OIII".into(), binning: 1, frame_paths: vec![] },
+            LightGroup {
+                filter: "Ha".into(),
+                binning: 1,
+                frame_paths: vec![],
+            },
+            LightGroup {
+                filter: "OIII".into(),
+                binning: 1,
+                frame_paths: vec![],
+            },
         ];
         assert!(is_narrowband_session(&groups));
 
-        let groups = vec![
-            LightGroup { filter: "L".into(), binning: 1, frame_paths: vec![] },
-        ];
+        let groups = vec![LightGroup {
+            filter: "L".into(),
+            binning: 1,
+            frame_paths: vec![],
+        }];
         assert!(!is_narrowband_session(&groups));
     }
 

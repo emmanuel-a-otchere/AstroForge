@@ -1,14 +1,11 @@
-use crate::calibration::{self, StreamingCalibrator};
-use crate::export::{self, ProcessingReport, FrameStats, StageParams};
-use crate::fits::FitsHeader;
+use crate::calibration::StreamingCalibrator;
+use crate::export::{FrameStats, ProcessingReport, StageParams};
 use crate::image::F32Image;
-use crate::ingest::{self, FrameInfo, FrameType, SessionManifest};
+use crate::ingest::{FrameType, SessionManifest};
 use crate::registration::{self, AffineTransform};
 use crate::stacking::{self, StreamingStacker};
 use crate::stretching;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
@@ -31,17 +28,12 @@ impl Default for PipelineConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum Verbosity {
+    #[default]
     Beginner,
     Intermediate,
     Expert,
-}
-
-impl Default for Verbosity {
-    fn default() -> Self {
-        Verbosity::Beginner
-    }
 }
 
 impl Verbosity {
@@ -117,16 +109,19 @@ pub fn run_pipeline(
 
     stage_params.push(StageParams {
         stage_id: "registration".into(),
-        params: [("reference_frame".into(), ref_idx.to_string())].into_iter().collect(),
+        params: [("reference_frame".into(), ref_idx.to_string())]
+            .into_iter()
+            .collect(),
     });
 
-    let stack_result = stacking::kappa_sigma_stack(&aligned_frames, config.kappa, config.max_iterations)
-        .unwrap_or_else(|_| stacking::StackResult {
-            image: F32Image::new(1, 1, 1),
-            weight_map: F32Image::new(1, 1, 1),
-            frame_count: 0,
-            rejected_count: 0,
-        });
+    let stack_result =
+        stacking::kappa_sigma_stack(&aligned_frames, config.kappa, config.max_iterations)
+            .unwrap_or_else(|_| stacking::StackResult {
+                image: F32Image::new(1, 1, 1),
+                weight_map: F32Image::new(1, 1, 1),
+                frame_count: 0,
+                rejected_count: 0,
+            });
 
     stage_params.push(StageParams {
         stage_id: "stacking".into(),
@@ -139,11 +134,13 @@ pub fn run_pipeline(
         .collect(),
     });
 
-    let stretched = stretching::auto_stretch(&stack_result.image);
+    let _stretched = stretching::auto_stretch(&stack_result.image);
 
     stage_params.push(StageParams {
         stage_id: "stretching".into(),
-        params: [("method".into(), "arcsinh_auto".into())].into_iter().collect(),
+        params: [("method".into(), "arcsinh_auto".into())]
+            .into_iter()
+            .collect(),
     });
 
     let frame_stats = compute_frame_stats(manifest);
@@ -284,11 +281,7 @@ mod tests {
             make_test_frame(8, 8),
         ];
         let calibrator = StreamingCalibrator::new(None, None, None);
-        let result = run_streaming_pipeline(
-            frames.into_iter(),
-            8, 8, 1,
-            &calibrator,
-        );
+        let result = run_streaming_pipeline(frames.into_iter(), 8, 8, 1, &calibrator);
         assert_eq!(result.frame_count, 3);
     }
 
@@ -296,11 +289,7 @@ mod tests {
     fn test_streaming_pipeline_30_frames() {
         let frames: Vec<F32Image> = (0..30).map(|_| make_test_frame(8, 8)).collect();
         let calibrator = StreamingCalibrator::new(None, None, None);
-        let result = run_streaming_pipeline(
-            frames.into_iter(),
-            8, 8, 1,
-            &calibrator,
-        );
+        let result = run_streaming_pipeline(frames.into_iter(), 8, 8, 1, &calibrator);
         assert_eq!(result.frame_count, 30);
         assert!((result.weight_map[(0, 0, 0)] - 30.0).abs() < 0.01);
     }

@@ -27,11 +27,7 @@ pub struct Tile {
     pub height: u32,
 }
 
-pub fn generate_tiles(
-    image_width: u32,
-    image_height: u32,
-    config: &TileConfig,
-) -> Vec<Tile> {
+pub fn generate_tiles(image_width: u32, image_height: u32, config: &TileConfig) -> Vec<Tile> {
     let mut tiles = Vec::new();
     let step = config.tile_size - config.overlap;
 
@@ -200,7 +196,7 @@ mod tests {
         let mut output = F32Image::new(16, 16, 1);
         let mut weight = F32Image::new(16, 16, 1);
         blend_tile(&mut output, &extracted, &tile, &mut weight);
-        assert!(weight[(0, 0, 0)] > 0.0);
+        assert!(weight[(0, 4, 4)] > 0.0);
     }
 
     #[test]

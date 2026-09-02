@@ -30,22 +30,36 @@ pub fn kappa_sigma_stack(
     for c in 0..channels {
         for y in 0..height {
             for x in 0..width {
-                let mut values: Vec<f32> = frames.iter().map(|f| f[(c, y, x)]).collect();
+                let values: Vec<f32> = frames.iter().map(|f| f[(c, y, x)]).collect();
                 let mut mask: Vec<bool> = vec![true; n];
 
                 for _ in 0..max_iterations {
-                    let active: Vec<f32> = values.iter().zip(&mask).filter(|(_, &m)| m).map(|(&v, _)| v).collect();
+                    let mut active: Vec<f32> = values
+                        .iter()
+                        .zip(&mask)
+                        .filter(|(_, &m)| m)
+                        .map(|(&v, _)| v)
+                        .collect();
                     if active.len() < 3 {
                         break;
                     }
-                    let mean = active.iter().sum::<f32>() / active.len() as f32;
-                    let var = active.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / active.len() as f32;
-                    let std = var.sqrt();
-                    let threshold = kappa as f32 * std;
+                    // Robust kappa-sigma clipping using median absolute deviation
+                    // (MAD). Mean+std is fooled by outliers because the outlier
+                    // itself inflates the std; MAD is resistent to them.
+                    active.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    let median = active[active.len() / 2];
+                    let mut deviations: Vec<f32> =
+                        active.iter().map(|&v| (v - median).abs()).collect();
+                    deviations
+                        .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    let mad = deviations[deviations.len() / 2];
+                    // 1.4826 makes MAD a robust proxy for sigma on Gaussian-like distributions.
+                    let sigma = 1.4826 * mad;
+                    let threshold = kappa as f32 * sigma;
 
                     let mut changed = false;
                     for i in 0..n {
-                        if mask[i] && (values[i] - mean).abs() > threshold {
+                        if mask[i] && (values[i] - median).abs() > threshold {
                             mask[i] = false;
                             changed = true;
                             rejected_count += 1;
@@ -56,7 +70,12 @@ pub fn kappa_sigma_stack(
                     }
                 }
 
-                let active: Vec<f32> = values.iter().zip(&mask).filter(|(_, &m)| m).map(|(&v, _)| v).collect();
+                let active: Vec<f32> = values
+                    .iter()
+                    .zip(&mask)
+                    .filter(|(_, &m)| m)
+                    .map(|(&v, _)| v)
+                    .collect();
                 if active.is_empty() {
                     result[(c, y, x)] = 0.0;
                 } else {
@@ -108,7 +127,8 @@ impl StreamingStacker {
 
     pub fn result(&self) -> StackResult {
         let mut image = F32Image::new(self.sum.width(), self.sum.height(), self.sum.channels());
-        let mut weight_map = F32Image::new(self.sum.width(), self.sum.height(), self.sum.channels());
+        let mut weight_map =
+            F32Image::new(self.sum.width(), self.sum.height(), self.sum.channels());
 
         for c in 0..image.channels() {
             for y in 0..image.height() {

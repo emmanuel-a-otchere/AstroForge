@@ -1,5 +1,5 @@
-use crate::image::F32Image;
 use crate::debayer::BayerPattern;
+use crate::image::F32Image;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,9 +53,7 @@ pub fn detect_bayer(image: &F32Image) -> BayerDetectionResult {
         None
     };
 
-    let method = if confidence > 0.85 {
-        DetectionMethod::Statistical
-    } else if confidence > 0.5 {
+    let method = if confidence > 0.5 {
         DetectionMethod::Statistical
     } else {
         DetectionMethod::AssumeRGB
@@ -131,7 +129,7 @@ fn green_variance_test(image: &F32Image) -> f64 {
 
     for y in 0..height - 1 {
         for x in 0..width - 1 {
-            let pos = ((y % 2) * 2 + (x % 2)) as usize;
+            let pos = (y % 2) * 2 + (x % 2);
             green_positions[pos] += image[(c, y, x)] as f64;
             green_counts[pos] += 1;
         }
@@ -145,7 +143,11 @@ fn green_variance_test(image: &F32Image) -> f64 {
     }
 
     let overall_mean = means.iter().sum::<f64>() / 4.0;
-    let variance: f64 = means.iter().map(|m| (m - overall_mean).powi(2)).sum::<f64>() / 4.0;
+    let variance: f64 = means
+        .iter()
+        .map(|m| (m - overall_mean).powi(2))
+        .sum::<f64>()
+        / 4.0;
 
     let g0_g2_diff = (means[0] - means[2]).abs();
     let g1_g3_diff = (means[1] - means[3]).abs();
@@ -171,7 +173,7 @@ fn detect_pattern(image: &F32Image) -> BayerPattern {
 
     for y in 0..sample_size {
         for x in 0..sample_size {
-            let pos = ((y % 2) * 2 + (x % 2)) as usize;
+            let pos = (y % 2) * 2 + (x % 2);
             corner_means[pos] += image[(c, y, x)] as f64;
             counts[pos] += 1;
         }

@@ -1,8 +1,7 @@
 use crate::image::F32Image;
-use ndarray::s;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Write;
 
 pub const HEADER_RECORD_SIZE: usize = 80;
 pub const HEADER_BLOCK_SIZE: usize = 2880;
@@ -156,7 +155,10 @@ pub fn write_header(header: &FitsHeader, writer: &mut impl Write) -> Result<(), 
     }
 
     for (key, value) in &header.cards {
-        if !matches!(key.as_str(), "SIMPLE" | "BITPIX" | "NAXIS" | "NAXIS1" | "NAXIS2" | "NAXIS3") {
+        if !matches!(
+            key.as_str(),
+            "SIMPLE" | "BITPIX" | "NAXIS" | "NAXIS1" | "NAXIS2" | "NAXIS3"
+        ) {
             records.push(format_card(key, value));
         }
     }
@@ -189,10 +191,7 @@ fn format_card(key: &str, value: &str) -> String {
     }
 }
 
-pub fn read_f32_image(
-    data: &[u8],
-    header: &FitsHeader,
-) -> Result<F32Image, FitsError> {
+pub fn read_f32_image(data: &[u8], header: &FitsHeader) -> Result<F32Image, FitsError> {
     let width = header.naxis1().ok_or(FitsError::MissingAxis("NAXIS1"))? as usize;
     let height = header.naxis2().ok_or(FitsError::MissingAxis("NAXIS2"))? as usize;
     let channels = header.naxis3().unwrap_or(1) as usize;
@@ -264,7 +263,10 @@ fn find_data_offset(data: &[u8]) -> Result<usize, FitsError> {
         let block_end = (offset + HEADER_BLOCK_SIZE).min(data.len());
         let block = &data[offset..block_end];
         for i in (0..block.len()).step_by(HEADER_RECORD_SIZE) {
-            let record = &block[i..i.min(block.len())];
+            // Read a full record (80 bytes) when there are enough bytes left;
+            // truncate the final partial record in the last block.
+            let record_end = (i + HEADER_RECORD_SIZE).min(block.len());
+            let record = &block[i..record_end];
             let record_str = String::from_utf8_lossy(record);
             if record_str.starts_with("END") {
                 return Ok(offset + HEADER_BLOCK_SIZE);
@@ -289,7 +291,6 @@ pub enum FitsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     #[test]
     fn test_header_parse_and_write_roundtrip() {

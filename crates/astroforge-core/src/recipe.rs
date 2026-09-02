@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Per-stage parameter map produced by [`apply_recipe`].
+pub type StageParams = Vec<(String, HashMap<String, serde_json::Value>)>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recipe {
     pub schema_version: String,
@@ -144,7 +147,7 @@ pub enum ValidationResult {
 pub fn apply_recipe(
     recipe: &Recipe,
     available_models: &[String],
-) -> Result<Vec<(String, HashMap<String, serde_json::Value>)>, ApplyError> {
+) -> Result<StageParams, ApplyError> {
     match validate_compatibility(recipe, available_models) {
         ValidationResult::Compatible => {}
         ValidationResult::MissingModels(missing) => {
@@ -249,7 +252,9 @@ mod tests {
         recipe.add_model("swinir-denoise-astro", ModelType::Deterministic);
         let available = vec!["other-model".to_string()];
         match validate_compatibility(&recipe, &available) {
-            ValidationResult::MissingModels(m) => assert!(m.contains(&"swinir-denoise-astro".to_string())),
+            ValidationResult::MissingModels(m) => {
+                assert!(m.contains(&"swinir-denoise-astro".to_string()))
+            }
             _ => panic!("Expected MissingModels"),
         }
     }

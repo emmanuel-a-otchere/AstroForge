@@ -83,8 +83,12 @@ pub fn classify_frame(path: &Path, file_data: &[u8]) -> FrameInfo {
         path: path.to_path_buf(),
         frame_type,
         exptime: header.as_ref().and_then(|h| h.exptime()),
-        filter: header.as_ref().and_then(|h| h.filter().map(|s| s.to_string())),
-        date_obs: header.as_ref().and_then(|h| h.date_obs().map(|s| s.to_string())),
+        filter: header
+            .as_ref()
+            .and_then(|h| h.filter().map(|s| s.to_string())),
+        date_obs: header
+            .as_ref()
+            .and_then(|h| h.date_obs().map(|s| s.to_string())),
         ccd_temp: header.as_ref().and_then(|h| h.ccd_temp()),
         width: header.as_ref().and_then(|h| h.naxis1()),
         height: header.as_ref().and_then(|h| h.naxis2()),
@@ -127,7 +131,11 @@ fn determine_frame_type(header: &Option<FitsHeader>, path: &Path) -> FrameType {
         }
     }
 
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     if name.contains("dark") {
         FrameType::Dark
     } else if name.contains("flat") {
@@ -157,7 +165,8 @@ fn detect_anomalies(header: &Option<FitsHeader>) -> Vec<String> {
 }
 
 pub fn group_lights(frames: &[FrameInfo]) -> Vec<LightGroup> {
-    let mut groups: std::collections::HashMap<(String, i64), Vec<PathBuf>> = std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<(String, i64), Vec<PathBuf>> =
+        std::collections::HashMap::new();
 
     for frame in frames {
         if frame.frame_type != FrameType::Light {
@@ -181,7 +190,11 @@ pub fn group_lights(frames: &[FrameInfo]) -> Vec<LightGroup> {
         .collect()
 }
 
-pub fn build_manifest(session_id: &str, source_dir: &str, frames: Vec<FrameInfo>) -> SessionManifest {
+pub fn build_manifest(
+    session_id: &str,
+    source_dir: &str,
+    frames: Vec<FrameInfo>,
+) -> SessionManifest {
     let light_groups = group_lights(&frames);
     SessionManifest {
         session_id: session_id.to_string(),
@@ -199,42 +212,75 @@ mod tests {
     fn test_determine_frame_type_from_header() {
         let mut header = FitsHeader::new();
         header.set("IMAGETYP", "LIGHT");
-        assert_eq!(determine_frame_type(&Some(header), Path::new("test.fits")), FrameType::Light);
+        assert_eq!(
+            determine_frame_type(&Some(header), Path::new("test.fits")),
+            FrameType::Light
+        );
 
         let mut header = FitsHeader::new();
         header.set("IMAGETYP", "DARK");
-        assert_eq!(determine_frame_type(&Some(header), Path::new("test.fits")), FrameType::Dark);
+        assert_eq!(
+            determine_frame_type(&Some(header), Path::new("test.fits")),
+            FrameType::Dark
+        );
 
         let mut header = FitsHeader::new();
         header.set("IMAGETYP", "FLAT");
-        assert_eq!(determine_frame_type(&Some(header), Path::new("test.fits")), FrameType::Flat);
+        assert_eq!(
+            determine_frame_type(&Some(header), Path::new("test.fits")),
+            FrameType::Flat
+        );
 
         let mut header = FitsHeader::new();
         header.set("IMAGETYP", "BIAS");
-        assert_eq!(determine_frame_type(&Some(header), Path::new("test.fits")), FrameType::Bias);
+        assert_eq!(
+            determine_frame_type(&Some(header), Path::new("test.fits")),
+            FrameType::Bias
+        );
     }
 
     #[test]
     fn test_determine_frame_type_from_exptime() {
         let mut header = FitsHeader::new();
         header.set("EXPTIME", "0");
-        assert_eq!(determine_frame_type(&Some(header), Path::new("test.fits")), FrameType::Bias);
+        assert_eq!(
+            determine_frame_type(&Some(header), Path::new("test.fits")),
+            FrameType::Bias
+        );
 
         let mut header = FitsHeader::new();
         header.set("EXPTIME", "0.5");
-        assert_eq!(determine_frame_type(&Some(header), Path::new("test.fits")), FrameType::Dark);
+        assert_eq!(
+            determine_frame_type(&Some(header), Path::new("test.fits")),
+            FrameType::Dark
+        );
 
         let mut header = FitsHeader::new();
         header.set("EXPTIME", "120");
-        assert_eq!(determine_frame_type(&Some(header), Path::new("test.fits")), FrameType::Light);
+        assert_eq!(
+            determine_frame_type(&Some(header), Path::new("test.fits")),
+            FrameType::Light
+        );
     }
 
     #[test]
     fn test_determine_frame_type_from_filename() {
-        assert_eq!(determine_frame_type(&None, Path::new("dark_001.fits")), FrameType::Dark);
-        assert_eq!(determine_frame_type(&None, Path::new("flat_001.fits")), FrameType::Flat);
-        assert_eq!(determine_frame_type(&None, Path::new("bias_001.fits")), FrameType::Bias);
-        assert_eq!(determine_frame_type(&None, Path::new("light_001.fits")), FrameType::Light);
+        assert_eq!(
+            determine_frame_type(&None, Path::new("dark_001.fits")),
+            FrameType::Dark
+        );
+        assert_eq!(
+            determine_frame_type(&None, Path::new("flat_001.fits")),
+            FrameType::Flat
+        );
+        assert_eq!(
+            determine_frame_type(&None, Path::new("bias_001.fits")),
+            FrameType::Bias
+        );
+        assert_eq!(
+            determine_frame_type(&None, Path::new("light_001.fits")),
+            FrameType::Light
+        );
     }
 
     #[test]

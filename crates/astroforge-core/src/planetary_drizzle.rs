@@ -55,7 +55,8 @@ pub fn planetary_drizzle(
                         let current_w = weight_map[(c, out_y, out_x)];
                         let new_w = current_w + w;
                         if new_w > 0.0 {
-                            output[(c, out_y, out_x)] = (output[(c, out_y, out_x)] * current_w + val * w) / new_w;
+                            output[(c, out_y, out_x)] =
+                                (output[(c, out_y, out_x)] * current_w + val * w) / new_w;
                             weight_map[(c, out_y, out_x)] = new_w;
                         }
                     }
@@ -108,7 +109,10 @@ mod tests {
     fn test_drizzle_2x_scale() {
         let frame = make_uniform(8, 8, 100.0);
         let offsets = vec![(0.0, 0.0)];
-        let config = DrizzleConfig { scale: 2.0, pixfrac: 0.6 };
+        let config = DrizzleConfig {
+            scale: 2.0,
+            pixfrac: 0.6,
+        };
         let result = planetary_drizzle(&[frame], &offsets, &config);
         assert_eq!(result.width(), 16);
         assert_eq!(result.height(), 16);

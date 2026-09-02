@@ -1,5 +1,5 @@
+use crate::dip::{dip_denoise, DipConfig};
 use crate::image::F32Image;
-use crate::dip::{DipConfig, dip_denoise};
 
 pub fn planetary_stretch(image: &F32Image, aggression: f32) -> F32Image {
     let mut result = image.clone();
@@ -173,10 +173,7 @@ mod tests {
 
     #[test]
     fn test_dip_coadd() {
-        let frames = vec![
-            make_uniform(4, 4, 100.0),
-            make_uniform(4, 4, 200.0),
-        ];
+        let frames = vec![make_uniform(4, 4, 100.0), make_uniform(4, 4, 200.0)];
         let config = DipConfig {
             max_iterations: 10,
             ..Default::default()

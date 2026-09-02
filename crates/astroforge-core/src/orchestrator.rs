@@ -1,4 +1,4 @@
-use crate::pipeline::{PipelineDag, Stage, StageContext, StageError, StageResult};
+use crate::pipeline::{PipelineDag, Stage, StageContext, StageResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 

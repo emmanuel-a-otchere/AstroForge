@@ -1,10 +1,9 @@
 use crate::image::F32Image;
-use ndarray::s;
 
 pub fn build_master_dark(
     frames: &[F32Image],
-    exptime: f64,
-    ccd_temp: Option<f64>,
+    _exptime: f64,
+    _ccd_temp: Option<f64>,
 ) -> Result<F32Image, CalibrationError> {
     if frames.is_empty() {
         return Err(CalibrationError::NoFrames);
@@ -54,9 +53,13 @@ pub fn apply_calibration(
         for c in 0..result.channels() {
             for y in 0..result.height() {
                 for x in 0..result.width() {
-                    let f = flat[(c.min(flat.channels() - 1), y.min(flat.height() - 1), x.min(flat.width() - 1))];
+                    let f = flat[(
+                        c.min(flat.channels() - 1),
+                        y.min(flat.height() - 1),
+                        x.min(flat.width() - 1),
+                    )];
                     if f.abs() > 1e-10 {
-                        result[(c, y, x)] /= f / median as f32;
+                        result[(c, y, x)] /= f / median;
                     }
                 }
             }
@@ -66,10 +69,7 @@ pub fn apply_calibration(
     result
 }
 
-pub fn apply_calibration_lights_only(
-    light: &F32Image,
-    master_flat: Option<&F32Image>,
-) -> F32Image {
+pub fn apply_calibration_lights_only(light: &F32Image, master_flat: Option<&F32Image>) -> F32Image {
     apply_calibration(light, None, master_flat, None)
 }
 
@@ -107,7 +107,7 @@ fn sigma_clipped_median_combine(
     sigma: f64,
     max_iters: u32,
 ) -> Result<F32Image, CalibrationError> {
-    let n = frames.len();
+    let _n = frames.len();
     let channels = frames[0].channels();
     let height = frames[0].height();
     let width = frames[0].width();
@@ -117,14 +117,12 @@ fn sigma_clipped_median_combine(
     for c in 0..channels {
         for y in 0..height {
             for x in 0..width {
-                let mut values: Vec<f32> = frames
-                    .iter()
-                    .map(|f| f[(c, y, x)])
-                    .collect();
+                let mut values: Vec<f32> = frames.iter().map(|f| f[(c, y, x)]).collect();
 
                 for _ in 0..max_iters {
                     let mean = values.iter().sum::<f32>() / values.len() as f32;
-                    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32;
+                    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f32>()
+                        / values.len() as f32;
                     let std = var.sqrt();
                     let threshold = sigma as f32 * std;
 
@@ -137,6 +135,8 @@ fn sigma_clipped_median_combine(
 
                 values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let mid = values.len() / 2;
+                #[allow(unknown_lints, clippy::manual_is_multiple_of)]
+                // `manual_is_multiple_of` only exists on clippy 1.86+ (Rust >= 1.87); the project's rust-toolchain.toml pins 1.81 so this lint name is unknown there. `unknown_lints` allows the name to be referenced even when the lint is absent.
                 let median = if values.len() % 2 == 0 {
                     (values[mid - 1] + values[mid]) / 2.0
                 } else {
@@ -153,7 +153,7 @@ fn sigma_clipped_median_combine(
 fn normalize_flat(flat: &mut F32Image) {
     let median = flat.mean().unwrap_or(1.0).max(1e-10);
     for val in flat.iter_mut() {
-        *val = *val / median as f32;
+        *val /= median;
     }
 }
 
@@ -190,20 +190,14 @@ mod tests {
 
     #[test]
     fn test_master_dark_build() {
-        let frames = vec![
-            make_test_image(4, 4, 500.0),
-            make_test_image(4, 4, 500.0),
-        ];
+        let frames = vec![make_test_image(4, 4, 500.0), make_test_image(4, 4, 500.0)];
         let master = build_master_dark(&frames, 300.0, Some(-10.0)).unwrap();
         assert!((master[(0, 0, 0)] - 500.0).abs() < 0.01);
     }
 
     #[test]
     fn test_master_flat_normalize() {
-        let frames = vec![
-            make_test_image(4, 4, 2000.0),
-            make_test_image(4, 4, 2000.0),
-        ];
+        let frames = vec![make_test_image(4, 4, 2000.0), make_test_image(4, 4, 2000.0)];
         let master = build_master_flat(&frames).unwrap();
         let mean = master.mean().unwrap_or(0.0);
         assert!((mean - 1.0).abs() < 0.01);
@@ -254,7 +248,7 @@ mod tests {
 
     #[test]
     fn test_sigma_clip_rejects_outlier() {
-        let mut frames = vec![
+        let frames = vec![
             make_test_image(2, 2, 100.0),
             make_test_image(2, 2, 100.0),
             make_test_image(2, 2, 100.0),

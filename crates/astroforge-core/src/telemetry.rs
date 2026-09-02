@@ -73,10 +73,7 @@ fn now_iso() -> String {
     format!("1970-01-01T00:00:{}Z", secs)
 }
 
-pub fn generate_crash_report(
-    error: &str,
-    config: &CrashReportConfig,
-) -> serde_json::Value {
+pub fn generate_crash_report(error: &str, config: &CrashReportConfig) -> serde_json::Value {
     serde_json::json!({
         "error": error,
         "timestamp": now_iso(),

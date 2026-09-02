@@ -26,13 +26,18 @@ pub fn compute_frame_quality(image: &F32Image) -> FrameQuality {
     let mean = image.iter().sum::<f32>() / image.len() as f32;
     let var = image.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / image.len() as f32;
     let std = var.sqrt();
-    let snr = if std > 0.0 { mean as f64 / std as f64 } else { 0.0 };
+    let snr = if std > 0.0 {
+        mean as f64 / std as f64
+    } else {
+        0.0
+    };
     let background = mean as f64;
     let cloud_score = (std as f64 / mean.max(1e-10) as f64).min(1.0);
 
     let eccentricity = if !stars.is_empty() {
-        let avg_brightness: f64 = stars.iter().map(|s| s.brightness).sum::<f64>() / stars.len() as f64;
-        (1.0 - (fwhm / (avg_brightness.max(1.0)))).max(0.0).min(1.0)
+        let avg_brightness: f64 =
+            stars.iter().map(|s| s.brightness).sum::<f64>() / stars.len() as f64;
+        (1.0 - (fwhm / (avg_brightness.max(1.0)))).clamp(0.0, 1.0)
     } else {
         0.0
     };
@@ -47,10 +52,7 @@ pub fn compute_frame_quality(image: &F32Image) -> FrameQuality {
     }
 }
 
-pub fn filter_frames(
-    qualities: &[FrameQuality],
-    reject_percentile: f64,
-) -> Vec<usize> {
+pub fn filter_frames(qualities: &[FrameQuality], reject_percentile: f64) -> Vec<usize> {
     let n = qualities.len();
     if n == 0 {
         return vec![];
@@ -69,11 +71,8 @@ pub fn filter_frames(
 
     indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    let rejected: std::collections::HashSet<usize> = indexed
-        .iter()
-        .take(reject_count)
-        .map(|(i, _)| *i)
-        .collect();
+    let rejected: std::collections::HashSet<usize> =
+        indexed.iter().take(reject_count).map(|(i, _)| *i).collect();
 
     (0..n).filter(|i| !rejected.contains(i)).collect()
 }
@@ -99,8 +98,22 @@ mod tests {
     #[test]
     fn test_filter_frames_no_rejection() {
         let qualities = vec![
-            FrameQuality { fwhm: 2.0, eccentricity: 0.5, star_count: 100, snr: 50.0, background: 100.0, cloud_score: 0.1 },
-            FrameQuality { fwhm: 3.0, eccentricity: 0.6, star_count: 80, snr: 40.0, background: 100.0, cloud_score: 0.2 },
+            FrameQuality {
+                fwhm: 2.0,
+                eccentricity: 0.5,
+                star_count: 100,
+                snr: 50.0,
+                background: 100.0,
+                cloud_score: 0.1,
+            },
+            FrameQuality {
+                fwhm: 3.0,
+                eccentricity: 0.6,
+                star_count: 80,
+                snr: 40.0,
+                background: 100.0,
+                cloud_score: 0.2,
+            },
         ];
         let accepted = filter_frames(&qualities, 0.0);
         assert_eq!(accepted.len(), 2);

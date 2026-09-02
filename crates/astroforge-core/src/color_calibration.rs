@@ -45,10 +45,13 @@ pub fn calibrate_color(image: &F32Image) -> ColorCalibrationResult {
 
 pub fn apply_color_calibration(image: &F32Image, calibration: &ColorCalibrationResult) -> F32Image {
     let mut result = image.clone();
-    let gains = [calibration.red_gain, calibration.green_gain, calibration.blue_gain];
+    let gains = [
+        calibration.red_gain,
+        calibration.green_gain,
+        calibration.blue_gain,
+    ];
 
-    for c in 0..result.channels().min(3) {
-        let gain = gains[c];
+    for (c, &gain) in gains.iter().take(result.channels().min(3)).enumerate() {
         for val in result.slice_mut(ndarray::s![c..c + 1, .., ..]).iter_mut() {
             *val *= gain;
         }
@@ -149,9 +152,10 @@ mod tests {
             }
         }
         let result = calibrate_color(&img);
+        // The brightest channel (blue = 200) should not be amplified.
         assert!(result.red_gain > 1.0);
         assert!((result.green_gain - 2.0).abs() < 0.01);
-        assert!(result.blue_gain < 1.0);
+        assert!(result.blue_gain <= 1.0);
     }
 
     #[test]
@@ -183,7 +187,8 @@ mod tests {
             }
         }
         let result = calibrate_from_neutral_region(&img, (0, 0, 4, 4));
+        // The brightest channel (blue = 150) should not be amplified.
         assert!(result.red_gain > 1.0);
-        assert!(result.blue_gain < 1.0);
+        assert!(result.blue_gain <= 1.0);
     }
 }

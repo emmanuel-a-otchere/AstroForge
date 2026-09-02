@@ -17,8 +17,12 @@ impl SessionStore {
         })
     }
 
-    pub fn create_project(&self, name: &str, target_type: Option<&str>) -> Result<String, SessionError> {
-        let id = format!("proj_{}", timestamp());
+    pub fn create_project(
+        &self,
+        name: &str,
+        target_type: Option<&str>,
+    ) -> Result<String, SessionError> {
+        let id = format!("proj_{}_{}", timestamp(), unique_nonce());
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO projects (id, name, target_type) VALUES (?1, ?2, ?3)",
@@ -33,7 +37,7 @@ impl SessionStore {
         source_dir: Option<&str>,
         verbosity: &str,
     ) -> Result<String, SessionError> {
-        let id = format!("sess_{}", timestamp());
+        let id = format!("sess_{}_{}", timestamp(), unique_nonce());
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO sessions (id, project_id, source_dir, verbosity, status) VALUES (?1, ?2, ?3, ?4, 'created')",
@@ -85,10 +89,12 @@ impl SessionStore {
 
     pub fn get_latest_checkpoint(&self, session_id: &str) -> Option<CheckpointInfo> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, stage_id, artifact_path, created_at
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, session_id, stage_id, artifact_path, created_at
              FROM checkpoints WHERE session_id = ?1 ORDER BY id DESC LIMIT 1",
-        ).ok()?;
+            )
+            .ok()?;
 
         stmt.query_row(params![session_id], |row| {
             Ok(CheckpointInfo {
@@ -98,21 +104,23 @@ impl SessionStore {
                 artifact_path: row.get(3)?,
                 created_at: row.get(4)?,
             })
-        }).ok()
+        })
+        .ok()
     }
 
     pub fn get_session_status(&self, session_id: &str) -> Option<SessionStatus> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, status FROM sessions WHERE id = ?1",
-        ).ok()?;
+        let mut stmt = conn
+            .prepare("SELECT id, status FROM sessions WHERE id = ?1")
+            .ok()?;
 
         stmt.query_row(params![session_id], |row| {
             Ok(SessionStatus {
                 session_id: row.get(0)?,
                 status: row.get(1)?,
             })
-        }).ok()
+        })
+        .ok()
     }
 
     pub fn set_session_status(&self, session_id: &str, status: &str) -> Result<(), SessionError> {
@@ -126,9 +134,7 @@ impl SessionStore {
 
     pub fn find_interrupted_sessions(&self) -> Vec<String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = match conn.prepare(
-            "SELECT id FROM sessions WHERE status = 'running'",
-        ) {
+        let mut stmt = match conn.prepare("SELECT id FROM sessions WHERE status = 'running'") {
             Ok(s) => s,
             Err(_) => return vec![],
         };
@@ -170,6 +176,15 @@ fn timestamp() -> u64 {
         .unwrap_or(0)
 }
 
+// Monotonic counter for IDs that are created within the same millisecond
+// (which the system clock cannot disambiguate). Combined with the timestamp,
+// it guarantees uniqueness even when two sessions/projects are created back-to-back.
+fn unique_nonce() -> u32 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NONCE: AtomicU32 = AtomicU32::new(0);
+    NONCE.fetch_add(1, Ordering::Relaxed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,18 +194,26 @@ mod tests {
         let db_path = PathBuf::from(":memory:");
         let store = SessionStore::new(&db_path).unwrap();
 
-        let proj_id = store.create_project("Test Project", Some("deep_sky")).unwrap();
+        let proj_id = store
+            .create_project("Test Project", Some("deep_sky"))
+            .unwrap();
         assert!(proj_id.starts_with("proj_"));
 
-        let sess_id = store.create_session(&proj_id, Some("/test/dir"), "beginner").unwrap();
+        let sess_id = store
+            .create_session(&proj_id, Some("/test/dir"), "beginner")
+            .unwrap();
         assert!(sess_id.starts_with("sess_"));
 
-        let run_id = store.record_stage_run(&sess_id, "ingest", "running", None, None, None).unwrap();
+        let run_id = store
+            .record_stage_run(&sess_id, "ingest", "running", None, None, None)
+            .unwrap();
         assert!(run_id > 0);
 
         store.complete_stage_run(run_id, "completed").unwrap();
 
-        let ckpt_id = store.save_checkpoint(&sess_id, "ingest", "/artifacts/ingest.fits").unwrap();
+        let ckpt_id = store
+            .save_checkpoint(&sess_id, "ingest", "/artifacts/ingest.fits")
+            .unwrap();
         assert!(ckpt_id > 0);
 
         let latest = store.get_latest_checkpoint(&sess_id);

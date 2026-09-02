@@ -8,7 +8,11 @@ pub struct FeaturePoint {
     pub response: f64,
 }
 
-pub fn detect_features(image: &F32Image, max_corners: usize, quality_threshold: f64) -> Vec<FeaturePoint> {
+pub fn detect_features(
+    image: &F32Image,
+    max_corners: usize,
+    quality_threshold: f64,
+) -> Vec<FeaturePoint> {
     let c = 0;
     let width = image.width();
     let height = image.height();
@@ -48,7 +52,11 @@ pub fn detect_features(image: &F32Image, max_corners: usize, quality_threshold: 
         }
     }
 
-    features.sort_by(|a, b| b.response.partial_cmp(&a.response).unwrap_or(std::cmp::Ordering::Equal));
+    features.sort_by(|a, b| {
+        b.response
+            .partial_cmp(&a.response)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     features.truncate(max_corners);
     features
 }

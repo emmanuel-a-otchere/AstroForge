@@ -29,7 +29,7 @@ pub fn parse_dng_tags(data: &[u8]) -> DngMetadata {
                     _ => '?',
                 })
                 .collect::<String>();
-            BayerPattern::from_str(&pattern_str)
+            BayerPattern::parse(&pattern_str)
         } else if raw.len() >= 2 {
             let pattern_str = raw
                 .iter()
@@ -41,7 +41,7 @@ pub fn parse_dng_tags(data: &[u8]) -> DngMetadata {
                 })
                 .collect::<String>();
             let padded = format!("{}{}", pattern_str, pattern_str);
-            BayerPattern::from_str(&padded[..4])
+            BayerPattern::parse(&padded[..4])
         } else {
             None
         }

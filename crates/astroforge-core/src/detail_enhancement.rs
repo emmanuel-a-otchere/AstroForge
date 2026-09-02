@@ -1,10 +1,6 @@
 use crate::image::F32Image;
 
-pub fn multi_scale_unsharp_mask(
-    image: &F32Image,
-    scales: &[u32],
-    amount: f32,
-) -> F32Image {
+pub fn multi_scale_unsharp_mask(image: &F32Image, scales: &[u32], amount: f32) -> F32Image {
     let mut result = image.clone();
 
     for &scale in scales {
@@ -16,15 +12,11 @@ pub fn multi_scale_unsharp_mask(
     result
 }
 
-pub fn local_contrast_enhancement(
-    image: &F32Image,
-    radius: u32,
-    amount: f32,
-) -> F32Image {
+pub fn local_contrast_enhancement(image: &F32Image, radius: u32, amount: f32) -> F32Image {
     let blurred = box_blur(image, radius as usize);
     let mut result = image.clone();
 
-    let mean = image.iter().sum::<f32>() / image.len() as f32;
+    let _mean = image.iter().sum::<f32>() / image.len() as f32;
 
     for c in 0..result.channels() {
         for y in 0..result.height() {
@@ -43,11 +35,7 @@ pub fn local_contrast_enhancement(
     result
 }
 
-pub fn structure_transfer(
-    target: &F32Image,
-    source: &F32Image,
-    blend: f32,
-) -> F32Image {
+pub fn structure_transfer(target: &F32Image, source: &F32Image, blend: f32) -> F32Image {
     let mut result = target.clone();
     let source_blur = box_blur(source, 3);
     let target_blur = box_blur(target, 3);

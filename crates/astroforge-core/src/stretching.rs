@@ -11,7 +11,7 @@ pub fn auto_stretch(image: &F32Image) -> F32Image {
 
     for val in result.iter_mut() {
         let normalized = (*val - min) / range;
-        *val = arcsinh_stretch(normalized, midtones) as f32;
+        *val = arcsinh_stretch(f64::from(normalized), midtones) as f32;
     }
 
     result
@@ -22,7 +22,10 @@ pub fn arcsinh_stretch(value: f64, midtones: f64) -> f64 {
         return 0.0;
     }
     let beta = midtones.max(1e-10);
-    let stretched = beta * (value / beta).asinh() / (1.0 / beta).asinh();
+    // Lupton et al. 1999 arcsinh stretch:
+    //   stretched(x) = asinh(x / beta) / asinh(1 / beta)
+    // Maps 0 -> 0 and 1 -> 1 regardless of beta.
+    let stretched = (value / beta).asinh() / (1.0 / beta).asinh();
     stretched.clamp(0.0, 1.0)
 }
 
@@ -42,7 +45,12 @@ fn compute_midtones(image: &F32Image) -> f64 {
     }
 }
 
-pub fn histogram_stretch(image: &F32Image, shadows: f64, highlights: f64, midtones: f64) -> F32Image {
+pub fn histogram_stretch(
+    image: &F32Image,
+    shadows: f64,
+    highlights: f64,
+    midtones: f64,
+) -> F32Image {
     let mut result = image.clone();
     let range = (highlights - shadows).max(1e-10);
 
@@ -63,18 +71,22 @@ fn midtone_transfer(value: f64, midtones: f64) -> f64 {
         return 1.0;
     }
     let m = midtones.clamp(0.001, 0.999);
-    let result = ((m - 1.0) * value) / ((m - 1.0) * value - m * value + m);
+    // Lupton et al. 1999 midtone transfer:
+    //   m(v) = ((m - 1) * v) / ((2m - 1) * v - m)
+    // Maps 0 -> 0 and 1 -> 1; the `m` parameter shifts where the inflection
+    // happens (m = 0.5 -> identity, m < 0.5 -> brightens midtones, m > 0.5 -> darkens).
+    let result = ((m - 1.0) * value) / ((2.0 * m - 1.0) * value - m);
     result.clamp(0.0, 1.0)
 }
 
 pub fn compute_histogram(image: &F32Image, bins: usize) -> Vec<u32> {
     let mut hist = vec![0u32; bins];
-    let min = image.iter().copied().fold(f32::INFINITY, f32::min);
-    let max = image.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let range = (max - min).max(1e-10);
+    // Image values are normalised floats in [0, 1]; bin against that range so
+    // a value of 0.5 lands in the middle bin (e.g. bin 128 of 256).
+    let range = 1.0_f32;
 
     for &val in image.iter() {
-        let normalized = ((val - min) / range) as f64;
+        let normalized = (val / range).clamp(0.0, 1.0) as f64;
         let bin = (normalized * bins as f64) as usize;
         let bin = bin.min(bins - 1);
         hist[bin] += 1;
@@ -94,7 +106,11 @@ mod tests {
             img[(0, i / 4, i % 4)] = i as f32 * 100.0;
         }
         let stretched = auto_stretch(&img);
-        let max = stretched.iter().copied().fold(f32::NEG_INFINITY, f32::min).max(0.0);
+        let max = stretched
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::min)
+            .max(0.0);
         let min = stretched.iter().copied().fold(f32::INFINITY, f32::min);
         assert!(max <= 1.0);
         assert!(min >= 0.0);

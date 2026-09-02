@@ -4,17 +4,24 @@ use std::io::Write;
 pub fn export_tiff_16bit(image: &F32Image, writer: &mut impl Write) -> Result<(), ExportError> {
     let width = image.width() as u32;
     let height = image.height() as u32;
-    let channels = image.channels() as u16;
+    let channels = image.channels();
 
     let bits_per_sample = 16u16;
-    let samples_per_pixel = channels;
-    let rows_per_strip = height;
+    let _samples_per_pixel = channels;
+    let _rows_per_strip = height;
 
-    let image_data_size = (width * height * channels as u32 * 2) as u32;
+    let image_data_size = width * height * channels as u32 * 2;
 
     let mut buf = Vec::new();
 
-    write_tiff_header(&mut buf, width, height, channels, bits_per_sample, image_data_size);
+    write_tiff_header(
+        &mut buf,
+        width,
+        height,
+        channels,
+        bits_per_sample,
+        image_data_size,
+    );
 
     for c in 0..image.channels() {
         for y in 0..image.height() {
@@ -47,10 +54,10 @@ fn write_tiff_header(
     let num_entries = 9u16;
     buf.extend_from_slice(&num_entries.to_le_bytes());
 
-    let mut offset = 8 + 2 + (num_entries as u32 * 12) + 4;
+    let offset = 8 + 2 + (num_entries as u32 * 12) + 4;
 
-    write_ifd_entry(buf, 256, 3, 1, width as u32);
-    write_ifd_entry(buf, 257, 3, 1, height as u32);
+    write_ifd_entry(buf, 256, 3, 1, width);
+    write_ifd_entry(buf, 257, 3, 1, height);
     write_ifd_entry(buf, 258, 3, channels as u32, bits_per_sample as u32);
     write_ifd_entry(buf, 259, 3, 1, 1);
     write_ifd_entry(buf, 262, 3, 1, if channels == 1 { 1 } else { 2 });
@@ -138,12 +145,17 @@ th {{ background: #f1f5f9; }}
         rejected_section = if report.rejected_frames.is_empty() {
             String::new()
         } else {
-            let rows: String = report
-                .rejected_frames
-                .iter()
-                .map(|r| format!("<tr><td>{}</td><td>{}</td></tr>", r.path, r.reason))
-                .collect();
-            format!("<h2>Rejected Frames</h2><table><tr><th>File</th><th>Reason</th></tr>{}</table>", rows)
+            let mut rows = String::new();
+            for r in &report.rejected_frames {
+                rows.push_str(&format!(
+                    "<tr><td>{}</td><td>{}</td></tr>",
+                    r.path, r.reason
+                ));
+            }
+            format!(
+                "<h2>Rejected Frames</h2><table><tr><th>File</th><th>Reason</th></tr>{}</table>",
+                rows
+            )
         },
         stage_rows = report
             .stage_parameters
@@ -181,7 +193,11 @@ pub fn export_png_8bit(image: &F32Image, writer: &mut impl Write) -> Result<(), 
     Ok(())
 }
 
-pub fn export_jpeg_8bit(image: &F32Image, quality: u8, writer: &mut impl Write) -> Result<(), ExportError> {
+pub fn export_jpeg_8bit(
+    image: &F32Image,
+    quality: u8,
+    writer: &mut impl Write,
+) -> Result<(), ExportError> {
     let width = image.width() as u32;
     let height = image.height() as u32;
     let channels = image.channels();
@@ -201,7 +217,11 @@ pub fn export_jpeg_8bit(image: &F32Image, quality: u8, writer: &mut impl Write) 
     Ok(())
 }
 
-pub fn export_xisf(image: &F32Image, history: &serde_json::Value, writer: &mut impl Write) -> Result<(), ExportError> {
+pub fn export_xisf(
+    image: &F32Image,
+    history: &serde_json::Value,
+    writer: &mut impl Write,
+) -> Result<(), ExportError> {
     let header = b"XISF0100";
     writer.write_all(header)?;
     let metadata = serde_json::to_vec(history).unwrap_or_else(|_| b"{}".to_vec());
@@ -236,7 +256,13 @@ pub fn export_sidecar_json(
     Ok(())
 }
 
-fn write_png(writer: &mut impl Write, data: &[u8], width: u32, height: u32, channels: u8) -> Result<(), ExportError> {
+fn write_png(
+    writer: &mut impl Write,
+    data: &[u8],
+    width: u32,
+    height: u32,
+    channels: u8,
+) -> Result<(), ExportError> {
     writer.write_all(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])?;
     let mut chunk = Vec::new();
     chunk.extend_from_slice(&width.to_be_bytes());
@@ -258,7 +284,11 @@ fn write_png(writer: &mut impl Write, data: &[u8], width: u32, height: u32, chan
     Ok(())
 }
 
-fn write_png_chunk(writer: &mut impl Write, chunk_type: &[u8; 4], data: &[u8]) -> Result<(), ExportError> {
+fn write_png_chunk(
+    writer: &mut impl Write,
+    chunk_type: &[u8; 4],
+    data: &[u8],
+) -> Result<(), ExportError> {
     writer.write_all(&(data.len() as u32).to_be_bytes())?;
     writer.write_all(chunk_type)?;
     writer.write_all(data)?;

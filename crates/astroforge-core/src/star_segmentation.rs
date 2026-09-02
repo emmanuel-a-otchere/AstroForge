@@ -39,7 +39,11 @@ pub fn segment_stars(image: &F32Image, threshold_sigma: f64) -> StarSegmentation
     }
 }
 
-pub fn enhance_star_layer(star_layer: &F32Image, color_boost: f32, size_reduction: f32) -> F32Image {
+pub fn enhance_star_layer(
+    star_layer: &F32Image,
+    color_boost: f32,
+    _size_reduction: f32,
+) -> F32Image {
     let mut result = star_layer.clone();
     for val in result.iter_mut() {
         *val *= color_boost;
@@ -47,7 +51,11 @@ pub fn enhance_star_layer(star_layer: &F32Image, color_boost: f32, size_reductio
     result
 }
 
-pub fn enhance_background_layer(background_layer: &F32Image, contrast: f32, saturation: f32) -> F32Image {
+pub fn enhance_background_layer(
+    background_layer: &F32Image,
+    contrast: f32,
+    _saturation: f32,
+) -> F32Image {
     let mut result = background_layer.clone();
     let mean = result.iter().sum::<f32>() / result.len() as f32;
     for val in result.iter_mut() {
@@ -82,13 +90,22 @@ pub fn remove_satellite_trails(image: &F32Image, trail_mask: &F32Image) -> F32Im
     for c in 0..result.channels() {
         for y in 0..result.height() {
             for x in 0..result.width() {
-                if trail_mask[(c.min(trail_mask.channels() - 1), y.min(trail_mask.height() - 1), x.min(trail_mask.width() - 1)] > 0.5 {
+                if trail_mask[(
+                    c.min(trail_mask.channels() - 1),
+                    y.min(trail_mask.height() - 1),
+                    x.min(trail_mask.width() - 1),
+                )] > 0.5
+                {
                     let mut sum = 0.0f32;
                     let mut count = 0;
                     for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
                         let nx = x as i32 + dx;
                         let ny = y as i32 + dy;
-                        if nx >= 0 && nx < result.width() as i32 && ny >= 0 && ny < result.height() as i32 {
+                        if nx >= 0
+                            && nx < result.width() as i32
+                            && ny >= 0
+                            && ny < result.height() as i32
+                        {
                             sum += result[(c, ny as usize, nx as usize)];
                             count += 1;
                         }

@@ -37,7 +37,7 @@ pub fn compute_frame_quality(image: &F32Image) -> FrameQuality {
     let eccentricity = if !stars.is_empty() {
         let avg_brightness: f64 =
             stars.iter().map(|s| s.brightness).sum::<f64>() / stars.len() as f64;
-        (1.0 - (fwhm / (avg_brightness.max(1.0)))).max(0.0).min(1.0)
+        (1.0 - (fwhm / (avg_brightness.max(1.0)))).clamp(0.0, 1.0)
     } else {
         0.0
     };

@@ -1,4 +1,3 @@
-use crate::image::F32Image;
 use crate::ingest::FrameInfo;
 use serde::{Deserialize, Serialize};
 
@@ -37,8 +36,6 @@ pub fn route_session(
         } else {
             TargetType::Planetary
         }
-    } else if avg_exptime > 10.0 && count < 500 {
-        TargetType::DeepSky
     } else {
         TargetType::DeepSky
     }
@@ -54,7 +51,7 @@ pub fn route_session_prompt(frames: &[FrameInfo]) -> Option<TargetType> {
 
     let count = frames.len();
 
-    if avg_exptime >= 2.0 && avg_exptime <= 10.0 {
+    if (2.0..=10.0).contains(&avg_exptime) {
         return None;
     }
     if avg_exptime < 2.0 && count <= 500 {

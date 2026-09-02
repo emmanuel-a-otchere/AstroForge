@@ -53,9 +53,7 @@ pub fn detect_bayer(image: &F32Image) -> BayerDetectionResult {
         None
     };
 
-    let method = if confidence > 0.85 {
-        DetectionMethod::Statistical
-    } else if confidence > 0.5 {
+    let method = if confidence > 0.5 {
         DetectionMethod::Statistical
     } else {
         DetectionMethod::AssumeRGB
@@ -131,7 +129,7 @@ fn green_variance_test(image: &F32Image) -> f64 {
 
     for y in 0..height - 1 {
         for x in 0..width - 1 {
-            let pos = ((y % 2) * 2 + (x % 2)) as usize;
+            let pos = (y % 2) * 2 + (x % 2);
             green_positions[pos] += image[(c, y, x)] as f64;
             green_counts[pos] += 1;
         }
@@ -175,7 +173,7 @@ fn detect_pattern(image: &F32Image) -> BayerPattern {
 
     for y in 0..sample_size {
         for x in 0..sample_size {
-            let pos = ((y % 2) * 2 + (x % 2)) as usize;
+            let pos = (y % 2) * 2 + (x % 2);
             corner_means[pos] += image[(c, y, x)] as f64;
             counts[pos] += 1;
         }

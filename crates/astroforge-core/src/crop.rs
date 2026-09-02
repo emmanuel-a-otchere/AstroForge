@@ -98,7 +98,7 @@ pub fn rotate_90(image: &F32Image, clockwise: bool) -> F32Image {
 pub fn remove_borders(image: &F32Image, border_width: usize) -> F32Image {
     let width = image.width();
     let height = image.height();
-    let channels = image.channels();
+    let _channels = image.channels();
 
     if border_width == 0 {
         return image.clone();

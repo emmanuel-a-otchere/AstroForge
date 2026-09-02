@@ -16,7 +16,7 @@ pub fn local_contrast_enhancement(image: &F32Image, radius: u32, amount: f32) ->
     let blurred = box_blur(image, radius as usize);
     let mut result = image.clone();
 
-    let mean = image.iter().sum::<f32>() / image.len() as f32;
+    let _mean = image.iter().sum::<f32>() / image.len() as f32;
 
     for c in 0..result.channels() {
         for y in 0..result.height() {

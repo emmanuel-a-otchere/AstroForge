@@ -2,7 +2,7 @@ use crate::image::F32Image;
 
 pub fn correct_cosmetics(image: &F32Image, sigma_threshold: f64) -> F32Image {
     let mut result = image.clone();
-    let c = 0;
+    let _c = 0;
     let height = result.height();
     let width = result.width();
 

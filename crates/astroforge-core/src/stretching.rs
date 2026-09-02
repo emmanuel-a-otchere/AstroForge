@@ -11,7 +11,7 @@ pub fn auto_stretch(image: &F32Image) -> F32Image {
 
     for val in result.iter_mut() {
         let normalized = (*val - min) / range;
-        *val = arcsinh_stretch(normalized, midtones) as f32;
+        *val = arcsinh_stretch(f64::from(normalized), midtones) as f32;
     }
 
     result

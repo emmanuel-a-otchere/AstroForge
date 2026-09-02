@@ -332,7 +332,7 @@ mod tests {
         let img = make_test_image();
         let result = model.run(&img);
         let score = result[(0, 0, 0)];
-        assert!(score >= 0.0 && score <= 1.0);
+        assert!((0.0..=1.0).contains(&score));
     }
 
     #[test]

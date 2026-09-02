@@ -79,7 +79,7 @@ impl ModelRegistry {
 
 fn sha256_hex(data: &[u8]) -> String {
     let mut hash: [u8; 32] = [0; 32];
-    let len = data.len();
+    let _len = data.len();
     for (i, byte) in data.iter().enumerate() {
         hash[i % 32] = hash[i % 32].wrapping_add(*byte);
     }

@@ -1,5 +1,4 @@
 use crate::image::F32Image;
-use crate::planetary_features::FeaturePoint;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,7 +186,7 @@ mod tests {
         }
         assert_eq!(ranker.total_frames(), 1000);
         let best = ranker.select_best();
-        assert!(best.len() >= 1);
+        assert!(!best.is_empty());
         assert!(best.len() <= 200);
     }
 
@@ -200,7 +199,7 @@ mod tests {
         }
         assert_eq!(ranker.total_frames(), 50_000);
         let best = ranker.select_best();
-        assert!(best.len() >= 1);
+        assert!(!best.is_empty());
         assert!(best.len() <= 10_000);
     }
 }

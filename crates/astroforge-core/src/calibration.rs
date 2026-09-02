@@ -1,10 +1,9 @@
 use crate::image::F32Image;
-use ndarray::s;
 
 pub fn build_master_dark(
     frames: &[F32Image],
-    exptime: f64,
-    ccd_temp: Option<f64>,
+    _exptime: f64,
+    _ccd_temp: Option<f64>,
 ) -> Result<F32Image, CalibrationError> {
     if frames.is_empty() {
         return Err(CalibrationError::NoFrames);
@@ -60,7 +59,7 @@ pub fn apply_calibration(
                         x.min(flat.width() - 1),
                     )];
                     if f.abs() > 1e-10 {
-                        result[(c, y, x)] /= f / median as f32;
+                        result[(c, y, x)] /= f / median;
                     }
                 }
             }
@@ -108,7 +107,7 @@ fn sigma_clipped_median_combine(
     sigma: f64,
     max_iters: u32,
 ) -> Result<F32Image, CalibrationError> {
-    let n = frames.len();
+    let _n = frames.len();
     let channels = frames[0].channels();
     let height = frames[0].height();
     let width = frames[0].width();
@@ -136,7 +135,7 @@ fn sigma_clipped_median_combine(
 
                 values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let mid = values.len() / 2;
-                let median = if values.len() % 2 == 0 {
+                let median = if values.len().is_multiple_of(2) {
                     (values[mid - 1] + values[mid]) / 2.0
                 } else {
                     values[mid]
@@ -152,7 +151,7 @@ fn sigma_clipped_median_combine(
 fn normalize_flat(flat: &mut F32Image) {
     let median = flat.mean().unwrap_or(1.0).max(1e-10);
     for val in flat.iter_mut() {
-        *val = *val / median as f32;
+        *val /= median;
     }
 }
 
@@ -247,7 +246,7 @@ mod tests {
 
     #[test]
     fn test_sigma_clip_rejects_outlier() {
-        let mut frames = vec![
+        let frames = vec![
             make_test_image(2, 2, 100.0),
             make_test_image(2, 2, 100.0),
             make_test_image(2, 2, 100.0),

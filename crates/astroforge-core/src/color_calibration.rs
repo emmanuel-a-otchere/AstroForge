@@ -51,8 +51,7 @@ pub fn apply_color_calibration(image: &F32Image, calibration: &ColorCalibrationR
         calibration.blue_gain,
     ];
 
-    for c in 0..result.channels().min(3) {
-        let gain = gains[c];
+    for (c, &gain) in gains.iter().take(result.channels().min(3)).enumerate() {
         for val in result.slice_mut(ndarray::s![c..c + 1, .., ..]).iter_mut() {
             *val *= gain;
         }

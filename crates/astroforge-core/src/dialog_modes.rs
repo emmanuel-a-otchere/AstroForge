@@ -1,4 +1,3 @@
-use crate::image::F32Image;
 use crate::mvp_pipeline::{DialogMode, Verbosity};
 use serde::{Deserialize, Serialize};
 

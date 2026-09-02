@@ -197,7 +197,7 @@ pub fn compute_transform(ref_stars: &[Star], frame_stars: &[Star]) -> Option<Aff
 }
 
 pub fn apply_transform(image: &F32Image, transform: &AffineTransform) -> F32Image {
-    let c = 0;
+    let _c = 0;
     let height = image.height();
     let width = image.width();
     let mut result = F32Image::new(width, height, image.channels());

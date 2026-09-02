@@ -46,7 +46,7 @@ impl ArtifactStore {
         &self,
         id: &ArtifactId,
         data: &[u8],
-        format: ArtifactFormat,
+        _format: ArtifactFormat,
     ) -> Result<PathBuf, std::io::Error> {
         let path = self.path_for(id);
         if let Some(parent) = path.parent() {

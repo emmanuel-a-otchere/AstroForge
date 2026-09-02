@@ -4,13 +4,13 @@ use std::io::Write;
 pub fn export_tiff_16bit(image: &F32Image, writer: &mut impl Write) -> Result<(), ExportError> {
     let width = image.width() as u32;
     let height = image.height() as u32;
-    let channels = image.channels() as u16;
+    let channels = image.channels();
 
     let bits_per_sample = 16u16;
-    let samples_per_pixel = channels;
-    let rows_per_strip = height;
+    let _samples_per_pixel = channels;
+    let _rows_per_strip = height;
 
-    let image_data_size = (width * height * channels as u32 * 2) as u32;
+    let image_data_size = width * height * channels as u32 * 2;
 
     let mut buf = Vec::new();
 
@@ -54,10 +54,10 @@ fn write_tiff_header(
     let num_entries = 9u16;
     buf.extend_from_slice(&num_entries.to_le_bytes());
 
-    let mut offset = 8 + 2 + (num_entries as u32 * 12) + 4;
+    let offset = 8 + 2 + (num_entries as u32 * 12) + 4;
 
-    write_ifd_entry(buf, 256, 3, 1, width as u32);
-    write_ifd_entry(buf, 257, 3, 1, height as u32);
+    write_ifd_entry(buf, 256, 3, 1, width);
+    write_ifd_entry(buf, 257, 3, 1, height);
     write_ifd_entry(buf, 258, 3, channels as u32, bits_per_sample as u32);
     write_ifd_entry(buf, 259, 3, 1, 1);
     write_ifd_entry(buf, 262, 3, 1, if channels == 1 { 1 } else { 2 });

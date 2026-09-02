@@ -30,7 +30,7 @@ pub fn kappa_sigma_stack(
     for c in 0..channels {
         for y in 0..height {
             for x in 0..width {
-                let mut values: Vec<f32> = frames.iter().map(|f| f[(c, y, x)]).collect();
+                let values: Vec<f32> = frames.iter().map(|f| f[(c, y, x)]).collect();
                 let mut mask: Vec<bool> = vec![true; n];
 
                 for _ in 0..max_iterations {

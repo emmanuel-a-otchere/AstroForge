@@ -47,7 +47,7 @@ pub fn plate_solve(
     }
 }
 
-fn solve_with_astap(_image_data: &[u8], focal_length: f64, pixel_size: f64) -> PlateSolveResult {
+fn solve_with_astap(_image_data: &[u8], _focal_length: f64, _pixel_size: f64) -> PlateSolveResult {
     PlateSolveResult {
         solution: None,
         backend: PlateSolveBackend::Astap,
@@ -130,9 +130,9 @@ pub struct StarAnnotation {
 }
 
 pub fn annotate_stars(
-    solution: &WcsSolution,
-    image_width: usize,
-    image_height: usize,
+    _solution: &WcsSolution,
+    _image_width: usize,
+    _image_height: usize,
 ) -> Vec<StarAnnotation> {
     Vec::new()
 }

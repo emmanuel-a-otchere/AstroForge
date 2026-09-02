@@ -1,14 +1,11 @@
-use crate::calibration::{self, StreamingCalibrator};
-use crate::export::{self, FrameStats, ProcessingReport, StageParams};
-use crate::fits::FitsHeader;
+use crate::calibration::StreamingCalibrator;
+use crate::export::{FrameStats, ProcessingReport, StageParams};
 use crate::image::F32Image;
-use crate::ingest::{self, FrameInfo, FrameType, SessionManifest};
+use crate::ingest::{FrameType, SessionManifest};
 use crate::registration::{self, AffineTransform};
 use crate::stacking::{self, StreamingStacker};
 use crate::stretching;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
@@ -31,17 +28,12 @@ impl Default for PipelineConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum Verbosity {
+    #[default]
     Beginner,
     Intermediate,
     Expert,
-}
-
-impl Default for Verbosity {
-    fn default() -> Self {
-        Verbosity::Beginner
-    }
 }
 
 impl Verbosity {
@@ -142,7 +134,7 @@ pub fn run_pipeline(
         .collect(),
     });
 
-    let stretched = stretching::auto_stretch(&stack_result.image);
+    let _stretched = stretching::auto_stretch(&stack_result.image);
 
     stage_params.push(StageParams {
         stage_id: "stretching".into(),

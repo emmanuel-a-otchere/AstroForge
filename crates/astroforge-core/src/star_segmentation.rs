@@ -42,7 +42,7 @@ pub fn segment_stars(image: &F32Image, threshold_sigma: f64) -> StarSegmentation
 pub fn enhance_star_layer(
     star_layer: &F32Image,
     color_boost: f32,
-    size_reduction: f32,
+    _size_reduction: f32,
 ) -> F32Image {
     let mut result = star_layer.clone();
     for val in result.iter_mut() {
@@ -54,7 +54,7 @@ pub fn enhance_star_layer(
 pub fn enhance_background_layer(
     background_layer: &F32Image,
     contrast: f32,
-    saturation: f32,
+    _saturation: f32,
 ) -> F32Image {
     let mut result = background_layer.clone();
     let mean = result.iter().sum::<f32>() / result.len() as f32;

@@ -10,7 +10,7 @@ pub enum BayerPattern {
 }
 
 impl BayerPattern {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "RGGB" => Some(Self::RGGB),
             "BGGR" => Some(Self::BGGR),
@@ -21,15 +21,13 @@ impl BayerPattern {
     }
 
     pub fn color_at(&self, x: usize, y: usize) -> usize {
-        let x_even = x % 2 == 0;
-        let y_even = y % 2 == 0;
+        let x_even = x.is_multiple_of(2);
+        let y_even = y.is_multiple_of(2);
         match self {
             Self::RGGB => {
                 if x_even && y_even {
                     0
-                } else if !x_even && y_even {
-                    1
-                } else if x_even && !y_even {
+                } else if x_even ^ y_even {
                     1
                 } else {
                     2
@@ -38,9 +36,7 @@ impl BayerPattern {
             Self::BGGR => {
                 if x_even && y_even {
                     2
-                } else if !x_even && y_even {
-                    1
-                } else if x_even && !y_even {
+                } else if x_even ^ y_even {
                     1
                 } else {
                     0
@@ -138,8 +134,7 @@ fn debayer_bilinear(bayer: &F32Image, pattern: BayerPattern) -> F32Image {
 pub fn apply_white_balance(image: &F32Image, r_gain: f32, g_gain: f32, b_gain: f32) -> F32Image {
     let mut result = image.clone();
     let gains = [r_gain, g_gain, b_gain];
-    for c in 0..result.channels().min(3) {
-        let gain = gains[c];
+    for (c, &gain) in gains.iter().take(result.channels().min(3)).enumerate() {
         for val in result.slice_mut(ndarray::s![c..c + 1, .., ..]).iter_mut() {
             *val *= gain;
         }
@@ -162,8 +157,8 @@ mod tests {
 
     #[test]
     fn test_bayer_pattern_from_str() {
-        assert_eq!(BayerPattern::from_str("RGGB"), Some(BayerPattern::RGGB));
-        assert_eq!(BayerPattern::from_str("invalid"), None);
+        assert_eq!(BayerPattern::parse("RGGB"), Some(BayerPattern::RGGB));
+        assert_eq!(BayerPattern::parse("invalid"), None);
     }
 
     #[test]

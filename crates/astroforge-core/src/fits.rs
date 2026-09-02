@@ -1,8 +1,7 @@
 use crate::image::F32Image;
-use ndarray::s;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Write;
 
 pub const HEADER_RECORD_SIZE: usize = 80;
 pub const HEADER_BLOCK_SIZE: usize = 2880;
@@ -289,7 +288,6 @@ pub enum FitsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     #[test]
     fn test_header_parse_and_write_roundtrip() {

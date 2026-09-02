@@ -20,9 +20,10 @@ impl BayerPattern {
         }
     }
 
+    #[allow(unknown_lints, clippy::manual_is_multiple_of)] // `manual_is_multiple_of` only exists on clippy 1.86+ (Rust >= 1.87); the project's rust-toolchain.toml pins 1.81 so this lint name is unknown there. `unknown_lints` allows the name to be referenced even when the lint is absent.
     pub fn color_at(&self, x: usize, y: usize) -> usize {
-        let x_even = x.is_multiple_of(2);
-        let y_even = y.is_multiple_of(2);
+        let x_even = x % 2 == 0;
+        let y_even = y % 2 == 0;
         match self {
             Self::RGGB => {
                 if x_even && y_even {

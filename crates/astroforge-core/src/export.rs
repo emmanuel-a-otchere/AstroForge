@@ -145,11 +145,13 @@ th {{ background: #f1f5f9; }}
         rejected_section = if report.rejected_frames.is_empty() {
             String::new()
         } else {
-            let rows: String = report
-                .rejected_frames
-                .iter()
-                .map(|r| format!("<tr><td>{}</td><td>{}</td></tr>", r.path, r.reason))
-                .collect();
+            let mut rows = String::new();
+            for r in &report.rejected_frames {
+                rows.push_str(&format!(
+                    "<tr><td>{}</td><td>{}</td></tr>",
+                    r.path, r.reason
+                ));
+            }
             format!(
                 "<h2>Rejected Frames</h2><table><tr><th>File</th><th>Reason</th></tr>{}</table>",
                 rows

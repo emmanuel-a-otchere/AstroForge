@@ -135,7 +135,9 @@ fn sigma_clipped_median_combine(
 
                 values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let mid = values.len() / 2;
-                let median = if values.len().is_multiple_of(2) {
+                #[allow(unknown_lints, clippy::manual_is_multiple_of)]
+                // `manual_is_multiple_of` only exists on clippy 1.86+ (Rust >= 1.87); the project's rust-toolchain.toml pins 1.81 so this lint name is unknown there. `unknown_lints` allows the name to be referenced even when the lint is absent.
+                let median = if values.len() % 2 == 0 {
                     (values[mid - 1] + values[mid]) / 2.0
                 } else {
                     values[mid]

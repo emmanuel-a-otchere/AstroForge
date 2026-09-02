@@ -13,6 +13,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { probeGpu, type GpuCapability } from "../lib/gpu";
+  import { loadGallery } from "../lib/gallery";
   import {
     currentLayoutMode,
     modeSwitchAvailable,
@@ -33,9 +34,13 @@
   let gpuCapability: GpuCapability = $state("canvas2d");
   let gpuChecked = $state(false);
 
-  function init() {
+  async function init() {
     gpuCapability = probeGpu();
     gpuChecked = true;
+    // Hydrate the gallery cache from the local rusqlite store (or
+    // placeholder fallback if running outside Tauri). This way every
+    // consumer of getGallery() sees the same data on first render.
+    await loadGallery();
   }
 
   if (typeof document !== "undefined") {

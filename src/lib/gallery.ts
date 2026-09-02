@@ -1,27 +1,89 @@
 /**
  * GalleryStore — local-only gallery state for "Your Work".
  *
- * Phase 4 will back this with rusqlite via Tauri IPC. For now we ship
- * placeholder data so the visual surface renders correctly without
- * touching the existing Supabase autosave flow.
+ * Phase 4: backed by rusqlite via Tauri IPC (`gallery_list`, `gallery_upsert`,
+ * `gallery_delete` commands in `src-tauri/src/main.rs`).
  *
- * The interface is intentionally async-ready: load() returns a Promise so
- * the call sites don't change when the backing store moves to SQLite.
+ * The Tauri runtime exposes IPC via `window.__TAURI_INTERNALS__`. When the
+ * app is running in a plain browser (Vite dev without the Tauri shell, or
+ * unit-test harness), we fall back to an in-memory placeholder so the
+ * UI still renders.
+ *
+ * Field naming: Rust serialises with snake_case (e.g. `integration_hours`),
+ * the Svelte side uses camelCase for consistency with the rest of the
+ * frontend (`integrationHours`). The mapping happens at the IPC boundary.
  */
+
+import { writable, type Writable } from "svelte/store";
+import { invoke } from "@tauri-apps/api/core";
 
 export type GalleryStatus = "pending" | "processing" | "completed";
 
 export interface GalleryItem {
   id: string;
   name: string;
-  target: string; // e.g. "M42", "NGC 7000"
+  target: string;
   integrationHours: number;
-  palette: string; // e.g. "LRGB", "SHO", "Hα"
+  palette: string;
   status: GalleryStatus;
   updatedAt: string; // ISO
-  /** Optional thumbnail data URL — currently a radial gradient placeholder. */
   thumbnail?: string;
 }
+
+interface RustGalleryItem {
+  id: string;
+  name: string;
+  target: string;
+  integration_hours: number;
+  palette: string;
+  status: GalleryStatus;
+  updated_at: string;
+}
+
+interface RustGalleryItemUpdate {
+  id?: string | null;
+  name: string;
+  target: string;
+  integration_hours: number;
+  palette: string;
+  status: GalleryStatus;
+}
+
+function fromRust(item: RustGalleryItem): GalleryItem {
+  return {
+    id: item.id,
+    name: item.name,
+    target: item.target,
+    integrationHours: item.integration_hours,
+    palette: item.palette,
+    status: item.status,
+    updatedAt: item.updated_at,
+  };
+}
+
+function toRustUpdate(update: {
+  id?: string | null;
+  name: string;
+  target: string;
+  integrationHours: number;
+  palette: string;
+  status: GalleryStatus;
+}): RustGalleryItemUpdate {
+  return {
+    id: update.id ?? null,
+    name: update.name,
+    target: update.target,
+    integration_hours: update.integrationHours,
+    palette: update.palette,
+    status: update.status,
+  };
+}
+
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+// ─── Placeholder fallback (browser dev mode, unit tests) ────────────────
 
 const PLACEHOLDER_ITEMS: GalleryItem[] = [
   {
@@ -71,34 +133,104 @@ const PLACEHOLDER_ITEMS: GalleryItem[] = [
   },
 ];
 
-let cachedItems: GalleryItem[] | null = null;
+/**
+ * The single source of truth for the gallery on the Svelte side. All
+ * mutations (load, upsert, delete) go through this store so any
+ * subscribed component re-renders.
+ */
+export const galleryStore: Writable<GalleryItem[]> = writable<GalleryItem[]>([]);
+
+// ─── Public API ─────────────────────────────────────────────────────────
 
 /**
- * Async to match the eventual rusqlite-backed API. Returns the gallery
- * items in display order (most-recent first).
+ * Sync accessor — for components that need immediate access on first
+ * render (ModeC, ModeD). Returns the current store value via `get()`.
  */
-/**
- * Sync accessor — useful for components that need immediate access
- * (ModeC, ModeD). Same cached list as loadGallery(); the async version
- * is preferred for first-load since it lets us await the rusqlite path
- * in Phase 4.
- */
+import { get } from "svelte/store";
 export function getGallery(): GalleryItem[] {
-  if (cachedItems === null) {
-    cachedItems = [...PLACEHOLDER_ITEMS];
-  }
-  return cachedItems;
-}
-
-export async function loadGallery(): Promise<GalleryItem[]> {
-  return getGallery();
+  return get(galleryStore);
 }
 
 /**
- * Filter helper used by the gallery tabs (Recent / Processing / Completed).
- * "Recent" is the most-recent slice; "Processing" / "Completed" filter by
- * status.
+ * Async load from the local rusqlite store via Tauri IPC. Falls back to
+ * placeholder data when running outside Tauri (browser dev / tests).
  */
+export async function loadGallery(): Promise<GalleryItem[]> {
+  if (!isTauri()) {
+    galleryStore.set([...PLACEHOLDER_ITEMS]);
+    return get(galleryStore);
+  }
+  try {
+    const items = await invoke<RustGalleryItem[]>("gallery_list");
+    const mapped = items.map(fromRust);
+    galleryStore.set(mapped);
+    return mapped;
+  } catch (err) {
+    console.error("loadGallery failed; falling back to placeholder", err);
+    galleryStore.set([...PLACEHOLDER_ITEMS]);
+    return get(galleryStore);
+  }
+}
+
+/**
+ * Add or update a gallery item. Returns the persisted item with
+ * server-assigned id/timestamp.
+ */
+export async function upsertGalleryItem(
+  update: Omit<GalleryItem, "updatedAt"> & { id?: string | null }
+): Promise<GalleryItem> {
+  if (!isTauri()) {
+    const next: GalleryItem = {
+      ...update,
+      id: update.id ?? `placeholder-${Date.now()}`,
+      updatedAt: new Date().toISOString(),
+    } as GalleryItem;
+    galleryStore.update((items) => {
+      const idx = items.findIndex((i) => i.id === next.id);
+      if (idx >= 0) {
+        const copy = items.slice();
+        copy[idx] = next;
+        return copy;
+      }
+      return [next, ...items];
+    });
+    return next;
+  }
+  const result = await invoke<RustGalleryItem>("gallery_upsert", {
+    update: toRustUpdate({
+      id: update.id ?? null,
+      name: update.name,
+      target: update.target,
+      integrationHours: update.integrationHours,
+      palette: update.palette,
+      status: update.status,
+    }),
+  });
+  const item = fromRust(result);
+  galleryStore.update((items) => {
+    const idx = items.findIndex((i) => i.id === item.id);
+    if (idx >= 0) {
+      const copy = items.slice();
+      copy[idx] = item;
+      return copy;
+    }
+    return [item, ...items];
+  });
+  return item;
+}
+
+/** Delete a gallery item by id. No-op if missing. */
+export async function deleteGalleryItem(id: string): Promise<void> {
+  if (!isTauri()) {
+    galleryStore.update((items) => items.filter((i) => i.id !== id));
+    return;
+  }
+  await invoke("gallery_delete", { id });
+  galleryStore.update((items) => items.filter((i) => i.id !== id));
+}
+
+// ─── Display helpers ────────────────────────────────────────────────────
+
 export type GalleryTab = "recent" | "processing" | "completed";
 
 export function filterByTab(items: GalleryItem[], tab: GalleryTab): GalleryItem[] {
@@ -113,8 +245,6 @@ export function filterByTab(items: GalleryItem[], tab: GalleryTab): GalleryItem[
   }
 }
 
-/** Status badge label and CSS modifier — kept here so the gallery stays
- * the single source of truth for status semantics. */
 export function statusBadgeClass(status: GalleryStatus): string {
   return `gallery-status gallery-status-${status}`;
 }

@@ -45,6 +45,28 @@ CREATE INDEX IF NOT EXISTS idx_stage_runs_session ON stage_runs(session_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoints_session ON checkpoints(session_id);
 "#;
 
+/// Gallery store schema. Kept separate from the session schema so the
+/// two stores can evolve independently (different ownership, different
+/// write cadence). Migration is run when `GalleryStore::new` opens the
+/// DB.
+pub const GALLERY_SCHEMA_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS gallery_items (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    target TEXT NOT NULL,
+    integration_hours REAL NOT NULL DEFAULT 0,
+    palette TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'completed')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_gallery_items_status
+    ON gallery_items(status);
+CREATE INDEX IF NOT EXISTS idx_gallery_items_updated_at
+    ON gallery_items(updated_at DESC);
+"#;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,

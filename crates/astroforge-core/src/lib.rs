@@ -13,6 +13,7 @@ pub mod dip;
 pub mod dng_parser;
 pub mod export;
 pub mod fits;
+pub mod gallery;
 pub mod image;
 pub mod ingest;
 pub mod mvp_pipeline;

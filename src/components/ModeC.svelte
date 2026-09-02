@@ -11,11 +11,11 @@
   import type { Snippet } from "svelte";
   import Gallery from "./Gallery.svelte";
   import ScreenCard from "./ScreenCard.svelte";
-  import { getGallery, type GalleryItem } from "../lib/gallery";
+  import { galleryStore, type GalleryItem } from "../lib/gallery";
 
   let { children }: { children?: Snippet } = $props();
 
-  let activeItem: GalleryItem | null = $state(getGallery()[2] ?? null);
+  let activeItem: GalleryItem | null = $state($galleryStore[2] ?? null);
   let activeTab: "tuning" | "stages" | "output" = $state("tuning");
 
   function pickItem(item: GalleryItem) {

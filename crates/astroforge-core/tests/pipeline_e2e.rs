@@ -75,7 +75,10 @@ fn tmp_workspace(name: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    p.push(format!("astroforge-pipeline-{name}-{}-{stamp}", std::process::id()));
+    p.push(format!(
+        "astroforge-pipeline-{name}-{}-{stamp}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&p);
     std::fs::create_dir_all(&p).expect("mkdir tmp");
     p

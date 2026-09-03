@@ -22,6 +22,7 @@
     type IngestFrame,
     type PipelineResult,
   } from "../lib/pipeline";
+  import { publishPreview } from "../lib/preview-store";
 
   export let sessionId: string;
 
@@ -67,6 +68,15 @@
       lastResult = await runPipeline(sessionId, folder, "beginner");
       if (!lastResult.success && lastResult.error) {
         errorMessage = lastResult.error;
+      } else if (lastResult.success && lastResult.preview) {
+        // Publish to the preview store so PreviewCanvas (in ModeD)
+        // can pick it up next time the user enters the workflow view.
+        publishPreview({
+          sessionId,
+          folder,
+          preview: lastResult.preview,
+          finishedAt: Date.now(),
+        });
       }
     } catch (err) {
       errorMessage = (err as Error).message ?? String(err);
@@ -78,6 +88,9 @@
   function shortPath(p: string): string {
     return p.split(/[\\/]/).pop() ?? p;
   }
+
+  export let onViewPreview: ((sessionId: string) => void) | undefined =
+    undefined;
 </script>
 
 <section class="manifest-review">
@@ -172,7 +185,22 @@
               <dd>{formatExposure(lastResult.report.frameStats.totalExposure)}</dd>
               <dt>Stages recorded</dt>
               <dd>{lastResult.report.stageParameters.length}</dd>
+              {#if lastResult.preview}
+                <dt>Preview size</dt>
+                <dd>{lastResult.preview.width}×{lastResult.preview.height}</dd>
+              {/if}
             </dl>
+            {#if lastResult.preview && onViewPreview}
+              <div class="row preview-actions">
+                <button
+                  type="button"
+                  class="btn-primary"
+                  on:click={() => onViewPreview(sessionId)}
+                >
+                  View stretched preview
+                </button>
+              </div>
+            {/if}
             {#if lastResult.report.stageParameters.length > 0}
               <ul class="stages">
                 {#each lastResult.report.stageParameters as s}

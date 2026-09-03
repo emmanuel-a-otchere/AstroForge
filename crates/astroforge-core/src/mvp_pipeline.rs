@@ -57,7 +57,18 @@ pub enum DialogMode {
 pub struct PipelineResult {
     pub success: bool,
     pub report: ProcessingReport,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub preview: Option<PreviewImage>,
     pub error: Option<String>,
+}
+
+/// RGBA preview bitmap produced by the MVP pipeline. Width × height
+/// pixels, each 4 bytes (R, G, B, A). Sent to the UI for live preview.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviewImage {
+    pub width: usize,
+    pub height: usize,
+    pub rgba: Vec<u8>,
 }
 
 pub fn run_pipeline(
@@ -77,6 +88,7 @@ pub fn run_pipeline(
                 stage_parameters: stage_params,
                 export_path: None,
             },
+            preview: None,
             error: Some("No calibrated frames provided".into()),
         };
     }
@@ -134,7 +146,7 @@ pub fn run_pipeline(
         .collect(),
     });
 
-    let _stretched = stretching::auto_stretch(&stack_result.image);
+    let stretched = stretching::auto_stretch(&stack_result.image);
 
     stage_params.push(StageParams {
         stage_id: "stretching".into(),
@@ -145,6 +157,8 @@ pub fn run_pipeline(
 
     let frame_stats = compute_frame_stats(manifest);
 
+    let preview = f32_image_to_rgba(&stretched);
+
     PipelineResult {
         success: true,
         report: ProcessingReport {
@@ -154,7 +168,66 @@ pub fn run_pipeline(
             stage_parameters: stage_params,
             export_path: None,
         },
+        preview: Some(preview),
         error: None,
+    }
+}
+
+/// Convert a 3-channel float image to an 8-bit RGBA byte vector with
+/// percentile-based normalization. Per-channel normalisation handles
+/// narrowband stacks where one channel may dominate; the alpha channel
+/// is set to 255 everywhere so the result paints opaquely.
+///
+/// Used by the Tauri bridge to feed the WebGL renderer / preview UI.
+pub fn f32_image_to_rgba(img: &F32Image) -> PreviewImage {
+    let width = img.width();
+    let height = img.height();
+    let channels = img.channels().min(3);
+
+    // 1st / 99.5th percentile per channel — robust against hot pixels
+    // and cosmic ray hits that would otherwise compress the dynamic
+    // range during normalisation.
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    for c in 0..channels {
+        let mut values: Vec<f32> = img
+            .as_standard_layout()
+            .slice(ndarray::s![c, .., ..])
+            .iter()
+            .copied()
+            .collect();
+        if values.is_empty() {
+            continue;
+        }
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let n = values.len();
+        let p_lo = values[(n as f64 * 0.005) as usize];
+        let p_hi = values[((n as f64 * 0.995) as usize).min(n - 1)];
+        lo[c] = p_lo;
+        hi[c] = p_hi;
+    }
+
+    let mut rgba = Vec::with_capacity(width * height * 4);
+    for y in 0..height {
+        for x in 0..width {
+            for c in 0..3 {
+                let raw = if c < channels { img[(c, y, x)] } else { 0.0 };
+                let range = hi[c] - lo[c];
+                let normalized = if range > 1e-6 {
+                    ((raw - lo[c]) / range).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                rgba.push((normalized * 255.0) as u8);
+            }
+            rgba.push(255);
+        }
+    }
+
+    PreviewImage {
+        width,
+        height,
+        rgba,
     }
 }
 
@@ -301,5 +374,58 @@ mod tests {
         let result = run_pipeline(&manifest, vec![], &config);
         assert!(!result.success);
         assert!(result.error.is_some());
+    }
+
+    #[test]
+    fn test_run_pipeline_emits_preview() {
+        let manifest = make_manifest(3);
+        let frames: Vec<F32Image> = (0..3)
+            .map(|i| {
+                let mut img = F32Image::new(16, 16, 3);
+                for y in 0..16 {
+                    for x in 0..16 {
+                        img[(0, y, x)] = (x + y + i) as f32;
+                        img[(1, y, x)] = (x + y + i) as f32 * 0.5;
+                        img[(2, y, x)] = (x + y + i) as f32 * 0.25;
+                    }
+                }
+                img
+            })
+            .collect();
+        let config = PipelineConfig::default();
+        let result = run_pipeline(&manifest, frames, &config);
+        assert!(result.success);
+        let preview = result.preview.expect("preview present");
+        assert_eq!(preview.width, 16);
+        assert_eq!(preview.height, 16);
+        assert_eq!(preview.rgba.len(), 16 * 16 * 4);
+        // Alpha must be opaque everywhere.
+        assert!(preview.rgba.iter().skip(3).step_by(4).all(|&a| a == 255));
+    }
+
+    #[test]
+    fn test_f32_image_to_rgba_percentiles() {
+        // Linear ramp 0..1 — percentiles should land inside the
+        // distribution so the middle value maps to roughly the
+        // middle byte (~128).
+        let mut img = F32Image::new(64, 64, 1);
+        for y in 0..64 {
+            for x in 0..64 {
+                img[(0, y, x)] = (x + y * 64) as f32 / (64.0 * 64.0 - 1.0);
+            }
+        }
+        let preview = f32_image_to_rgba(&img);
+        assert_eq!(preview.width, 64);
+        assert_eq!(preview.height, 64);
+        // Pixel at (32, 32) ≈ middle of the ramp should map to
+        // mid-range, not blow out to either end.
+        let middle = preview.rgba[(32 * 64 + 32) * 4];
+        assert!(middle > 64 && middle < 192, "got middle={}", middle);
+        // First pixel ≈ 0 should map near black.
+        let first = preview.rgba[0];
+        assert!(first < 16, "first byte={} should be near black", first);
+        // Last pixel ≈ 1 should map near white.
+        let last = preview.rgba[(63 * 64 + 63) * 4];
+        assert!(last > 192, "last byte={} should be near white", last);
     }
 }

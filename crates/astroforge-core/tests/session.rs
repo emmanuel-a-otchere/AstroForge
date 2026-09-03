@@ -132,3 +132,60 @@ fn auto_complete_in_tauri_command_path() {
     // per-row read API; the absence of errors is the contract.)
     let _ = session_id;
 }
+
+#[test]
+fn receipts_round_trip_via_list_stage_runs() {
+    // Mirrors what the ReceiptsPanel pulls via session_get_receipts:
+    // params + metrics + error survive the round-trip as JSON strings
+    // so the Svelte side can rebuild a StageReceipt without further IPC.
+    let path = tmp_db_path("receipts");
+    let store = SessionStore::new(&path).expect("open");
+    let project_id = store.create_project("Receipts", Some("deep_sky")).unwrap();
+    let session_id = store.create_session(&project_id, None, "beginner").unwrap();
+
+    // Two runs: one happy, one with a warning payload in metrics
+    let r1 = store
+        .record_stage_run(
+            &session_id,
+            "ingest",
+            "completed",
+            Some(r#"{"strength":0.5}"#),
+            Some(r#"{"durationMs":42,"mean":1234.5}"#),
+            None,
+        )
+        .unwrap();
+    let r2 = store
+        .record_stage_run(
+            &session_id,
+            "background_extraction",
+            "completed",
+            Some(r#"{"strength":0.8}"#),
+            Some(r#"{"durationMs":150,"warnings":["hot pixel near (10,10)"]}"#),
+            None,
+        )
+        .unwrap();
+    store.complete_stage_run(r1, "completed").unwrap();
+    store.complete_stage_run(r2, "completed").unwrap();
+
+    // The Tauri command returns this list verbatim
+    let runs = store.list_stage_runs(&session_id);
+    assert_eq!(runs.len(), 2);
+
+    // First run: happy path, no warnings
+    assert_eq!(runs[0].stage_id, "ingest");
+    assert!(runs[0].params_json.as_deref().unwrap().contains("strength"));
+    assert!(runs[0]
+        .metrics_json
+        .as_deref()
+        .unwrap()
+        .contains("durationMs"));
+
+    // Second run: warnings embedded in metrics JSON (the way the Svelte
+    // side folds them in recordStage)
+    assert_eq!(runs[1].stage_id, "background_extraction");
+    let metrics: serde_json::Value =
+        serde_json::from_str(runs[1].metrics_json.as_deref().unwrap()).unwrap();
+    let warnings = metrics.get("warnings").and_then(|v| v.as_array()).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].as_str().unwrap().contains("hot pixel"));
+}

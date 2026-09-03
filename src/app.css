@@ -179,9 +179,15 @@
   --text-primary: var(--on-surface);
   --text-secondary: var(--on-surface-variant);
   --text-muted: var(--outline);
+  --text-on-accent: var(--inverse-on-surface);
   --border: var(--outline-variant);
   --accent: var(--cobalt-accent);
   --accent-dim: var(--primary-container);
+
+  /* ReceiptsPanel status text colours — sit beside the existing
+     success-* tokens, matching the visual hierarchy of gallery pills. */
+  --warning-fg: #fcd9a6;
+  --error-fg: #ffb4ab;
 
   font-family: var(--font-body);
   font-size: var(--text-body);

@@ -145,6 +145,55 @@ impl SessionStore {
             Err(_) => vec![],
         }
     }
+
+    /// Return every stage_run row for a session, oldest first. Each row
+    /// carries the params / metrics JSON blobs verbatim, so the Svelte
+    /// side can rebuild a StageReceipt without further IPC.
+    ///
+    /// Empty Vec when the session has no runs (or doesn't exist); never
+    /// errors — the caller decides what "no runs" means.
+    pub fn list_stage_runs(&self, session_id: &str) -> Vec<StageRunInfo> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, session_id, stage_id, status, params_json, metrics_json, error, \
+                    started_at, completed_at \
+             FROM stage_runs WHERE session_id = ?1 ORDER BY id ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok(StageRunInfo {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                stage_id: row.get(2)?,
+                status: row.get(3)?,
+                params_json: row.get(4)?,
+                metrics_json: row.get(5)?,
+                error: row.get(6)?,
+                started_at: row.get(7)?,
+                completed_at: row.get(8)?,
+            })
+        });
+        match rows {
+            Ok(r) => r.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageRunInfo {
+    pub id: i64,
+    pub session_id: String,
+    pub stage_id: String,
+    pub status: String,
+    pub params_json: Option<String>,
+    pub metrics_json: Option<String>,
+    pub error: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

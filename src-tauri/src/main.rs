@@ -114,6 +114,15 @@ fn session_find_interrupted(state: State<'_, SessionState>) -> Result<Vec<String
     Ok(store.find_interrupted_sessions())
 }
 
+#[tauri::command]
+fn session_get_receipts(
+    state: State<'_, SessionState>,
+    session_id: String,
+) -> Result<Vec<astroforge_core::session::StageRunInfo>, CommandError> {
+    let store = state.0.lock().expect("session store mutex poisoned");
+    Ok(store.list_stage_runs(&session_id))
+}
+
 fn gallery_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     // Resolves to e.g. <app_data_dir>/gallery.sqlite. Falls back to
     // cwd if the app data dir isn't available (shouldn't happen in
@@ -158,6 +167,7 @@ fn main() {
             session_create,
             session_record_stage,
             session_find_interrupted,
+            session_get_receipts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

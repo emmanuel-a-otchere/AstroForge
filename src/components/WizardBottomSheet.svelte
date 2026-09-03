@@ -18,6 +18,7 @@
   } from "../lib/pipeline-store";
   import type { PreviewParams } from "../lib/gl-renderer";
   import { recordStage } from "../lib/session";
+  import ReceiptsPanel from "./ReceiptsPanel.svelte";
 
   export let previewParams: PreviewParams;
   export let onParamsChange: (params: Partial<PreviewParams>) => void;
@@ -57,21 +58,41 @@
    * stage_run row is written to the local rusqlite store. The hook is
    * fire-and-forget: failures are best-effort, never blocking the UI.
    *
+   * Also emits a StageReceipt (§4.1, issue #143) so the receipt log
+   * shows when the stage ran, how long it took, and any warnings.
+   *
    * Spec §5 NFR + issue #144.
    */
   async function handleNext() {
     const params = { ...node.params, strength: sliderValue };
     const stageId = node.type;
     const sessionId = $sessionStore.sessionId;
+    const startedAt = performance.now();
+
     commitStage(params);
     nextStep();
     sliderValue = 0.5;
+
+    const durationMs = Math.round(performance.now() - startedAt);
+    // Receipt body — wired through both the in-memory pipeline-store
+    // (via the next-history-entry) and the persistent stage_runs row.
+    const receipt = {
+      stageId,
+      durationMs,
+      parameters: params as Record<string, unknown>,
+      warnings: [] as string[],
+      metrics: { durationMs },
+      engine: "automagic",
+      success: true,
+    };
     try {
       await recordStage({
         sessionId,
         stageId,
         status: "completed",
-        params,
+        params: receipt.parameters,
+        metrics: receipt.metrics,
+        warnings: receipt.warnings,
       });
     } catch (err) {
       console.warn("session autosave failed (non-blocking):", err);
@@ -357,6 +378,8 @@
       <span class="material-symbols-outlined">arrow_forward</span>
     </button>
   </div>
+
+  <ReceiptsPanel />
 </div>
 
 <style>

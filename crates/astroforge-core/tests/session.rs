@@ -31,7 +31,9 @@ fn session_lifecycle_round_trip() {
     let store = SessionStore::new(&path).expect("open");
 
     // create project + session (mirrors session_create_project + session_create)
-    let project_id = store.create_project("Round Trip", Some("deep_sky")).unwrap();
+    let project_id = store
+        .create_project("Round Trip", Some("deep_sky"))
+        .unwrap();
     assert!(project_id.starts_with("proj_"));
 
     let session_id = store
@@ -78,7 +80,9 @@ fn autosave_records_multiple_stages() {
     assert!(ckpt_id > 0);
 
     // Latest checkpoint is the export
-    let latest = store.get_latest_checkpoint(&session_id).expect("checkpoint");
+    let latest = store
+        .get_latest_checkpoint(&session_id)
+        .expect("checkpoint");
     assert_eq!(latest.stage_id, "export");
     assert_eq!(latest.artifact_path, "/tmp/out.tif");
 }

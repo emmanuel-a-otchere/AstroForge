@@ -174,13 +174,11 @@ fn receipts_round_trip_via_list_stage_runs() {
     // First run: happy path, no warnings
     assert_eq!(runs[0].stage_id, "ingest");
     assert!(runs[0].params_json.as_deref().unwrap().contains("strength"));
-    assert!(
-        runs[0]
-            .metrics_json
-            .as_deref()
-            .unwrap()
-            .contains("durationMs")
-    );
+    assert!(runs[0]
+        .metrics_json
+        .as_deref()
+        .unwrap()
+        .contains("durationMs"));
 
     // Second run: warnings embedded in metrics JSON (the way the Svelte
     // side folds them in recordStage)

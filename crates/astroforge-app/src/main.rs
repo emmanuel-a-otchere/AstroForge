@@ -92,15 +92,18 @@ fn run(source_dir: &PathBuf, output_path: &PathBuf) -> Result<CliReport> {
     // 1. Ingest: scan the directory and classify every FITS frame.
     log::info!("scanning {}", source_dir.display());
     let mut frames: Vec<FrameInfo> = Vec::new();
-    let entries = fs::read_dir(source_dir).with_context(|| {
-        format!("failed to read source directory {}", source_dir.display())
-    })?;
+    let entries = fs::read_dir(source_dir)
+        .with_context(|| format!("failed to read source directory {}", source_dir.display()))?;
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()).map_or(true, |e| {
-            !(e.eq_ignore_ascii_case("fits") || e.eq_ignore_ascii_case("fit"))
-        }) {
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map_or(true, |e| {
+                !(e.eq_ignore_ascii_case("fits") || e.eq_ignore_ascii_case("fit"))
+            })
+        {
             continue;
         }
         // Best-effort classify using IMAGETYP; fall back to filename.

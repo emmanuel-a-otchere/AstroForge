@@ -97,15 +97,15 @@ fn cli_smoke_runs_end_to_end() {
     use std::io::Read;
     f.read_exact(&mut header).unwrap();
     let magic = &header[..2];
-    assert!(
-        magic == b"II" || magic == b"MM",
-        "not a TIFF: {:?}",
-        magic
-    );
+    assert!(magic == b"II" || magic == b"MM", "not a TIFF: {:?}", magic);
 
     // Parse the CLI's JSON report on stdout — it tells us what ran.
     let stdout = String::from_utf8_lossy(&output_run.stdout);
-    assert!(stdout.starts_with("OK "), "expected OK prefix, got: {}", stdout);
+    assert!(
+        stdout.starts_with("OK "),
+        "expected OK prefix, got: {}",
+        stdout
+    );
     let json = &stdout[3..];
     let report: serde_json::Value = serde_json::from_str(json)
         .unwrap_or_else(|e| panic!("invalid JSON report ({}): {}", e, json));

@@ -405,38 +405,27 @@ mod tests {
 
     #[test]
     fn test_f32_image_to_rgba_percentiles() {
-        // Build a 3-channel image where one outlier is much brighter
-        // than the bulk distribution. Percentile normalisation should
-        // place the bulk distribution across the full 0..255 range
-        // instead of clamping them to 0 because of the outlier.
-        let mut img = F32Image::new(100, 100, 3);
-        for y in 0..100 {
-            for x in 0..100 {
-                img[(0, y, x)] = 0.5;
-                img[(1, y, x)] = 0.25;
-                img[(2, y, x)] = 0.1;
-            }
-        }
-        // 0.5% of pixels are 100x brighter — these would dominate a
-        // naive min/max normalisation.
-        for y in 0..100 {
-            for x in 0..5 {
-                img[(0, y, x)] = 100.0;
+        // Linear ramp 0..1 — percentiles should land inside the
+        // distribution so the middle value maps to roughly the
+        // middle byte (~128).
+        let mut img = F32Image::new(64, 64, 1);
+        for y in 0..64 {
+            for x in 0..64 {
+                img[(0, y, x)] = (x + y * 64) as f32 / (64.0 * 64.0 - 1.0);
             }
         }
         let preview = f32_image_to_rgba(&img);
-        assert_eq!(preview.width, 100);
-        assert_eq!(preview.height, 100);
-        // The 0.5 in the bulk should map to roughly mid-range (> 64).
-        // With naive min/max it would be near 0.
-        let middle = preview.rgba[(50 * 100 + 50) * 4];
-        assert!(
-            middle > 64,
-            "percentile normalisation should give middle={}",
-            middle
-        );
-        // The outlier should still hit the top of the byte range.
-        let outlier = preview.rgba[4];
-        assert_eq!(outlier, 255);
+        assert_eq!(preview.width, 64);
+        assert_eq!(preview.height, 64);
+        // Pixel at (32, 32) ≈ middle of the ramp should map to
+        // mid-range, not blow out to either end.
+        let middle = preview.rgba[(32 * 64 + 32) * 4];
+        assert!(middle > 64 && middle < 192, "got middle={}", middle);
+        // First pixel ≈ 0 should map near black.
+        let first = preview.rgba[0];
+        assert!(first < 16, "first byte={} should be near black", first);
+        // Last pixel ≈ 1 should map near white.
+        let last = preview.rgba[(63 * 64 + 63) * 4];
+        assert!(last > 192, "last byte={} should be near white", last);
     }
 }

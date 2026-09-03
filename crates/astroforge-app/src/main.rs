@@ -24,7 +24,7 @@ use std::time::Instant;
 use anyhow::{bail, Context, Result};
 use astroforge_core::export::export_tiff_16bit;
 use astroforge_core::fits;
-use astroforge_core::ingest::{self, FrameInfo, FrameType, SessionManifest};
+use astroforge_core::ingest::{self, FrameInfo, FrameType};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig};
 
 fn main() {
@@ -91,20 +91,13 @@ fn run(source_dir: &PathBuf, output_path: &PathBuf) -> Result<CliReport> {
 
     // 1. Ingest: scan the directory and classify every FITS frame.
     log::info!("scanning {}", source_dir.display());
+    let paths = ingest::scan_directory(source_dir)
+        .with_context(|| format!("scan_directory failed for {}", source_dir.display()))?;
     let mut frames: Vec<FrameInfo> = Vec::new();
-    let entries = fs::read_dir(source_dir)
-        .with_context(|| format!("failed to read source directory {}", source_dir.display()))?;
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()).map_or(true, |e| {
-            !(e.eq_ignore_ascii_case("fits") || e.eq_ignore_ascii_case("fit"))
-        }) {
-            continue;
-        }
-        // Best-effort classify using IMAGETYP; fall back to filename.
-        let frame = ingest::classify_frame(&path, fits::parse_header)
-            .with_context(|| format!("classify_frame failed for {}", path.display()))?;
+    for path in paths {
+        let bytes = fs::read(&path)
+            .with_context(|| format!("read failed for {}", path.display()))?;
+        let frame = ingest::classify_frame(&path, &bytes);
         frames.push(frame);
     }
 
@@ -116,17 +109,28 @@ fn run(source_dir: &PathBuf, output_path: &PathBuf) -> Result<CliReport> {
         bail!("no light frames in {}", source_dir.display());
     }
 
-    let manifest = build_manifest(frames.clone());
+    let session_id = format!(
+        "cli-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let manifest = ingest::build_manifest(&session_id, &source_dir.display().to_string(), frames);
 
     // 2. Read all light frames into F32Images. Calibration is currently
     //    lights-only (no darks/flats yet); the MVP pipeline document
     //    makes that explicit and the CLI mirrors it.
     let mut calibrated: Vec<astroforge_core::image::F32Image> = Vec::new();
-    for frame in &frames {
+    for frame in &manifest.frames {
         if frame.frame_type != FrameType::Light {
             continue;
         }
-        let img = fits::read_f32_image(&frame.path)
+        let bytes = fs::read(&frame.path)
+            .with_context(|| format!("read failed for {}", frame.path.display()))?;
+        let header = fits::parse_header(&bytes)
+            .with_context(|| format!("parse_header failed for {}", frame.path.display()))?;
+        let img = fits::read_f32_image(&bytes, &header)
             .with_context(|| format!("read_f32_image failed for {}", frame.path.display()))?;
         calibrated.push(img);
     }
@@ -194,7 +198,7 @@ fn run(source_dir: &PathBuf, output_path: &PathBuf) -> Result<CliReport> {
         .into_iter()
         .map(|s| StageInfo {
             id: s.stage_id,
-            params: s.params,
+            params: s.params.into_iter().collect(),
         })
         .collect();
 
@@ -212,43 +216,4 @@ fn run(source_dir: &PathBuf, output_path: &PathBuf) -> Result<CliReport> {
         preview_height: preview.height,
         output_bytes,
     })
-}
-
-fn build_manifest(frames: Vec<FrameInfo>) -> SessionManifest {
-    // Light groups: group lights by filter+binning so the orchestrator
-    // can stack each group independently. For the MVP smoke test this
-    // is just one bucket, but the wire shape stays correct.
-    let mut light_groups: Vec<astroforge_core::ingest::LightGroup> = Vec::new();
-    for frame in &frames {
-        if frame.frame_type != FrameType::Light {
-            continue;
-        }
-        let filter = frame.filter.clone().unwrap_or_else(|| "L".into());
-        let binning = frame.binning.unwrap_or(1);
-        if let Some(group) = light_groups
-            .iter_mut()
-            .find(|g| g.filter == filter && g.binning == binning)
-        {
-            group.frame_paths.push(frame.path.clone());
-        } else {
-            light_groups.push(astroforge_core::ingest::LightGroup {
-                filter,
-                binning,
-                frame_paths: vec![frame.path.clone()],
-            });
-        }
-    }
-
-    SessionManifest {
-        session_id: format!(
-            "cli-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ),
-        source_dir: ".".into(),
-        frames,
-        light_groups,
-    }
 }

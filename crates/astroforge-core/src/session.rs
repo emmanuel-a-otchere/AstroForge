@@ -11,7 +11,7 @@ pub struct SessionStore {
 impl SessionStore {
     pub fn new(db_path: &PathBuf) -> Result<Self, SessionError> {
         let conn = Connection::open(db_path)?;
-        conn.execute_batch(db::SCHEMA_SQL)?;
+        conn.execute_batch(db::SESSION_SCHEMA_SQL)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })

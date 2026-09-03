@@ -17,6 +17,7 @@
     type ProcessingMode,
   } from "../lib/pipeline-store";
   import type { PreviewParams } from "../lib/gl-renderer";
+  import { recordStage } from "../lib/session";
 
   export let previewParams: PreviewParams;
   export let onParamsChange: (params: Partial<PreviewParams>) => void;
@@ -51,10 +52,30 @@
     onParamsChange({ strength: sliderValue } as Partial<PreviewParams>);
   }
 
-  function handleNext() {
-    commitStage({ ...node.params, strength: sliderValue });
+  /**
+   * Commit the current stage + advance. Fires the autosave hook so a
+   * stage_run row is written to the local rusqlite store. The hook is
+   * fire-and-forget: failures are best-effort, never blocking the UI.
+   *
+   * Spec §5 NFR + issue #144.
+   */
+  async function handleNext() {
+    const params = { ...node.params, strength: sliderValue };
+    const stageId = node.type;
+    const sessionId = $sessionStore.sessionId;
+    commitStage(params);
     nextStep();
     sliderValue = 0.5;
+    try {
+      await recordStage({
+        sessionId,
+        stageId,
+        status: "completed",
+        params,
+      });
+    } catch (err) {
+      console.warn("session autosave failed (non-blocking):", err);
+    }
   }
 
   function handleBack() {

@@ -88,6 +88,7 @@ pub fn run_pipeline(
                 stage_parameters: stage_params,
                 export_path: None,
             },
+            preview: None,
             error: Some("No calibrated frames provided".into()),
         };
     }

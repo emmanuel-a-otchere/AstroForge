@@ -8,7 +8,7 @@
 //! has a real test behind it. Runs end-to-end with synthetic FITS
 //! files written to a tempdir — no external data, no network.
 
-use astroforge_core::fits::{self, FitsHeader, HEADER_BLOCK_SIZE};
+use astroforge_core::fits::{self, FitsHeader};
 use astroforge_core::ingest::{self, FrameInfo, FrameType};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig, Verbosity};
 use std::fs::File;
@@ -16,34 +16,17 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn write_minimal_fits(path: &PathBuf, width: usize, height: usize, exptime: f64) {
-    // Minimal valid FITS: header padded to 2880 bytes + data
-    // (BITPIX=-32 = IEEE 754 float). Enough for fits::parse_header
-    // and fits::read_f32_image to round-trip a small test image.
+    // Minimal valid FITS file: header (2880 bytes) + zeroed image data
+    // rounded up to the FITS record size. Uses fits::write_header for
+    // the header so the format matches the parser byte-for-byte.
     let mut header = FitsHeader::new();
-    header.set("SIMPLE", "T");
-    header.set("BITPIX", "-32");
-    header.set("NAXIS", "2");
-    header.set("NAXIS1", &width.to_string());
-    header.set("NAXIS2", &height.to_string());
     header.set("IMAGETYP", "LIGHT");
     header.set("EXPTIME", &exptime.to_string());
-    header.set("END", "");
+    header.set("NAXIS1", &width.to_string());
+    header.set("NAXIS2", &height.to_string());
 
     let mut file = File::create(path).expect("create fits");
-
-    // Header: each card is 80 chars; pad to 2880 with spaces.
-    let mut header_bytes = Vec::new();
-    // We can't reuse fits::write_header here without lifting it public
-    // and matching its exact format, so emit cards directly. The
-    // existing parser accepts the same layout.
-    for (k, v) in &header.cards {
-        let card = format!("{:<8}= {:<70}", k, v);
-        let mut bytes = card.into_bytes();
-        bytes.resize(80, b' ');
-        header_bytes.extend_from_slice(&bytes);
-    }
-    header_bytes.resize(HEADER_BLOCK_SIZE, b' ');
-    file.write_all(&header_bytes).expect("header");
+    fits::write_header(&header, &mut file).expect("write header");
 
     // Data: width * height f32 big-endian floats; zeroes are fine for
     // this test — we just want the pipeline to walk every stage.
@@ -52,19 +35,11 @@ fn write_minimal_fits(path: &PathBuf, width: usize, height: usize, exptime: f64)
     for _ in 0..pixel_count {
         data.extend_from_slice(&0.0_f32.to_be_bytes());
     }
-    // Pad each row to FITS record boundary (2880 bytes).
-    let row_size = width * 4;
-    let padding_per_row = if row_size % HEADER_BLOCK_SIZE == 0 {
-        0
-    } else {
-        HEADER_BLOCK_SIZE - (row_size % HEADER_BLOCK_SIZE)
-    };
-    for _ in 0..height {
-        let start = data.len();
-        data.resize(start + row_size, 0);
-        if padding_per_row > 0 {
-            data.resize(start + row_size + padding_per_row, 0);
-        }
+    // Round up to a FITS block boundary.
+    let block_size: usize = 2880;
+    let total = data.len();
+    if total % block_size != 0 {
+        data.resize(total + (block_size - total % block_size), 0);
     }
     file.write_all(&data).expect("data");
 }

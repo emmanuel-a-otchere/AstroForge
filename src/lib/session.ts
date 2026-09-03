@@ -171,10 +171,21 @@ export async function recordStage(input: {
   status: "running" | "completed" | "failed" | "skipped";
   params?: Record<string, unknown> | null;
   metrics?: Record<string, unknown> | null;
+  warnings?: string[] | null;
   error?: string | null;
 }): Promise<number> {
+  // Receipt shape that survives the IPC boundary unchanged: the Rust
+  // side stores metrics/warnings/error as separate columns, but we
+  // also fold them into a single `metrics_json` blob so a future
+  // receipt-query command can reconstruct the full StageReceipt.
   const paramsJson = input.params ? JSON.stringify(input.params) : null;
-  const metricsJson = input.metrics ? JSON.stringify(input.metrics) : null;
+  const metricsBlob: Record<string, unknown> = {
+    ...(input.metrics ?? {}),
+  };
+  if (input.warnings && input.warnings.length > 0) {
+    metricsBlob.warnings = input.warnings;
+  }
+  const metricsJson = Object.keys(metricsBlob).length > 0 ? JSON.stringify(metricsBlob) : null;
 
   if (!isTauri()) {
     const id = inMemoryRuns.length + 1;
@@ -221,3 +232,23 @@ export async function findInterruptedSessions(): Promise<string[]> {
 
 export { fromRustRun as stageRunFromRust };
 export { fromRust as sessionFromRust };
+
+// ─── Receipt history ────────────────────────────────────────────────────
+
+/**
+ * Fetch the persisted receipt log for a session (one row per stage
+ * run, oldest first). Each entry carries params_json / metrics_json /
+ * error so the UI can rebuild a StageReceipt shape for display.
+ *
+ * Browser fallback returns [] — in dev mode there's no persistent
+ * store, so the in-memory pipeline-store history is the only source.
+ */
+export async function fetchReceipts(sessionId: string): Promise<StageRunRecord[]> {
+  if (!isTauri()) {
+    return [];
+  }
+  const rows = await invoke<RustStageRun[]>("session_get_receipts", {
+    sessionId,
+  });
+  return rows.map(fromRustRun);
+}

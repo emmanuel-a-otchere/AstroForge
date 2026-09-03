@@ -25,6 +25,7 @@
   import ModeB from "./components/ModeB.svelte";
   import ModeC from "./components/ModeC.svelte";
   import ModeD from "./components/ModeD.svelte";
+  import ManifestReview from "./components/ManifestReview.svelte";
   import {
     initSession,
     sessionStore,
@@ -309,6 +310,7 @@
           Load new files
         </button>
       </ScreenCard>
+      <ManifestReview sessionId={$sessionStore.sessionId} />
       {/snippet}
     </ModeB>
   {:else if currentMode === "b" && currentStep === "processing"}

@@ -3,5 +3,8 @@
   "identifier": "default",
   "description": "AstroForge default capability",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "dialog:allow-open"
+  ]
 }

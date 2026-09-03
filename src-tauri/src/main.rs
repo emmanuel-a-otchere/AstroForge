@@ -273,6 +273,7 @@ fn session_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let gallery_path = gallery_db_path(&app.handle())?;
             let gallery = GalleryStore::new(&gallery_path)

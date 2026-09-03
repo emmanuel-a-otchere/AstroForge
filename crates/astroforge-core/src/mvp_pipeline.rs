@@ -210,11 +210,7 @@ pub fn f32_image_to_rgba(img: &F32Image) -> PreviewImage {
     for y in 0..height {
         for x in 0..width {
             for c in 0..3 {
-                let raw = if c < channels {
-                    img[(c, y, x)]
-                } else {
-                    0.0
-                };
+                let raw = if c < channels { img[(c, y, x)] } else { 0.0 };
                 let range = hi[c] - lo[c];
                 let normalized = if range > 1e-6 {
                     ((raw - lo[c]) / range).clamp(0.0, 1.0)
@@ -382,17 +378,19 @@ mod tests {
     #[test]
     fn test_run_pipeline_emits_preview() {
         let manifest = make_manifest(3);
-        let frames: Vec<F32Image> = (0..3).map(|i| {
-            let mut img = F32Image::new(16, 16, 3);
-            for y in 0..16 {
-                for x in 0..16 {
-                    img[(0, y, x)] = (x + y + i) as f32;
-                    img[(1, y, x)] = (x + y + i) as f32 * 0.5;
-                    img[(2, y, x)] = (x + y + i) as f32 * 0.25;
+        let frames: Vec<F32Image> = (0..3)
+            .map(|i| {
+                let mut img = F32Image::new(16, 16, 3);
+                for y in 0..16 {
+                    for x in 0..16 {
+                        img[(0, y, x)] = (x + y + i) as f32;
+                        img[(1, y, x)] = (x + y + i) as f32 * 0.5;
+                        img[(2, y, x)] = (x + y + i) as f32 * 0.25;
+                    }
                 }
-            }
-            img
-        }).collect();
+                img
+            })
+            .collect();
         let config = PipelineConfig::default();
         let result = run_pipeline(&manifest, frames, &config);
         assert!(result.success);

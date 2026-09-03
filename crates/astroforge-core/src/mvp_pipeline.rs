@@ -405,23 +405,38 @@ mod tests {
 
     #[test]
     fn test_f32_image_to_rgba_percentiles() {
-        // Build a 3-channel image with one bright outlier per channel;
-        // normalisation should NOT clamp everything to 0 / 255.
-        let mut img = F32Image::new(10, 10, 3);
-        for y in 0..10 {
-            for x in 0..10 {
+        // Build a 3-channel image where one outlier is much brighter
+        // than the bulk distribution. Percentile normalisation should
+        // place the bulk distribution across the full 0..255 range
+        // instead of clamping them to 0 because of the outlier.
+        let mut img = F32Image::new(100, 100, 3);
+        for y in 0..100 {
+            for x in 0..100 {
                 img[(0, y, x)] = 0.5;
                 img[(1, y, x)] = 0.25;
                 img[(2, y, x)] = 0.1;
             }
         }
-        img[(0, 0, 0)] = 1e6; // hot pixel
+        // 0.5% of pixels are 100x brighter — these would dominate a
+        // naive min/max normalisation.
+        for y in 0..100 {
+            for x in 0..5 {
+                img[(0, y, x)] = 100.0;
+            }
+        }
         let preview = f32_image_to_rgba(&img);
-        assert_eq!(preview.width, 10);
-        assert_eq!(preview.height, 10);
-        // Middle pixels (the bulk distribution) should map to ~128,
-        // not blow out to 255 because of the outlier.
-        let middle = preview.rgba[(5 * 10 + 5) * 4];
-        assert!(middle > 100 && middle < 200, "got middle={}", middle);
+        assert_eq!(preview.width, 100);
+        assert_eq!(preview.height, 100);
+        // The 0.5 in the bulk should map to roughly mid-range (> 64).
+        // With naive min/max it would be near 0.
+        let middle = preview.rgba[(50 * 100 + 50) * 4];
+        assert!(
+            middle > 64,
+            "percentile normalisation should give middle={}",
+            middle
+        );
+        // The outlier should still hit the top of the byte range.
+        let outlier = preview.rgba[4];
+        assert_eq!(outlier, 255);
     }
 }

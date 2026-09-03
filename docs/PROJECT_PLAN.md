@@ -198,7 +198,7 @@ separation and replace is mathematically exact (verifiable by difference maps).
 | P1.5-M1-T5 | [#141](https://github.com/emmanuel-a-otchere/AstroForge/issues/141) | Implement undo/redo history stack: every stage commit pushes a versioned snapshot (params + pixel ref); undo restores exact prior state | §4.2 | pending | T3 |
 | P1.5-M1-T6 | [#142](https://github.com/emmanuel-a-otchere/AstroForge/issues/142) | Implement mode-switch logic with confirmation: keep current pixel state OR re-process from chosen stage under new mode | §4.3 | pending | T1, T5 |
 | P1.5-M1-T7 | [#143](https://github.com/emmanuel-a-otchere/AstroForge/issues/143) | Implement stage receipt/log system: each stage emits human-readable entry with parameters, timing, warnings | §4.1 | pending | T3 |
-| P1.5-M1-T8 | [#144](https://github.com/emmanuel-a-otchere/AstroForge/issues/144) | Implement crash-safe autosave: persist session state (mode, history, intermediate refs) to Supabase on every stage commit | §5 NFR | pending | T5 |
+| P1.5-M1-T8 | [#144](https://github.com/emmanuel-a-otchere/AstroForge/issues/144) | Implement crash-safe autosave: persist session state (mode, history, intermediate refs) to local rusqlite (Tauri-side) on every stage commit | §5 NFR | pending | T5 |
 
 ### Milestone 1.5.2 — PreviewCanvas & Live Preview System
 

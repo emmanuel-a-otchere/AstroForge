@@ -1,9 +1,16 @@
 # AstroForge — Living Project Plan
 
-**Last updated:** 2026-09-02
-**Current phase:** Phase 0 — Foundation & Scaffolding (complete); Phase 1.5 — Guided Processing Train (active)
+**Last updated:** 2026-09-03
+**Current phase:** Phase 0 + Phase 1 (UI scaffolding complete; 6 Phase 1 MVP tasks pending);
+Phase 1.5 (UI chrome complete; **50 of 50 processing-pipeline issues OPEN**);
+Phase 2+ deferred.
 **Spec version:** 1.1.0
 **Active CR:** AF-CR-2026-09-01-IMG-PIPELINE
+**Active plan:** [`docs/plans/2026-09-03-m2-tranche/`](plans/2026-09-03-m2-tranche/PLAN.md)
+**Re-plan rationale:** Phases 1-6 of the Coder session shipped UI chrome, design tokens,
+local GalleryStore, and Supabase removal. The M1.5 processing pipeline (50 issues) and
+MVP smoke tests (4 issues) are still pending. M2 = finish what was promised in M1.5,
+not start new work. See `plans/2026-09-03-m2-tranche/PLAN.md` for the tranche plan.
 
 > This is a **living document**. It is rebased frequently against actual work
 > progress. When a task is completed, its status is updated here and the plan is

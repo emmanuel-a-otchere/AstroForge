@@ -59,6 +59,8 @@ pub struct PipelineResult {
     pub report: ProcessingReport,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub preview: Option<PreviewImage>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub stretched: Option<crate::image::F32Image>,
     pub error: Option<String>,
 }
 
@@ -89,6 +91,7 @@ pub fn run_pipeline(
                 export_path: None,
             },
             preview: None,
+            stretched: None,
             error: Some("No calibrated frames provided".into()),
         };
     }
@@ -169,6 +172,7 @@ pub fn run_pipeline(
             export_path: None,
         },
         preview: Some(preview),
+        stretched: Some(stretched),
         error: None,
     }
 }

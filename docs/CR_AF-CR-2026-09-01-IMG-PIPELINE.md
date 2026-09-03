@@ -97,7 +97,7 @@ Mode state must be persisted with the session and clearly indicated in the UI at
 ## 5. Non-Functional Requirements
 - Cross-platform parity (Windows, macOS Apple Silicon + Intel, Linux).
 - Live preview remains responsive on modest hardware; AI stages show measured progress and estimated time.
-- Session state (including mode, history, and all intermediate results) must survive crashes via autosave with explicit "keep or discard" after successful export.
+- Session state (including mode, history, and all intermediate results) must survive crashes via local autosave (Tauri-side rusqlite) with explicit "keep or discard" after successful export.
 - Clear separation between free and accelerated AI paths with transparent messaging.
 
 ## 6. Acceptance Criteria

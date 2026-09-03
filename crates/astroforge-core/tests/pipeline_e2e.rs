@@ -20,7 +20,15 @@ fn write_minimal_fits(path: &PathBuf, width: usize, height: usize, exptime: f64)
     // rounded up to the FITS record size. Uses fits::write_header for
     // the header so the format matches the parser byte-for-byte.
     let mut header = FitsHeader::new();
-    header.set("IMAGETYP", "LIGHT");
+    // Classify by filename so the test fixtures mirror a real session
+    // (where frame type comes from IMAGETYP, not just the path).
+    let frame_type = match path.file_name().and_then(|n| n.to_str()).unwrap_or("") {
+        n if n.contains("dark") => "DARK",
+        n if n.contains("flat") => "FLAT",
+        n if n.contains("bias") => "BIAS",
+        _ => "LIGHT",
+    };
+    header.set("IMAGETYP", frame_type);
     header.set("EXPTIME", &exptime.to_string());
     header.set("NAXIS1", &width.to_string());
     header.set("NAXIS2", &height.to_string());

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { WebGLRenderer, type PreviewParams, type ViewportState } from "../lib/gl-renderer";
+  import { previewStore } from "../lib/preview-store";
+  import { previewToImageData } from "../lib/pipeline";
 
   export let params: PreviewParams = {
     blackPoint: 0,
@@ -14,6 +16,8 @@
   export let compareMode: boolean = false;
   export let imageData: ImageData | null = null;
   export let floatData: { width: number; height: number; data: Float32Array } | null = null;
+  /** Optional session ID — when set, the canvas pulls the matching preview from previewStore. */
+  export let sessionId: string | null = null;
 
   let canvas: HTMLCanvasElement;
   let renderer: WebGLRenderer | null = null;
@@ -92,6 +96,15 @@
 
   $: if (renderer && floatData) {
     renderer.setImageData(floatData.width, floatData.height, floatData.data);
+    renderer.refit();
+    renderer.render(renderMode);
+  }
+
+  // Subscribe to the preview store so a freshly-completed pipeline run
+  // in ManifestReview feeds straight into the canvas without prop-drilling.
+  $: if (renderer && sessionId && $previewStore?.sessionId === sessionId) {
+    const data = previewToImageData($previewStore.preview);
+    renderer.setImageFromImageData(data);
     renderer.refit();
     renderer.render(renderMode);
   }

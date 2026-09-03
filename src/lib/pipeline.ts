@@ -53,6 +53,13 @@ function fromRust(f: RustIngestFrame): IngestFrame {
   };
 }
 
+export interface PreviewImage {
+  width: number;
+  height: number;
+  /** Raw RGBA bytes (length = width × height × 4). */
+  rgba: number[];
+}
+
 export interface PipelineReport {
   sessionId: string;
   frameStats: {
@@ -74,12 +81,14 @@ export interface PipelineReport {
 export interface PipelineResult {
   success: boolean;
   report: PipelineReport;
+  preview: PreviewImage | null;
   error: string | null;
 }
 
 interface RustPipelineResult {
   success: boolean;
   report: RustPipelineReport;
+  preview: RustPreviewImage | null;
   error: string | null;
 }
 
@@ -89,6 +98,12 @@ interface RustPipelineReport {
   rejected_frames: unknown[];
   stage_parameters: RustStageParams[];
   export_path: string | null;
+}
+
+interface RustPreviewImage {
+  width: number;
+  height: number;
+  rgba: number[];
 }
 
 interface RustFrameStats {
@@ -125,10 +140,21 @@ function reportFromRust(r: RustPipelineReport): PipelineReport {
   };
 }
 
+function previewFromRust(p: RustPreviewImage): PreviewImage {
+  return {
+    width: p.width,
+    height: p.height,
+    // Some Tauri serialisers wrap byte arrays in plain JS arrays;
+    // ensure we always have a fresh array the WebGL renderer can consume.
+    rgba: Array.from(p.rgba ?? []),
+  };
+}
+
 function resultFromRust(r: RustPipelineResult): PipelineResult {
   return {
     success: r.success,
     report: reportFromRust(r.report),
+    preview: r.preview ? previewFromRust(r.preview) : null,
     error: r.error,
   };
 }
@@ -235,4 +261,29 @@ export function formatExposure(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
   return `${m}m ${s}s`;
+}
+
+/**
+ * Convert a PreviewImage's raw RGBA bytes into an ImageData that the
+ * WebGL renderer / a 2D canvas can consume directly. The returned
+ * ImageData owns its `data` buffer (Uint8ClampedArray view of a copy).
+ */
+export function previewToImageData(p: PreviewImage): ImageData {
+  const clamped = Uint8ClampedArray.from(p.rgba);
+  return new ImageData(clamped, p.width, p.height);
+}
+
+/**
+ * Render a PreviewImage to a temporary 2D canvas and return the canvas.
+ * Useful for `WebGLRenderer.setImageFromCanvas`, which sidesteps the
+ * `texImage2D` Float/texture-format compatibility surface.
+ */
+export function previewToCanvas(p: PreviewImage): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = p.width;
+  canvas.height = p.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2D canvas unavailable");
+  ctx.putImageData(previewToImageData(p), 0, 0);
+  return canvas;
 }

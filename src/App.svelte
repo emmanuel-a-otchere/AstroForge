@@ -34,6 +34,7 @@
   import {
     setStage,
     currentLayoutMode,
+    setModeOverride,
     type AppStage,
   } from "./lib/layout-mode";
   import type { PreviewParams } from "./lib/gl-renderer";
@@ -92,6 +93,15 @@
 
   function goToSelectFiles() {
     currentStep = "select-files";
+  }
+
+  function viewPreview(_sessionId: string) {
+    // Navigate to ModeD (full-image workflow view). PreviewCanvas
+    // reads the matching preview from previewStore by session ID.
+    setModeOverride("d");
+    if (typeof console !== "undefined") {
+      console.info(`[astroforge] navigating to preview for ${_sessionId}`);
+    }
   }
 
   function handleFileSelect(event: Event) {
@@ -310,7 +320,10 @@
           Load new files
         </button>
       </ScreenCard>
-      <ManifestReview sessionId={$sessionStore.sessionId} />
+      <ManifestReview
+        sessionId={$sessionStore.sessionId}
+        onViewPreview={viewPreview}
+      />
       {/snippet}
     </ModeB>
   {:else if currentMode === "b" && currentStep === "processing"}

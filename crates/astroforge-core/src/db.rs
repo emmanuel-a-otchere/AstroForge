@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_SQL: &str = r#"
+/// Session store schema (projects / sessions / stage_runs / checkpoints).
+///
+/// Kept separate from the gallery schema so the two stores can evolve
+/// independently (different ownership, different write cadence).
+/// Migration is run when `SessionStore::new` opens the DB.
+pub const SESSION_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

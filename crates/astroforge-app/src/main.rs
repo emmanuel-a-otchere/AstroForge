@@ -97,13 +97,9 @@ fn run(source_dir: &PathBuf, output_path: &PathBuf) -> Result<CliReport> {
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
-        if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map_or(true, |e| {
-                !(e.eq_ignore_ascii_case("fits") || e.eq_ignore_ascii_case("fit"))
-            })
-        {
+        if path.extension().and_then(|e| e.to_str()).map_or(true, |e| {
+            !(e.eq_ignore_ascii_case("fits") || e.eq_ignore_ascii_case("fit"))
+        }) {
             continue;
         }
         // Best-effort classify using IMAGETYP; fall back to filename.

@@ -65,8 +65,60 @@
   --warning: #f59e0b;
   --processing: #a8655b;
 
+  /* Status foreground + border (for pill chips, badges) */
+  --success-fg: #b9f0c5;
+  --success-border: #b9f0c566;
+
   /* Background */
   --background: #121414;
+
+  /* ── Alpha overlay tokens ──────────────────────────────────────────── */
+  /* Translucent surfaces: dialog scrims, status pills, screen cards */
+  --overlay-scrim: rgba(0, 0, 0, 0.6);
+  --overlay-strong: rgba(0, 0, 0, 0.55);
+  --overlay-soft: rgba(0, 0, 0, 0.2);
+  --overlay-panel: rgba(30, 32, 32, 0.75);
+  --overlay-card: rgba(30, 32, 32, 0.85);
+  --overlay-card-strong: rgba(30, 32, 32, 0.92);
+  --overlay-glass: rgba(18, 20, 20, 0.6);
+  --overlay-tile-idle: rgba(255, 255, 255, 0.08);
+  --overlay-preview-bg: rgba(40, 42, 43, 0.85);
+  --overlay-preview-bg-hover: rgba(50, 52, 53, 0.95);
+
+  /* ── Glow tokens (box-shadow / radial accents) ─────────────────────── */
+  /* All expressed as the primary brand color (Solar Flare Red)
+     or the tertiary (Deep Orbit Blue) at controlled alpha so changes
+     to the source propagate. */
+  --glow-cobalt-soft: rgba(203, 78, 61, 0.18);
+  --glow-cobalt-mid: rgba(203, 78, 61, 0.2);
+  --glow-cobalt-strong: rgba(203, 78, 61, 0.3);
+  --glow-cobalt-bright: rgba(203, 78, 61, 0.4);
+  --glow-tertiary-mid: rgba(119, 135, 249, 0.4);
+  --glow-error: rgba(255, 180, 171, 0.4);
+
+  /* Tile + canvas radial-gradient halos */
+  --tile-glow-warm: rgba(255, 180, 168, 0.12);
+  --tile-glow-warm-strong: rgba(255, 180, 168, 0.18);
+  --tile-glow-cool: rgba(123, 162, 219, 0.12);
+  --tile-glow-cool-strong: rgba(187, 195, 255, 0.24);
+  --canvas-glow-mid: rgba(40, 42, 43, 0.4);
+  --canvas-mode-d-warm: rgba(203, 78, 61, 0.32);
+
+  /* Star field (1px white dots over the canvas backdrop) */
+  --star-color-100: rgba(255, 255, 255, 0.6);
+  --star-color-83: rgba(255, 255, 255, 0.5);
+  --star-color-67: rgba(255, 255, 255, 0.4);
+  --star-color-58: rgba(255, 255, 255, 0.35);
+
+  /* ── Shadow tokens (deep elevations) ───────────────────────────────── */
+  --shadow-screen-card: rgba(0, 0, 0, 0.45);
+  --glow-primary-hairline: rgba(255, 180, 168, 0.04);
+  --glow-cobalt-dim: rgba(203, 78, 61, 0.08);
+  --tile-glow-warm-dim: rgba(255, 180, 168, 0.08);
+
+  /* Status semantic backgrounds (banners, table rows) */
+  --warning-bg: rgba(245, 158, 11, 0.08);
+  --success-border-dim: rgba(185, 240, 197, 0.3);
 
   /* ── Typography ────────────────────────────────────────────────────────── */
   --font-display: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -169,19 +221,19 @@ body {
 
 /* ── Utility classes ───────────────────────────────────────────────────── */
 .glass-panel {
-  background-color: rgba(18, 20, 20, 0.6);
+  background-color: var(--overlay-glass);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--outline-variant);
 }
 
 .glow-active {
-  box-shadow: 0 0 4px 1px rgba(203, 78, 61, 0.2);
+  box-shadow: 0 0 4px 1px var(--glow-cobalt-mid);
   border-color: var(--cobalt-accent);
 }
 
 .luminescent-glow {
-  box-shadow: 0 0 12px rgba(203, 78, 61, 0.3);
+  box-shadow: 0 0 12px var(--glow-cobalt-strong);
 }
 
 .font-display { font-family: var(--font-display); }
@@ -249,7 +301,7 @@ body {
 }
 .status-processing {
   background-color: var(--cobalt-accent);
-  box-shadow: 0 0 4px 1px rgba(203, 78, 61, 0.4);
+  box-shadow: 0 0 4px 1px var(--glow-cobalt-bright);
   animation: pulse-led 2s infinite;
 }
 .status-queued {
@@ -257,11 +309,11 @@ body {
 }
 .status-completed {
   background-color: var(--tertiary-container);
-  box-shadow: 0 0 4px 1px rgba(119, 135, 249, 0.4);
+  box-shadow: 0 0 4px 1px var(--glow-tertiary-mid);
 }
 .status-error {
   background-color: var(--error);
-  box-shadow: 0 0 4px 1px rgba(255, 180, 171, 0.4);
+  box-shadow: 0 0 4px 1px var(--glow-error);
 }
 
 @keyframes pulse-led {

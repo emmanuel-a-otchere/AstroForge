@@ -137,7 +137,7 @@
     gap: var(--sp-md);
     padding: 0 var(--sp-lg);
     height: 56px;
-    background: rgba(30, 32, 32, 0.75);
+    background: var(--overlay-panel);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-bottom: 1px solid var(--outline-variant);
@@ -223,7 +223,7 @@
     gap: var(--sp-sm);
     padding: 0 var(--sp-lg);
     height: 32px;
-    background: rgba(30, 32, 32, 0.75);
+    background: var(--overlay-panel);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-top: 1px solid var(--outline-variant);

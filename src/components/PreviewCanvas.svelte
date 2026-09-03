@@ -153,7 +153,7 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: #000;
+    background: var(--surface-container-lowest);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -176,10 +176,10 @@
     left: 50%;
     transform: translateX(-50%);
     padding: 0.375rem 1rem;
-    background: rgba(15, 23, 42, 0.85);
+    background: var(--overlay-preview-bg);
     color: var(--text-primary);
     border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border-radius: var(--radius-md);
     font-size: 0.75rem;
     font-weight: 500;
     cursor: pointer;
@@ -189,7 +189,7 @@
   }
 
   .compare-btn:hover {
-    background: rgba(30, 41, 59, 0.95);
+    background: var(--overlay-preview-bg-hover);
   }
 
   .compare-btn:active {
@@ -202,9 +202,9 @@
     top: 0.75rem;
     right: 0.75rem;
     padding: 0.25rem 0.625rem;
-    background: rgba(15, 23, 42, 0.85);
+    background: var(--overlay-preview-bg);
     color: var(--text-muted);
-    border-radius: 0.25rem;
+    border-radius: var(--radius-default);
     font-size: 0.6875rem;
     font-variant-numeric: tabular-nums;
     backdrop-filter: blur(8px);

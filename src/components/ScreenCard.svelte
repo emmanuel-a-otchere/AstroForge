@@ -64,7 +64,7 @@
 
 <style>
   .screen-card {
-    background-color: rgba(30, 32, 32, 0.85);
+    background-color: var(--overlay-card);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--outline-variant);
@@ -79,9 +79,9 @@
   }
 
   .screen-card-overlay {
-    background-color: rgba(30, 32, 32, 0.92);
-    box-shadow: 0 0 0 1px rgba(255, 180, 168, 0.04),
-      0 12px 32px rgba(0, 0, 0, 0.45);
+    background-color: var(--overlay-card-strong);
+    box-shadow: 0 0 0 1px var(--glow-primary-hairline),
+      0 12px 32px var(--shadow-screen-card);
   }
 
   .screen-card-header {

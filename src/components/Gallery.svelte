@@ -188,13 +188,13 @@
     margin-left: 4px;
     padding: 0 6px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--overlay-tile-idle);
     color: inherit;
     font-size: 0.85em;
   }
 
   .gallery-tab.active .tab-count {
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--overlay-soft);
   }
 
   .gallery-scroll {
@@ -253,15 +253,15 @@
   .gallery-tile.active {
     border-color: var(--cobalt-accent);
     box-shadow: 0 0 0 1px var(--cobalt-accent),
-      0 8px 24px rgba(203, 78, 61, 0.18);
+      0 8px 24px var(--glow-cobalt-soft);
   }
 
   .tile-preview {
     position: relative;
     height: 80px;
     background:
-      radial-gradient(circle at 30% 20%, rgba(255, 180, 168, 0.12), transparent 60%),
-      radial-gradient(circle at 80% 80%, rgba(123, 162, 219, 0.12), transparent 60%),
+      radial-gradient(circle at 30% 20%, var(--tile-glow-warm), transparent 60%),
+      radial-gradient(circle at 80% 80%, var(--tile-glow-cool), transparent 60%),
       var(--surface-container-highest);
     display: flex;
     align-items: center;
@@ -285,14 +285,14 @@
     font-weight: 700;
     letter-spacing: var(--ls-label);
     text-transform: uppercase;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--overlay-strong);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
   }
 
   .status-completed {
-    color: #b9f0c5;
-    border: 1px solid rgba(185, 240, 197, 0.4);
+    color: var(--success-fg);
+    border: 1px solid var(--success-border);
   }
 
   .status-processing {

@@ -108,7 +108,7 @@
   .dialog-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--overlay-scrim);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -197,7 +197,7 @@
   }
 
   tr.has-anomaly {
-    background: rgba(245, 158, 11, 0.08);
+    background: var(--warning-bg);
   }
 
   .anomaly {

@@ -446,7 +446,7 @@
   .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--overlay-scrim);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -531,7 +531,7 @@
     background: var(--cobalt-accent);
     color: var(--surface);
     border-color: var(--cobalt-accent);
-    box-shadow: 0 0 8px rgba(203, 78, 61, 0.4);
+    box-shadow: 0 0 8px var(--glow-cobalt-bright);
   }
 
   .step-dot.done .step-num {
@@ -647,7 +647,7 @@
 
   .btn-automagic-process:hover {
     background: var(--primary-container);
-    box-shadow: 0 0 16px rgba(203, 78, 61, 0.3);
+    box-shadow: 0 0 16px var(--glow-cobalt-strong);
   }
 
   .btn-automagic-process .material-symbols-outlined {
@@ -693,7 +693,7 @@
     border-radius: 50%;
     background: var(--cobalt-accent);
     cursor: pointer;
-    box-shadow: 0 0 6px rgba(203, 78, 61, 0.3);
+    box-shadow: 0 0 6px var(--glow-cobalt-strong);
     transition: transform var(--transition-fast);
   }
 
@@ -708,7 +708,7 @@
     background: var(--cobalt-accent);
     cursor: pointer;
     border: none;
-    box-shadow: 0 0 6px rgba(203, 78, 61, 0.3);
+    box-shadow: 0 0 6px var(--glow-cobalt-strong);
   }
 
   .ai-suggestion {
@@ -795,7 +795,7 @@
 
   .btn-primary:hover:not(:disabled) {
     background: var(--primary-container);
-    box-shadow: 0 0 12px rgba(203, 78, 61, 0.2);
+    box-shadow: 0 0 12px var(--glow-cobalt-mid);
   }
 
   .btn-primary:disabled {

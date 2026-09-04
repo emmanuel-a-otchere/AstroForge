@@ -95,8 +95,8 @@ fn run(source_dir: &PathBuf, output_path: &PathBuf) -> Result<CliReport> {
         .with_context(|| format!("scan_directory failed for {}", source_dir.display()))?;
     let mut frames: Vec<FrameInfo> = Vec::new();
     for path in paths {
-        let bytes = fs::read(&path)
-            .with_context(|| format!("read failed for {}", path.display()))?;
+        let bytes =
+            fs::read(&path).with_context(|| format!("read failed for {}", path.display()))?;
         let frame = ingest::classify_frame(&path, &bytes);
         frames.push(frame);
     }

@@ -44,6 +44,22 @@ impl ModelRegistry {
             .unwrap_or(false)
     }
 
+    /// Return a [`ModelInfo`] for the first registered model whose
+    /// `stage` matches `stage_type`. Used by [`DefaultAIService`] to
+    /// pick a model for [`AIService::execute`](crate::service::AIService::execute).
+    ///
+    /// Returns the metadata only — the caller is responsible for
+    /// actually instantiating the concrete model type and running it.
+    /// Today there are no concrete models registered by default; this
+    /// is here so the service layer compiles and so P1.5-M6 can plug
+    /// models in without touching the trait.
+    pub fn info_for_stage(&self, stage_type: &str) -> Option<ModelInfo> {
+        self.manifest
+            .values()
+            .find(|e| e.info.stage == stage_type && e.downloaded && e.verified)
+            .map(|e| e.info.clone())
+    }
+
     pub fn local_path(&self, name: &str) -> Option<&PathBuf> {
         self.manifest.get(name).and_then(|e| e.local_path.as_ref())
     }

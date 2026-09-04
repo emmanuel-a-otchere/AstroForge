@@ -8,7 +8,7 @@ pub struct HardwareProbe {
     pub cpu_cores: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum GpuBackend {
     Cpu,
     Cuda,
@@ -17,7 +17,7 @@ pub enum GpuBackend {
     OpenVino,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum QualityTier {
     Fast,
     Balanced,

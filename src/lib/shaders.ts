@@ -33,7 +33,13 @@ export const MTF_STRETCH_SHADER = `
   varying vec2 v_uv;
 
   float mtf(float x, float m) {
-    // PixInsight MTF formula
+    // PixInsight MTF formula.
+    //
+    // PARITY: this formula is mirrored verbatim in Rust at
+    // crates/astroforge-core/src/stretching.rs (midtone_transfer).
+    // If you change one, change the other and update both test suites:
+    //   - Rust: test_mtf_* in crates/astroforge-core/src/stretching.rs
+    //   - (no JS test suite yet — Rust tests pin the contract)
     if (x <= 0.0) return 0.0;
     if (x >= 1.0) return 1.0;
     return ((m - 1.0) * x) / ((2.0 * m - 1.0) * x - m);

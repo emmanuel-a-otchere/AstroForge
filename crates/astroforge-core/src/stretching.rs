@@ -57,7 +57,14 @@ pub fn histogram_stretch(
     for val in result.iter_mut() {
         let normalized = (*val as f64 - shadows) / range;
         let stretched = midtone_transfer(normalized.clamp(0.0, 1.0), midtones);
-        *val = stretched as f32;
+        // Apply white-point clipping AFTER MTF, matching the GLSL shader's
+        //   stretched = min(stretched, u_highlights);
+        // step in src/lib/shaders.ts (MTF_STRETCH_SHADER). The `highlights`
+        // arg here is the upper end of the input range AND the ceiling on
+        // the output. Below-black-point inputs are already 0 after the
+        // (x - shadows) / (highlights - shadows) normalisation clamp, so
+        // no additional lower-bound clip is needed.
+        *val = stretched.min(highlights) as f32;
     }
 
     result
@@ -75,6 +82,10 @@ fn midtone_transfer(value: f64, midtones: f64) -> f64 {
     //   m(v) = ((m - 1) * v) / ((2m - 1) * v - m)
     // Maps 0 -> 0 and 1 -> 1; the `m` parameter shifts where the inflection
     // happens (m = 0.5 -> identity, m < 0.5 -> brightens midtones, m > 0.5 -> darkens).
+    //
+    // PARITY: this formula is mirrored verbatim in the GLSL `mtf()` helper inside
+    // src/lib/shaders.ts (`MTF_STRETCH_SHADER`). If you change one, change the other
+    // and update both test suites.
     let result = ((m - 1.0) * value) / ((2.0 * m - 1.0) * value - m);
     result.clamp(0.0, 1.0)
 }
@@ -139,5 +150,146 @@ mod tests {
         img.fill(0.5);
         let hist = compute_histogram(&img, 256);
         assert_eq!(hist[128], 16);
+    }
+
+    // ── MTF (Lupton 1999) parity tests ───────────────────────────────────
+    //
+    // These tests pin the Rust `midtone_transfer` so the GLSL `mtf()` in
+    // src/lib/shaders.ts cannot drift. If you change the formula, update
+    // both copies AND the values in `expected_mtf_table` below.
+
+    /// Hand-computed expected outputs of mtf(v, m) for canonical (v, m) pairs.
+    /// The formula is `((m - 1) * v) / ((2m - 1) * v - m)`; values match
+    /// to 4 decimals to absorb f64 rounding noise.
+    const EXPECTED_MTF_EPSILON: f64 = 1e-4;
+
+    #[test]
+    fn test_mtf_fixed_points_at_zero_and_one() {
+        // 0 -> 0 and 1 -> 1 for every m in (0, 1).
+        for m in [0.05, 0.25, 0.5, 0.75, 0.95] {
+            assert!(
+                (midtone_transfer(0.0, m) - 0.0).abs() < EXPECTED_MTF_EPSILON,
+                "mtf(0, {m}) = {} (expected 0)",
+                midtone_transfer(0.0, m)
+            );
+            assert!(
+                (midtone_transfer(1.0, m) - 1.0).abs() < EXPECTED_MTF_EPSILON,
+                "mtf(1, {m}) = {} (expected 1)",
+                midtone_transfer(1.0, m)
+            );
+        }
+    }
+
+    #[test]
+    fn test_mtf_identity_at_half_midtones() {
+        // m = 0.5 is the canonical identity: every value passes through
+        // (matches the GLSL `MTF_STRETCH_SHADER` comment: "neutral at 0.25"
+        // — but only when the input is the canonical linear-to-display
+        // 0.5 luminance. With pure m=0.5 every v satisfies v == mtf(v, 0.5)).
+        for v in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
+            let out = midtone_transfer(v, 0.5);
+            assert!(
+                (out - v).abs() < EXPECTED_MTF_EPSILON,
+                "m=0.5 must be identity: mtf({v}, 0.5) = {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mtf_hand_computed_canonical_pairs() {
+        // Reference values computed by hand from the Lupton 1999 formula:
+        //   mtf(v, m) = ((m - 1) * v) / ((2m - 1) * v - m)
+        //
+        //   mtf(0.25, 0.25) = 0.5000
+        //   mtf(0.50, 0.25) = 0.7500
+        //   mtf(0.50, 0.75) = 0.2500
+        //   mtf(0.75, 0.25) = 0.9000
+        let cases = [
+            (0.25_f64, 0.25_f64, 0.5_f64),
+            (0.50, 0.25, 0.75),
+            (0.50, 0.75, 0.25),
+            (0.75, 0.25, 0.90),
+        ];
+        for (v, m, expected) in cases {
+            let out = midtone_transfer(v, m);
+            assert!(
+                (out - expected).abs() < EXPECTED_MTF_EPSILON,
+                "mtf({v}, {m}) = {out} (expected {expected})"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mtf_monotonic_increasing() {
+        // The MTF must be strictly increasing in v for any fixed m in (0,1).
+        // A regression that introduces a flip would silently break stretching.
+        for m in [0.1, 0.25, 0.5, 0.75, 0.9] {
+            let mut prev = midtone_transfer(0.0, m);
+            for i in 1..=20 {
+                let v = i as f64 / 20.0;
+                let out = midtone_transfer(v, m);
+                assert!(
+                    out >= prev,
+                    "MTF not monotonic at m={m}: mtf({prev_v})={prev} > mtf({v})={out}",
+                    prev_v = (i - 1) as f64 / 20.0
+                );
+                prev = out;
+            }
+        }
+    }
+
+    // ── histogram_stretch: black-point + highlight clipping ─────────────
+
+    #[test]
+    fn test_histogram_stretch_black_point_clip() {
+        // A black point of 0.3 means any pixel below 0.3 should land at 0
+        // (after the (x - BP) / (1 - BP) normalisation).
+        let mut img = F32Image::new(2, 1, 1);
+        img[(0, 0, 0)] = 0.1; // below BP -> should clamp to 0
+        img[(0, 0, 1)] = 0.3; // at BP     -> should land near 0
+        let stretched = histogram_stretch(&img, 0.3, 1.0, 0.5);
+        assert!(
+            stretched[(0, 0, 0)] <= EXPECTED_MTF_EPSILON as f32,
+            "below-BP pixel should clip to 0, got {}",
+            stretched[(0, 0, 0)]
+        );
+        assert!(
+            stretched[(0, 0, 1)] <= EXPECTED_MTF_EPSILON as f32 + 0.01,
+            "at-BP pixel should land near 0, got {}",
+            stretched[(0, 0, 1)]
+        );
+    }
+
+    #[test]
+    fn test_histogram_stretch_highlight_clip() {
+        // Highlights = 0.7: any pixel that would exceed 0.7 after MTF must
+        // be clamped to <= 0.7 (the highlight ceiling).
+        let mut img = F32Image::new(1, 1, 1);
+        img[(0, 0, 0)] = 1.0; // brightest input
+        let stretched = histogram_stretch(&img, 0.0, 0.7, 0.5);
+        assert!(
+            stretched[(0, 0, 0)] <= 0.7 + EXPECTED_MTF_EPSILON as f32,
+            "highlight ceiling must clamp, got {}",
+            stretched[(0, 0, 0)]
+        );
+    }
+
+    #[test]
+    fn test_histogram_stretch_full_range_passthrough_neutral() {
+        // With shadows=0, highlights=1, midtones=0.5, every input v should
+        // map to itself (identity at m=0.5 over the full normalised range).
+        let mut img = F32Image::new(1, 5, 1);
+        for i in 0..5 {
+            img[(0, i, 0)] = (i as f32 + 1.0) / 6.0;
+        }
+        let stretched = histogram_stretch(&img, 0.0, 1.0, 0.5);
+        for i in 0..5 {
+            let v_in = (i as f32 + 1.0) / 6.0;
+            let v_out = stretched[(0, i, 0)];
+            assert!(
+                (v_out - v_in).abs() < EXPECTED_MTF_EPSILON as f32,
+                "identity stretch: in={v_in} out={v_out}"
+            );
+        }
     }
 }

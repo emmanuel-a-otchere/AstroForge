@@ -255,8 +255,8 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M5-T1 | [#164](https://github.com/emmanuel-a-otchere/AstroForge/issues/164) | Define `AIService` interface: `analyse(image, stage) → AnalysisResult`, `suggestParams(image, stage, dataType) → ParamProposal`, `execute(image, stage, params) → ProcessedImage` | §4.3, §8 | pending | P1.5-M1-T3 |
-| P1.5-M5-T2 | [#165](https://github.com/emmanuel-a-otchere/AstroForge/issues/165) | Implement AI service dispatch: route requests to local ONNX models, remote engines, or CPU fallback based on mode + hardware | §4.3 | pending | T1 |
+| P1.5-M5-T1 | [#164](https://github.com/emmanuel-a-otchere/AstroForge/issues/164) | Define `AIService` interface: `analyse(image, stage) → AnalysisResult`, `suggestParams(image, stage, dataType) → ParamProposal`, `execute(image, stage, params) → ProcessedImage` | §4.3, §8 | in_progress | P1.5-M1-T3 |
+| P1.5-M5-T2 | [#165](https://github.com/emmanuel-a-otchere/AstroForge/issues/165) | Implement AI service dispatch: route requests to local ONNX models, remote engines, or CPU fallback based on mode + hardware | §4.3 | in_progress | T1 |
 | P1.5-M5-T3 | [#166](https://github.com/emmanuel-a-otchere/AstroForge/issues/166) | Implement graceful degradation: if AI engine fails, fall back to algorithmic defaults and surface a clear warning | §4.3, §4.4 | pending | T2 |
 | P1.5-M5-T4 | [#167](https://github.com/emmanuel-a-otchere/AstroForge/issues/167) | Implement AI status + progress reporting to UI: measured progress, estimated time, engine name, quality tier | §5 NFR | pending | T2 |
 | P1.5-M5-T5 | [#168](https://github.com/emmanuel-a-otchere/AstroForge/issues/168) | Implement free-path vs accelerated-path selection with transparent messaging | §4.3, §5 NFR | pending | T2 |

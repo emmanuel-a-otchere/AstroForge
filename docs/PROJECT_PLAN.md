@@ -221,7 +221,7 @@ separation and replace is mathematically exact (verifiable by difference maps).
 | P1.5-M2-T5 | [#149](https://github.com/emmanuel-a-otchere/AstroForge/issues/149) | Implement preview statistics stability: denoise/sharpen shaders must not alter display stretch statistics (separate display stretch from data) | §4.4 | pending | T3, T4 |
 | P1.5-M2-T6 | [#150](https://github.com/emmanuel-a-otchere/AstroForge/issues/150) | Implement real-pixel zoom/pan/refit on PreviewCanvas with synced multi-preview grid support | §4.4, §4.1 stage 7 | done | T2 |
 | P1.5-M2-T7 | [#151](https://github.com/emmanuel-a-otchere/AstroForge/issues/151) | Implement "Hold to Compare" and side-by-side original vs current view at any stage | §4.2 | done | T2 |
-| P1.5-M2-T8 | [#152](https://github.com/emmanuel-a-otchere/AstroForge/issues/152) | Implement debounced full-resolution render: preview renders at reduced res during slider drag, full res on rest | §4.4 | in_progress | T2 |
+| P1.5-M2-T8 | [#152](https://github.com/emmanuel-a-otchere/AstroForge/issues/152) | Implement debounced full-resolution render: preview renders at reduced res during slider drag, full res on rest | §4.4 | done | T2 |
 
 ### Milestone 1.5.3 — Wizard Mode UI (Bottom Sheet)
 

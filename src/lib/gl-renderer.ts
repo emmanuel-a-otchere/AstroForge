@@ -20,6 +20,18 @@ export interface PreviewParams {
   strength: number;
   scnrStrength: number;
   scnrMethod: number; // 0 = min, 1 = average
+  // P1.5-M4-T4 (#162) — Pure Expert UI per-stage params.
+  // These fields are exposed in `ParameterSidebar.svelte` for the
+  // denoise / colour_calibration / sharpen_deconvolution stage types.
+  // The corresponding shader uniforms are not yet wired into the GL
+  // renderer (those shaders ship with P1.5-M6). Storing them here
+  // means the sidebar can edit them today and they will activate
+  // automatically when the matching shader path lands.
+  denoiseStrength?: number;
+  denoiseThreshold?: number;
+  colorSaturation?: number;
+  sharpenStrength?: number;
+  sharpenRadius?: number;
 }
 
 export interface ViewportState {

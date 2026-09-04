@@ -92,6 +92,69 @@
           on:input={(e) => handleParam("scnrStrength", parseFloat((e.target as HTMLInputElement).value))}
           class="slider" />
       </div>
+    {:else if stage?.type === "denoise"}
+      <div class="param-group">
+        <div class="param-row">
+          <label class="text-label-caps" for="p-denoise-strength">Denoise Strength</label>
+          <span class="text-data param-val">{((previewParams.denoiseStrength ?? 0) * 100).toFixed(0)}%</span>
+        </div>
+        <input id="p-denoise-strength" type="range" min="0" max="1" step="0.01"
+          value={previewParams.denoiseStrength ?? 0}
+          on:input={(e) => handleParam("denoiseStrength", parseFloat((e.target as HTMLInputElement).value))}
+          class="slider" />
+      </div>
+      <div class="param-group">
+        <div class="param-row">
+          <label class="text-label-caps" for="p-denoise-threshold">Detail Threshold</label>
+          <span class="text-data param-val">{((previewParams.denoiseThreshold ?? 0) * 100).toFixed(0)}%</span>
+        </div>
+        <input id="p-denoise-threshold" type="range" min="0" max="1" step="0.01"
+          value={previewParams.denoiseThreshold ?? 0}
+          on:input={(e) => handleParam("denoiseThreshold", parseFloat((e.target as HTMLInputElement).value))}
+          class="slider" />
+      </div>
+    {:else if stage?.type === "color_calibration"}
+      <div class="param-group">
+        <div class="param-row">
+          <label class="text-label-caps" for="p-saturation">Saturation</label>
+          <span class="text-data param-val">{((previewParams.colorSaturation ?? 1) * 100).toFixed(0)}%</span>
+        </div>
+        <input id="p-saturation" type="range" min="0" max="2" step="0.01"
+          value={previewParams.colorSaturation ?? 1}
+          on:input={(e) => handleParam("colorSaturation", parseFloat((e.target as HTMLInputElement).value))}
+          class="slider" />
+      </div>
+      <div class="param-group">
+        <div class="param-row">
+          <label class="text-label-caps" for="p-strength-calib">Strength</label>
+          <span class="text-data param-val">{(previewParams.strength * 100).toFixed(0)}%</span>
+        </div>
+        <input id="p-strength-calib" type="range" min="0" max="1" step="0.01"
+          value={previewParams.strength}
+          on:input={(e) => handleParam("strength", parseFloat((e.target as HTMLInputElement).value))}
+          class="slider" />
+      </div>
+    {:else if stage?.type === "sharpen_deconvolution"}
+      <div class="param-group">
+        <div class="param-row">
+          <label class="text-label-caps" for="p-sharpen-strength">Sharpen Strength</label>
+          <span class="text-data param-val">{((previewParams.sharpenStrength ?? 0) * 100).toFixed(0)}%</span>
+        </div>
+        <input id="p-sharpen-strength" type="range" min="0" max="1" step="0.01"
+          value={previewParams.sharpenStrength ?? 0}
+          on:input={(e) => handleParam("sharpenStrength", parseFloat((e.target as HTMLInputElement).value))}
+          class="slider" />
+      </div>
+      <div class="param-group">
+        <div class="param-row">
+          <label class="text-label-caps" for="p-sharpen-radius">Deconvolution Radius</label>
+          <span class="text-data param-val">{(previewParams.sharpenRadius ?? 1).toFixed(1)} px</span>
+        </div>
+        <input id="p-sharpen-radius" type="range" min="0.5" max="5" step="0.1"
+          value={previewParams.sharpenRadius ?? 1}
+          on:input={(e) => handleParam("sharpenRadius", parseFloat((e.target as HTMLInputElement).value))}
+          class="slider" />
+      </div>
     {:else}
       <div class="param-group">
         <div class="param-row">

@@ -1,9 +1,14 @@
+use crate::background;
 use crate::calibration::StreamingCalibrator;
-use crate::export::{FrameStats, ProcessingReport, StageParams};
+use crate::color_calibration;
+use crate::crop::{self, CropRegion};
+use crate::curves::{self, CurvesParams};
+use crate::export::{self, FrameStats, ProcessingReport, StageParams};
 use crate::image::F32Image;
 use crate::ingest::{FrameType, SessionManifest};
 use crate::registration::{self, AffineTransform};
 use crate::stacking::{self, StreamingStacker};
+use crate::star_segmentation;
 use crate::stretching;
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +19,26 @@ pub struct PipelineConfig {
     pub kappa: f64,
     pub max_iterations: u32,
     pub reject_percentile: f64,
+    /// Optional crop applied after stacking (P1.5-M6-T2). When `None`,
+    /// no crop is performed — the pipeline never silently auto-crops.
+    pub crop: Option<CropRegion>,
+    /// Enable background extraction (P1.5-M6-T3). When true, a sample
+    /// grid is taken from the stacked image and the gradient is
+    /// subtracted. Defaults to false (backward-compatible).
+    pub background_enabled: bool,
+    /// Enable colour calibration (P1.5-M6-T4). When true, the stacked
+    /// image goes through `apply_color_calibration`. Defaults to false.
+    pub color_calibration_enabled: bool,
+    /// Enable star segmentation (P1.5-M6-T8). When true, the post-stretch
+    /// image is split into starless + stars layers; both are returned on
+    /// `PipelineResult`. Defaults to false.
+    pub star_segmentation_enabled: bool,
+    /// Optional curves applied after stretching (P1.5-M6-T9). When
+    /// `None`, the curves stage is skipped entirely.
+    pub curves: Option<CurvesParams>,
+    /// If set, write the final processed image to this path as JPEG
+    /// (P1.5-M6-T10). Defaults to None (no file written).
+    pub export_path: Option<std::path::PathBuf>,
 }
 
 impl Default for PipelineConfig {
@@ -24,6 +49,12 @@ impl Default for PipelineConfig {
             kappa: 3.0,
             max_iterations: 5,
             reject_percentile: 15.0,
+            crop: None,
+            background_enabled: false,
+            color_calibration_enabled: false,
+            star_segmentation_enabled: false,
+            curves: None,
+            export_path: None,
         }
     }
 }
@@ -61,6 +92,18 @@ pub struct PipelineResult {
     pub preview: Option<PreviewImage>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub stretched: Option<crate::image::F32Image>,
+    /// Starless layer (P1.5-M6-T8). Only populated when
+    /// `PipelineConfig.star_segmentation_enabled` is true.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub starless: Option<crate::image::F32Image>,
+    /// Stars-only layer (P1.5-M6-T8). Only populated when
+    /// `PipelineConfig.star_segmentation_enabled` is true.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub stars: Option<crate::image::F32Image>,
+    /// Path the final image was exported to (P1.5-M6-T10). Only
+    /// populated when `PipelineConfig.export_path` was set.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub exported_to: Option<std::path::PathBuf>,
     pub error: Option<String>,
 }
 
@@ -92,6 +135,9 @@ pub fn run_pipeline(
             },
             preview: None,
             stretched: None,
+            starless: None,
+            stars: None,
+            exported_to: None,
             error: Some("No calibrated frames provided".into()),
         };
     }
@@ -149,7 +195,74 @@ pub fn run_pipeline(
         .collect(),
     });
 
-    let stretched = stretching::auto_stretch(&stack_result.image);
+    // ── P1.5-M6-T2 — Crop ───
+    let post_crop: F32Image = if let Some(region) = &config.crop {
+        let cropped = crop::crop(&stack_result.image, region);
+        stage_params.push(StageParams {
+            stage_id: "crop".into(),
+            params: [
+                ("x".into(), region.x.to_string()),
+                ("y".into(), region.y.to_string()),
+                ("width".into(), region.width.to_string()),
+                ("height".into(), region.height.to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        });
+        cropped
+    } else {
+        // Pipeline never silently auto-crops; the option is explicit.
+        stack_result.image
+    };
+
+    // ── P1.5-M6-T3 — Background Extraction ───
+    let post_background: F32Image = if config.background_enabled {
+        let h = post_crop.height();
+        let w = post_crop.width();
+        // Sample a 5×5 grid of evenly-distributed points across the
+        // image. Real implementations would let the user place these
+        // points manually; the 5×5 grid is the same default most
+        // tools ship with for unguided background extraction.
+        let mut samples: Vec<(f64, f64)> = Vec::with_capacity(25);
+        for i in 0..5 {
+            for j in 0..5 {
+                let x = (w as f64) * (i as f64 + 0.5) / 5.0;
+                let y = (h as f64) * (j as f64 + 0.5) / 5.0;
+                samples.push((x, y));
+            }
+        }
+        let gradient = background::extract_background(&post_crop, &samples);
+        let cleaned = background::subtract_gradient(&post_crop, &gradient);
+        stage_params.push(StageParams {
+            stage_id: "background_extraction".into(),
+            params: [("samples".into(), samples.len().to_string())]
+                .into_iter()
+                .collect(),
+        });
+        cleaned
+    } else {
+        post_crop
+    };
+
+    // ── P1.5-M6-T4 — Colour Calibration ───
+    let post_calibration: F32Image = if config.color_calibration_enabled {
+        let calibration = color_calibration::calibrate_color(&post_background);
+        let calibrated = color_calibration::apply_color_calibration(&post_background, &calibration);
+        stage_params.push(StageParams {
+            stage_id: "color_calibration".into(),
+            params: [
+                ("method".into(), "auto".into()),
+                ("bounded".into(), "true".into()),
+            ]
+            .into_iter()
+            .collect(),
+        });
+        calibrated
+    } else {
+        post_background
+    };
+
+    let stretched = stretching::auto_stretch(&post_calibration);
 
     stage_params.push(StageParams {
         stage_id: "stretching".into(),
@@ -158,9 +271,72 @@ pub fn run_pipeline(
             .collect(),
     });
 
+    // ── P1.5-M6-T9 — Creative / Curves ───
+    let post_curves: F32Image = if let Some(params) = &config.curves {
+        let out = curves::apply_curves(&stretched, params);
+        stage_params.push(StageParams {
+            stage_id: "curves".into(),
+            params: [
+                ("saturation".into(), params.saturation.to_string()),
+                ("r_gamma".into(), params.r.gamma.to_string()),
+                ("g_gamma".into(), params.g.gamma.to_string()),
+                ("b_gamma".into(), params.b.gamma.to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        });
+        out
+    } else {
+        stretched.clone()
+    };
+
+    // ── P1.5-M6-T8 — Star Handling ───
+    let (starless, stars) = if config.star_segmentation_enabled {
+        let segmentation = star_segmentation::segment_stars(&post_curves, 3.0);
+        let starless_layer =
+            star_segmentation::enhance_background_layer(&segmentation.background_layer, 1.0, 1.0);
+        let stars_layer = star_segmentation::enhance_star_layer(&segmentation.star_layer, 1.0, 1.0);
+        stage_params.push(StageParams {
+            stage_id: "star_segmentation".into(),
+            params: [("threshold_sigma".into(), "3.0".into())]
+                .into_iter()
+                .collect(),
+        });
+        (Some(starless_layer), Some(stars_layer))
+    } else {
+        (None, None)
+    };
+
+    // ── P1.5-M6-T10 — Export ───
+    let exported_to: Option<std::path::PathBuf> = if let Some(path) = &config.export_path {
+        let file_result = std::fs::File::create(path);
+        match file_result {
+            Ok(mut file) => {
+                if export::export_jpeg_8bit(&post_curves, 90, &mut file).is_ok() {
+                    stage_params.push(StageParams {
+                        stage_id: "export".into(),
+                        params: [
+                            ("format".into(), "jpeg".into()),
+                            ("quality".into(), "90".into()),
+                            ("path".into(), path.display().to_string()),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    });
+                    Some(path.clone())
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
     let frame_stats = compute_frame_stats(manifest);
 
-    let preview = f32_image_to_rgba(&stretched);
+    let preview = f32_image_to_rgba(&post_curves);
 
     PipelineResult {
         success: true,
@@ -169,10 +345,13 @@ pub fn run_pipeline(
             frame_stats,
             rejected_frames: vec![],
             stage_parameters: stage_params,
-            export_path: None,
+            export_path: exported_to.as_ref().map(|p| p.display().to_string()),
         },
         preview: Some(preview),
         stretched: Some(stretched),
+        starless,
+        stars,
+        exported_to,
         error: None,
     }
 }

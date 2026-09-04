@@ -26,6 +26,8 @@
   import ModeC from "./components/ModeC.svelte";
   import ModeD from "./components/ModeD.svelte";
   import ManifestReview from "./components/ManifestReview.svelte";
+  import { fly, fade } from "svelte/transition";
+  import { quintOut } from "svelte/easing";
   import {
     initSession,
     sessionStore,
@@ -331,14 +333,23 @@
       {#snippet canvas()}
       <div class="processing-canvas">
         {#if showForgeMode}
-          <div class="forge-layout">
+          <div
+            class="forge-layout"
+            in:fly={{ x: -240, duration: 350, easing: quintOut }}
+            out:fly={{ x: -240, duration: 280, easing: quintOut }}
+          >
             <NodeSidebar />
             <div class="forge-canvas-area">
               <PreviewCanvas params={previewParams} {renderMode} />
             </div>
           </div>
         {:else}
-          <PreviewCanvas params={previewParams} {renderMode} />
+          <div
+            in:fly={{ x: 0, y: 40, duration: 350, easing: quintOut }}
+            out:fly={{ x: 0, y: 40, duration: 280, easing: quintOut }}
+          >
+            <PreviewCanvas params={previewParams} {renderMode} />
+          </div>
         {/if}
         <button
           class="forge-toggle"
@@ -354,9 +365,19 @@
 
       {#snippet workflow()}
       {#if showForgeMode}
-        <ParameterSidebar {previewParams} onParamsChange={handleParamsChange} />
+        <div
+          in:fly={{ x: 240, duration: 350, easing: quintOut }}
+          out:fly={{ x: 240, duration: 280, easing: quintOut }}
+        >
+          <ParameterSidebar {previewParams} onParamsChange={handleParamsChange} />
+        </div>
       {:else}
-        <WizardBottomSheet {previewParams} onParamsChange={handleParamsChange} />
+        <div
+          in:fly={{ x: 0, y: 200, duration: 350, easing: quintOut }}
+          out:fly={{ x: 0, y: 200, duration: 280, easing: quintOut }}
+        >
+          <WizardBottomSheet {previewParams} onParamsChange={handleParamsChange} />
+        </div>
       {/if}
       {/snippet}
     </ModeB>

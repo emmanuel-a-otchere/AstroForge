@@ -35,9 +35,31 @@
     renderer.render(renderMode);
   }
 
+  /**
+   * Begin a gesture (pan / wheel) by switching to the reduced-resolution
+   * drawing buffer. Spec: P1.5-M2-T8 / #152 — preview at half-res during
+   * drag, full res on rest. The buffer flips back to full-res after the
+   * debounce window expires (see `endGesture`).
+   */
+  function beginGesture() {
+    if (!renderer) return;
+    renderer.setReducedResolution(true);
+  }
+
+  /** End a gesture: schedule a full-resolution re-render after a short
+   *  debounce. If a new gesture begins before the debounce fires, it
+   *  re-cancels itself via `beginGesture` -> `setReducedResolution(true)`
+   *  and the timer is implicitly replaced on the next `requestDebouncedRender`. */
+  function endGesture() {
+    if (!renderer) return;
+    renderer.setReducedResolution(false);
+    renderer.requestDebouncedRender(renderMode, 150);
+  }
+
   function handleMouseDown(e: MouseEvent) {
     isPanning = true;
     panStart = { x: e.clientX, y: e.clientY };
+    beginGesture();
   }
 
   function handleMouseMove(e: MouseEvent) {
@@ -53,16 +75,22 @@
   }
 
   function handleMouseUp() {
+    if (!isPanning) return;
     isPanning = false;
+    endGesture();
   }
 
   function handleWheel(e: WheelEvent) {
     e.preventDefault();
     if (!renderer) return;
+    // Each wheel tick begins a brief gesture: reduced-res for the move,
+    // full-res 150 ms after the user stops scrolling.
+    beginGesture();
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     viewport.zoom = Math.max(0.05, Math.min(50, viewport.zoom * factor));
     renderer.setViewport(viewport);
     renderer.render(renderMode);
+    endGesture();
   }
 
   function handleDoubleClick() {

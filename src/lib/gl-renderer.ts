@@ -38,6 +38,15 @@ export class WebGLRenderer {
   private imageHeight = 0;
   private canvasWidth = 0;
   private canvasHeight = 0;
+  /** True when the renderer is drawing into a half-resolution buffer for
+   *  cheap interaction-time previews. See `setReducedResolution` and the
+   *  P1.5-M2-T8 / #152 spec. */
+  private reducedRes = false;
+  /** Display size (the CSS / HTML attribute size the user sees).
+   *  Distinct from `canvasWidth/Height`, which are the GL drawing-buffer
+   *  size and may be downscaled during reduced-resolution interaction. */
+  private displayWidth = 0;
+  private displayHeight = 0;
   private viewport: ViewportState = { zoom: 1, panX: 0, panY: 0 };
   private params: PreviewParams = {
     blackPoint: 0,
@@ -156,12 +165,51 @@ export class WebGLRenderer {
   }
 
   resize(width: number, height: number): void {
-    this.canvasWidth = width;
-    this.canvasHeight = height;
-    this.gl.canvas.width = width;
-    this.gl.canvas.height = height;
-    this.gl.viewport(0, 0, width, height);
+    this.displayWidth = width;
+    this.displayHeight = height;
+    // Drawing-buffer size may be downscaled during reduced-res interaction;
+    // the CSS pixel size stays at the requested display size so the canvas
+    // continues to fill the container.
+    this.applyBufferSize();
     this.needsRender = true;
+  }
+
+  /**
+   * Toggle the reduced-resolution interaction mode (P1.5-M2-T8 / #152).
+   *
+   * When `enabled` is true, the GL drawing buffer drops to half the display
+   * dimensions; the canvas's CSS size stays the same so the layout is
+   * unaffected, only the render is cheaper. The browser scales the
+   * lower-res buffer up to the display size, which is visually fine for
+   * the pan/zoom interaction phase — the user is moving the view, not
+   * inspecting fine detail.
+   *
+   * Call `setReducedResolution(false)` (or wait for the debouncer to fire)
+   * before the final commit-quality render.
+   */
+  setReducedResolution(enabled: boolean): void {
+    if (this.reducedRes === enabled) return;
+    this.reducedRes = enabled;
+    this.applyBufferSize();
+    this.needsRender = true;
+  }
+
+  isReducedResolution(): boolean {
+    return this.reducedRes;
+  }
+
+  private applyBufferSize(): void {
+    const w = this.reducedRes
+      ? Math.max(1, Math.floor(this.displayWidth / 2))
+      : this.displayWidth;
+    const h = this.reducedRes
+      ? Math.max(1, Math.floor(this.displayHeight / 2))
+      : this.displayHeight;
+    this.canvasWidth = w;
+    this.canvasHeight = h;
+    this.gl.canvas.width = w;
+    this.gl.canvas.height = h;
+    this.gl.viewport(0, 0, w, h);
   }
 
   refit(): void {

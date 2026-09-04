@@ -18,7 +18,7 @@
 
 use std::fs::{self, File};
 use std::io::BufWriter;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
@@ -41,7 +41,7 @@ fn main() {
     let source_dir = PathBuf::from(&args[1]);
     let output_path = PathBuf::from(&args[2]);
 
-    match run(&source_dir, &output_path) {
+    match run(source_dir.as_path(), output_path.as_path()) {
         Ok(report) => {
             println!("OK {}", serde_json::to_string(&report).unwrap_or_default());
             std::process::exit(0);
@@ -86,7 +86,7 @@ struct StageInfo {
     params: std::collections::BTreeMap<String, String>,
 }
 
-fn run(source_dir: &PathBuf, output_path: &PathBuf) -> Result<CliReport> {
+fn run(source_dir: &Path, output_path: &Path) -> Result<CliReport> {
     let started = Instant::now();
 
     // 1. Ingest: scan the directory and classify every FITS frame.
@@ -116,7 +116,13 @@ fn run(source_dir: &PathBuf, output_path: &PathBuf) -> Result<CliReport> {
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     );
-    let manifest = ingest::build_manifest(&session_id, &source_dir.display().to_string(), frames);
+    // Clone here: build_manifest takes ownership, but we still need `frames`
+    //    for the per-type counts (darks/flats/biases) below.
+    let manifest = ingest::build_manifest(
+        &session_id,
+        &source_dir.display().to_string(),
+        frames.clone(),
+    );
 
     // 2. Read all light frames into F32Images. Calibration is currently
     //    lights-only (no darks/flats yet); the MVP pipeline document

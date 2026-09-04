@@ -232,7 +232,7 @@ separation and replace is mathematically exact (verifiable by difference maps).
 | P1.5-M3-T1 | [#153](https://github.com/emmanuel-a-otchere/AstroForge/issues/153) | Implement `WizardBottomSheet` component: stepper (step N of 10), large strength slider, Next/Back buttons | §A.1 | done | P1.5-M1-T4, P1.5-M2-T1 |
 | P1.5-M3-T2 | [#154](https://github.com/emmanuel-a-otchere/AstroForge/issues/154) | Implement stage-specific parameter panels that appear inside the bottom sheet per active step | §4.1 | done | T1 |
 | P1.5-M3-T3 | [#155](https://github.com/emmanuel-a-otchere/AstroForge/issues/155) | Implement "Reveal Pipeline / Expert Mode" toggle in top nav bar | §A.2 | done | T1 |
-| P1.5-M3-T4 | [#156](https://github.com/emmanuel-a-otchere/AstroForge/issues/156) | Implement wizard-to-forge transition animation: bottom sheet slides down + fades out, canvas shrinks, sidebars slide in, active step morphs into selected node | §A.2 | in_progress | T1, P1.5-M4-T1 |
+| P1.5-M3-T4 | [#156](https://github.com/emmanuel-a-otchere/AstroForge/issues/156) | Implement wizard-to-forge transition animation: bottom sheet slides down + fades out, canvas shrinks, sidebars slide in, active step morphs into selected node | §A.2 | done | T1, P1.5-M4-T1 |
 | P1.5-M3-T5 | [#157](https://github.com/emmanuel-a-otchere/AstroForge/issues/157) | Implement Automagic mode UI: single "Process" button, per-stage "Auto" buttons, progress + final result only, hidden granularity | §4.3 | pending | T1, T2 |
 | P1.5-M3-T6 | [#158](https://github.com/emmanuel-a-otchere/AstroForge/issues/158) | Implement mode indicator badge (persistent, always visible, colour-coded per mode) | §4.3, §7 | done | T1 |
 

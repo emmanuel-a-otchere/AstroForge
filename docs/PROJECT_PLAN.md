@@ -170,10 +170,10 @@ end-to-end through the UI.
 |---|---|---|---|---|
 | P1-M5-T1 | [#40](https://github.com/emmanuel-a-otchere/AstroForge/issues/40) | Implement Auto mode (defaults, no prompts) for all MVP stages | §9 | done | M4-T3 |
 | P1-M5-T2 | [#41](https://github.com/emmanuel-a-otchere/AstroForge/issues/41) | Implement beginner verbosity level (mostly Auto) | §9 | done | T1 |
-| P1-M5-T3 | [#42](https://github.com/emmanuel-a-otchere/AstroForge/issues/42) | Wire end-to-end pipeline: ingest → calibrate → register → stack → stretch → export | §7 | in_progress | M4-T3 |
-| P1-M5-T4 | [#43](https://github.com/emmanuel-a-otchere/AstroForge/issues/43) | Write scripted smoke test: FITS folder → TIFF on Windows | §16 DoD | pending | T3 |
-| P1-M5-T5 | [#44](https://github.com/emmanuel-a-otchere/AstroForge/issues/44) | Write scripted smoke test: FITS folder → TIFF on macOS | §16 DoD | pending | T3 |
-| P1-M5-T6 | [#45](https://github.com/emmanuel-a-otchere/AstroForge/issues/45) | Memory test: 30-frame stack on 4 GB configuration without OOM | §16 DoD, §2 | pending | T3 |
+| P1-M5-T3 | [#42](https://github.com/emmanuel-a-otchere/AstroForge/issues/42) | Wire end-to-end pipeline: ingest → calibrate → register → stack → stretch → export | §7 | done | M4-T3 |
+| P1-M5-T4 | [#43](https://github.com/emmanuel-a-otchere/AstroForge/issues/43) | Write scripted smoke test: FITS folder → TIFF on Windows | §16 DoD | done | T3 |
+| P1-M5-T5 | [#44](https://github.com/emmanuel-a-otchere/AstroForge/issues/44) | Write scripted smoke test: FITS folder → TIFF on macOS | §16 DoD | done | T3 |
+| P1-M5-T6 | [#45](https://github.com/emmanuel-a-otchere/AstroForge/issues/45) | Memory test: 30-frame stack on 4 GB configuration without OOM | §16 DoD, §2 | done | T3 |
 
 ---
 

@@ -242,10 +242,10 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M4-T1 | [#159](https://github.com/emmanuel-a-otchere/AstroForge/issues/159) | Implement `NodeSidebar` component: visual DAG with nodes (stages), edges (connections), status colours, active node highlight in accent colour | §A.1, §C.1 | pending | P1.5-M1-T2 |
-| P1.5-M4-T2 | [#160](https://github.com/emmanuel-a-otchere/AstroForge/issues/160) | Implement `ParameterSidebar` component: full parameter panel for selected node, all controls exposed | §A.1 | pending | T1 |
-| P1.5-M4-T3 | [#161](https://github.com/emmanuel-a-otchere/AstroForge/issues/161) | Implement node selection → parameter sidebar sync: clicking a node in the graph loads its params in the sidebar and updates the preview canvas | §C | pending | T1, T2, P1.5-M2-T1 |
-| P1.5-M4-T4 | [#162](https://github.com/emmanuel-a-otchere/AstroForge/issues/162) | Implement Pure Expert mode UI: every control, sub-parameter, mask, and intermediate buffer exposed; manual sub-step sequencing | §4.3 | pending | T2 |
+| P1.5-M4-T1 | [#159](https://github.com/emmanuel-a-otchere/AstroForge/issues/159) | Implement `NodeSidebar` component: visual DAG with nodes (stages), edges (connections), status colours, active node highlight in accent colour | §A.1, §C.1 | done | P1.5-M1-T2 |
+| P1.5-M4-T2 | [#160](https://github.com/emmanuel-a-otchere/AstroForge/issues/160) | Implement `ParameterSidebar` component: full parameter panel for selected node, all controls exposed | §A.1 | done | T1 |
+| P1.5-M4-T3 | [#161](https://github.com/emmanuel-a-otchere/AstroForge/issues/161) | Implement node selection → parameter sidebar sync: clicking a node in the graph loads its params in the sidebar and updates the preview canvas | §C | done | T1, T2, P1.5-M2-T1 |
+| P1.5-M4-T4 | [#162](https://github.com/emmanuel-a-otchere/AstroForge/issues/162) | Implement Pure Expert mode UI: every control, sub-parameter, mask, and intermediate buffer exposed; manual sub-step sequencing | §4.3 | in_progress | T2 |
 | P1.5-M4-T5 | [#163](https://github.com/emmanuel-a-otchere/AstroForge/issues/163) | Implement Automagic Expert mode UI: AI proposals in dialogs with live preview, accept/reject/refine, "Apply equally to selected" batch control | §4.3 | pending | T2, P1.5-M5-T1 |
 
 ### Milestone 1.5.5 — Backend AI Service Layer

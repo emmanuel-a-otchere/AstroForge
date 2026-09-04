@@ -78,6 +78,9 @@ struct CliReport {
     preview_width: usize,
     preview_height: usize,
     output_bytes: u64,
+    /// Best-effort peak resident-set size in KiB (Linux only). `None`
+    /// on macOS / Windows where `/proc/self/status` is unavailable.
+    peak_rss_kb: Option<u64>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -221,5 +224,31 @@ fn run(source_dir: &Path, output_path: &Path) -> Result<CliReport> {
         preview_width: preview.width,
         preview_height: preview.height,
         output_bytes,
+        peak_rss_kb: read_peak_rss_kb(),
     })
+}
+
+/// Best-effort peak RSS in KiB, parsed from `/proc/self/status` on Linux.
+/// Returns `None` on platforms where `/proc` is unavailable (macOS, Windows);
+/// the value is informational, never a hard assertion target.
+fn read_peak_rss_kb() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let text = fs::read_to_string("/proc/self/status").ok()?;
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("VmHWM:") {
+                // Format: "VmHWM:    12345 kB"
+                let kb: u64 = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse().ok())?;
+                return Some(kb);
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
 }

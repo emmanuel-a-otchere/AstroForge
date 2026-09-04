@@ -15,7 +15,18 @@ set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE_DIR="${1:-${REPO_ROOT}/tests/fixtures/sample-session}"
-OUTPUT_DIR="$(mktemp -d -t astroforge-smoke.XXXXXX)"
+# Portable temp dir creation:
+#   - GNU  (Linux, Git Bash on Windows): mktemp -d -t PREFIX.XXXXXX
+#   - BSD   (macOS):                    mktemp -d -t PREFIX
+# We probe for the GNU form first, falling back to BSD.
+if OUTPUT_DIR="$(mktemp -d -t astroforge-smoke.XXXXXX 2>/dev/null)"; then
+    :
+elif OUTPUT_DIR="$(mktemp -d -t astroforge-smoke 2>/dev/null)"; then
+    :
+else
+    echo "✗ mktemp failed to create a scratch directory" >&2
+    exit 1
+fi
 OUTPUT_TIF="${OUTPUT_DIR}/output.tif"
 
 cd "${REPO_ROOT}"

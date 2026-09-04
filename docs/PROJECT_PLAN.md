@@ -215,8 +215,8 @@ separation and replace is mathematically exact (verifiable by difference maps).
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
 | P1.5-M2-T1 | [#145](https://github.com/emmanuel-a-otchere/AstroForge/issues/145) | Implement `PreviewCanvas` Svelte component: persistent DOM element that survives wizard/forge mode transitions, renders to WebGL context | §A.1 | pending | P1.5-M1-T3 |
-| P1.5-M2-T2 | [#146](https://github.com/emmanuel-a-otchere/AstroForge/issues/146) | Implement WebGL rendering pipeline: texture upload from F32Image, full-screen quad, fragment shader output | §B | pending | T1 |
-| P1.5-M2-T3 | [#147](https://github.com/emmanuel-a-otchere/AstroForge/issues/147) | Implement MTF (Midtones Transfer Function) stretch shader in GLSL — black point clipping + midtone transfer per channel | §B.2 | pending | T2 |
+| P1.5-M2-T2 | [#146](https://github.com/emmanuel-a-otchere/AstroForge/issues/146) | Implement WebGL rendering pipeline: texture upload from F32Image, full-screen quad, fragment shader output | §B | done | T1 |
+| P1.5-M2-T3 | [#147](https://github.com/emmanuel-a-otchere/AstroForge/issues/147) | Implement MTF (Midtones Transfer Function) stretch shader in GLSL — black point clipping + midtone transfer per channel | §B.2 | done | T2 |
 | P1.5-M2-T4 | [#148](https://github.com/emmanuel-a-otchere/AstroForge/issues/148) | Implement SCNR "Green-be-Gone" shader in GLSL — reduce green channel to min(R,B) with strength slider blend | §B.1 | pending | T2 |
 | P1.5-M2-T5 | [#149](https://github.com/emmanuel-a-otchere/AstroForge/issues/149) | Implement preview statistics stability: denoise/sharpen shaders must not alter display stretch statistics (separate display stretch from data) | §4.4 | pending | T3, T4 |
 | P1.5-M2-T6 | [#150](https://github.com/emmanuel-a-otchere/AstroForge/issues/150) | Implement real-pixel zoom/pan/refit on PreviewCanvas with synced multi-preview grid support | §4.4, §4.1 stage 7 | pending | T2 |

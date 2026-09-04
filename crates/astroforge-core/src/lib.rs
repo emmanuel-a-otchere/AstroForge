@@ -5,6 +5,7 @@ pub mod calibration;
 pub mod color_calibration;
 pub mod cosmetic;
 pub mod crop;
+pub mod curves;
 pub mod db;
 pub mod debayer;
 pub mod detail_enhancement;

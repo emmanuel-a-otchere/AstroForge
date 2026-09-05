@@ -93,6 +93,11 @@ export interface SessionState {
   dataType: DataTypeDeclaration | null;
   canUndo: boolean;
   canRedo: boolean;
+  /// Session-level feature toggles (per D-6). Used to gate profile
+  /// params that depend on runtime context rather than the profile itself.
+  /// Example: `coreProtectMask: true` activates core-protection params
+  /// in `sharpen_deconvolution.coreProtectRequired` stages.
+  sessionFlags: Record<string, boolean>;
 }
 
 // ─── Stage Definitions ─────────────────────────────────────────────────────
@@ -201,6 +206,7 @@ function createInitialSession(sessionId?: string): SessionState {
     dataType: null,
     canUndo: false,
     canRedo: false,
+    sessionFlags: {},
   };
 }
 
@@ -455,4 +461,94 @@ export function deserializeSession(json: string): void {
   } catch {
     // invalid JSON, keep current state
   }
+}
+
+export function setSessionFlag(key: string, value: boolean): void {
+  sessionStore.update((state) => ({
+    ...state,
+    sessionFlags: { ...state.sessionFlags, [key]: value },
+  }));
+}
+
+// ─── Profile application (Phase 1.5 PR-B) ────────────────────────────────────
+//
+// `applyProfileToPipeline` is a pure function: it takes a Recipe and a
+// PipelineGraph, and returns a new PipelineGraph with each node's
+// `params` overwritten by the recipe's stage params (when present) and
+// `status` set to `active` or `skipped` based on `RecipeStage.enabled`.
+//
+// Session-flag gating (D-6): if a stage has a `coreProtectRequired: true`
+// param, that param is only applied when `sessionFlags.coreProtectMask`
+// is true. Without the flag, the param is omitted and a warning is
+// returned via the second tuple element.
+//
+// Unmatched stages (in graph but not in profile) keep their defaults.
+
+import type { Recipe } from "./profile-store";
+
+export interface ProfileApplyWarning {
+  /// Stage id where the warning applies.
+  stageId: string;
+  /// Param key that was gated off (e.g. "coreProtectRequired").
+  paramKey: string;
+  /// Human-readable explanation.
+  message: string;
+}
+
+export interface ProfileApplyResult {
+  graph: PipelineGraph;
+  warnings: ProfileApplyWarning[];
+}
+
+export function applyProfileToPipeline(
+  profile: Recipe,
+  graph: PipelineGraph,
+  sessionFlags: Record<string, boolean> = {},
+): ProfileApplyResult {
+  const warnings: ProfileApplyWarning[] = [];
+  const coreProtectOn = sessionFlags["coreProtectMask"] === true;
+
+  // Build a lookup from stage_id → RecipeStage for O(1) application.
+  const byStageId = new Map<string, (typeof profile.stages)[number]>();
+  for (const stage of profile.stages) {
+    byStageId.set(stage.stageId, stage);
+  }
+
+  const nodes = graph.nodes.map((node) => {
+    const recipeStage = byStageId.get(node.type);
+    if (!recipeStage) {
+      // No mapping for this node — keep defaults, but mark skipped if
+      // the recipe explicitly excluded every stage of this type. (We
+      // can't know that here; skip only when profile.enabled = false.)
+      return node;
+    }
+    if (!recipeStage.enabled) {
+      return { ...node, status: "skipped" as NodeStatus, version: 0, receipt: undefined };
+    }
+
+    // Apply params with session-flag gating.
+    const filtered: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(recipeStage.params)) {
+      if (k === "coreProtectRequired" && !coreProtectOn) {
+        warnings.push({
+          stageId: node.type,
+          paramKey: k,
+          message:
+            "coreProtectRequired param omitted — enable sessionFlags.coreProtectMask to activate core-protection params.",
+        });
+        continue;
+      }
+      filtered[k] = v;
+    }
+
+    return {
+      ...node,
+      params: { ...node.params, ...filtered },
+      status: "active" as NodeStatus,
+      version: 0,
+      receipt: undefined,
+    };
+  });
+
+  return { graph: { ...graph, nodes }, warnings };
 }

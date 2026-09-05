@@ -7,6 +7,8 @@ use astroforge_core::fits;
 use astroforge_core::gallery::{GalleryItemUpdate, GalleryStore};
 use astroforge_core::ingest::{self, FrameInfo};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig, PipelineResult, Verbosity};
+use astroforge_core::recipe::Recipe;
+use astroforge_core::recipe_store::{RecipeStore, RecipeSummary, RecipeVersion};
 use astroforge_core::session::SessionStore;
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -18,6 +20,10 @@ struct GalleryState(Mutex<GalleryStore>);
 /// Tauri-managed state: holds the SessionStore (rusqlite) for crash-safe
 /// autosave. Mirrors the GalleryState pattern.
 struct SessionState(Mutex<SessionStore>);
+
+/// Tauri-managed state: holds the RecipeStore (rusqlite) for pipeline
+/// profile persistence. Same mutex pattern as GalleryState.
+struct RecipeState(Mutex<RecipeStore>);
 
 #[derive(Serialize)]
 struct CommandError {
@@ -250,6 +256,69 @@ fn pipeline_run_session(
     Ok(mvp_pipeline::run_pipeline(&manifest, calibrated, &config))
 }
 
+// ─ ─── Recipe (pipeline profile) IPC ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+//
+// Phase 1.5 PR-A: backs the "telescope pipeline profile" feature
+// (docs/PROFILE_PIPELINES_PLAN.md). The Svelte side calls these to list
+// available profiles, retrieve a specific version, and save new
+// versions of a profile. Reads use Recipe::from_json_migrated so older
+// v1 payloads upgrade transparently.
+
+#[tauri::command]
+fn recipe_list(state: State<'_, RecipeState>) -> Result<Vec<RecipeSummary>, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    store.list().map_err(Into::into)
+}
+
+#[tauri::command]
+fn recipe_list_versions(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+) -> Result<Vec<RecipeVersion>, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    store.list_versions(&profile_id).map_err(Into::into)
+}
+
+#[tauri::command]
+fn recipe_get(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+    version: u32,
+) -> Result<Recipe, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    store.get(&profile_id, version).map_err(Into::into)
+}
+
+#[tauri::command]
+fn recipe_get_head(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+) -> Result<Recipe, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    store.get_head(&profile_id).map_err(Into::into)
+}
+
+#[tauri::command]
+fn recipe_save(
+    state: State<'_, RecipeState>,
+    recipe: Recipe,
+) -> Result<RecipeSummary, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    // Caller can either set recipe.version themselves or rely on us to
+    // compute the next version based on (name, target_type). For PR-A
+    // we always compute here so the Svelte side can be naive.
+    let profile_id = RecipeStore::profile_id_for(&recipe.name, &recipe.target_type);
+    let next_version = store.next_version_for(&profile_id).map_err(CommandError::from)?;
+    let mut owned = recipe;
+    if owned.version == 0 {
+        owned.version = next_version;
+    }
+    if owned.parent_version.is_none() && next_version > 1 {
+        owned.parent_version = Some(next_version - 1);
+    }
+    store.save(&owned).map_err(Into::into)
+}
+
 fn gallery_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     // Resolves to e.g. <app_data_dir>/gallery.sqlite. Falls back to
     // cwd if the app data dir isn't available (shouldn't happen in
@@ -271,6 +340,17 @@ fn session_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("sessions.sqlite"))
 }
 
+fn recipe_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    // Resolves to e.g. <app_data_dir>/recipes.sqlite. Separate file
+    // from the gallery and session DBs so each store can move
+    // independently.
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("failed to resolve app data dir: {e}"))?;
+    Ok(dir.join("recipes.sqlite"))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -285,6 +365,16 @@ fn main() {
                 .map_err(|e| format!("failed to open session store: {e}"))?;
             app.manage(SessionState(Mutex::new(sessions)));
 
+            let recipe_path = recipe_db_path(&app.handle())?;
+            let recipes = RecipeStore::new(&recipe_path)
+                .map_err(|e| format!("failed to open recipe store: {e}"))?;
+            // Seed DwarfII v1 on first launch so the user sees a profile
+            // they can load into a session.
+            recipes
+                .seed_if_empty()
+                .map_err(|e| format!("failed to seed recipe store: {e}"))?;
+            app.manage(RecipeState(Mutex::new(recipes)));
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -298,6 +388,11 @@ fn main() {
             session_get_receipts,
             ingest_scan_directory,
             pipeline_run_session,
+            recipe_list,
+            recipe_list_versions,
+            recipe_get,
+            recipe_get_head,
+            recipe_save,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

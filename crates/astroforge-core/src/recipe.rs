@@ -1,8 +1,30 @@
+use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Per-stage parameter map produced by [`apply_recipe`].
 pub type StageParams = Vec<(String, HashMap<String, serde_json::Value>)>;
+
+// ─── Schema versioning ───────────────────────────────────────────────────────
+//
+// Recipe's on-disk schema has been bumped from "1.0" to "2.0" to carry
+// per-version metadata (version, parent_version, branch, created_at).
+// `migrate_v1_to_v2()` upgrades old JSON transparently; `Recipe::new`
+// and all builders produce v2 going forward.
+
+pub const SCHEMA_VERSION_V1: &str = "1.0";
+pub const SCHEMA_VERSION_CURRENT: &str = "2.0";
+
+/// Outcome of [`migrate_recipe`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MigrationResult {
+    /// Recipe was already at the current schema; no changes made.
+    AlreadyCurrent,
+    /// Recipe was successfully upgraded; carries the new (current) version.
+    Migrated,
+    /// Recipe is at a newer schema than this binary knows about.
+    UnknownFuture(String),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recipe {
@@ -13,6 +35,35 @@ pub struct Recipe {
     pub stages: Vec<RecipeStage>,
     pub required_models: Vec<String>,
     pub integrity: IntegrityBadge,
+    /// Linear version counter for this profile (1-based). v1 is the first
+    /// save of a given profile name+target_type; every save increments.
+    #[serde(default = "default_version")]
+    pub version: u32,
+    /// The version this one was saved from. `None` for the first version.
+    #[serde(default)]
+    pub parent_version: Option<u32>,
+    /// Branch name. D-1 = 2 (linear) means this is always `"main"`; the
+    /// field is kept for future flexibility and to keep schema migration
+    /// straightforward.
+    #[serde(default = "default_branch")]
+    pub branch: String,
+    /// ISO-8601 timestamp the version was created.
+    #[serde(default = "default_empty_string")]
+    pub created_at: String,
+    /// Profile-level metadata flags (not session-level). Empty by default.
+    /// Reserved for future profile metadata; currently unused.
+    #[serde(default)]
+    pub flags: Vec<String>,
+}
+
+fn default_version() -> u32 {
+    1
+}
+fn default_branch() -> String {
+    "main".to_string()
+}
+fn default_empty_string() -> String {
+    String::new()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,9 +94,10 @@ pub enum ModelType {
 }
 
 impl Recipe {
+    /// Build a new v2 Recipe. The current schema is always produced.
     pub fn new(name: &str, target_type: &str) -> Self {
         Self {
-            schema_version: "1.0".into(),
+            schema_version: SCHEMA_VERSION_CURRENT.into(),
             name: name.into(),
             description: String::new(),
             target_type: target_type.into(),
@@ -57,6 +109,11 @@ impl Recipe {
                 seed_recorded: false,
                 models: Vec::new(),
             },
+            version: 1,
+            parent_version: None,
+            branch: "main".into(),
+            created_at: String::new(),
+            flags: Vec::new(),
         }
     }
 
@@ -88,9 +145,63 @@ impl Recipe {
         serde_json::to_string_pretty(self)
     }
 
+    /// Deserialize a Recipe from JSON, running migration if the on-disk
+    /// schema is older than the current. Refuses to load schemas newer
+    /// than what this binary knows about (caller should treat that as a
+    /// hard error).
+    pub fn from_json_migrated(json: &str) -> Result<Self, serde_json::Error> {
+        let mut recipe: Self = serde_json::from_str(json)?;
+        let result = migrate_recipe(&mut recipe);
+        match result {
+            MigrationResult::AlreadyCurrent | MigrationResult::Migrated => Ok(recipe),
+            MigrationResult::UnknownFuture(v) => Err(serde_json::Error::custom(format!(
+                "unknown future schema_version: {v}"
+            ))),
+        }
+    }
+
+    /// Raw deserialization without migration. Mostly for tests and for
+    /// callers that want to inspect schema versions directly.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
+}
+
+/// In-place schema migration. Returns the outcome so callers can decide
+/// whether to persist the migrated form.
+///
+/// - `AlreadyCurrent` — `schema_version == "2.0"`, nothing changed.
+/// - `Migrated` — was `"1.0"` (or unknown-older); fields added, version bumped.
+/// - `UnknownFuture` — `schema_version` is newer than `"2.0"`; we don't
+///   try to guess at unknown future fields, the recipe is left as-is.
+pub fn migrate_recipe(recipe: &mut Recipe) -> MigrationResult {
+    match recipe.schema_version.as_str() {
+        SCHEMA_VERSION_CURRENT => MigrationResult::AlreadyCurrent,
+        SCHEMA_VERSION_V1 => {
+            migrate_v1_to_v2(recipe);
+            MigrationResult::Migrated
+        }
+        other if other > SCHEMA_VERSION_CURRENT => {
+            MigrationResult::UnknownFuture(other.to_string())
+        }
+        // Unknown older version — treat like v1 since the only field we'd
+        // need is `schema_version`, which is already present.
+        _ => {
+            migrate_v1_to_v2(recipe);
+            MigrationResult::Migrated
+        }
+    }
+}
+
+fn migrate_v1_to_v2(recipe: &mut Recipe) {
+    // v1 had no version tracking. The first migration is always v1 with
+    // parent_version=None and a fresh branch.
+    recipe.version = 1;
+    recipe.parent_version = None;
+    recipe.branch = "main".into();
+    recipe.created_at = String::new();
+    recipe.flags = Vec::new();
+    recipe.schema_version = SCHEMA_VERSION_CURRENT.into();
 }
 
 pub fn sanitize_recipe(recipe: &mut Recipe) {
@@ -130,7 +241,7 @@ pub fn validate_compatibility(recipe: &Recipe, available_models: &[String]) -> V
         return ValidationResult::MissingModels(missing);
     }
 
-    if recipe.schema_version != "1.0" {
+    if recipe.schema_version != SCHEMA_VERSION_CURRENT {
         return ValidationResult::IncompatibleVersion(recipe.schema_version.clone());
     }
 
@@ -193,9 +304,79 @@ mod tests {
     #[test]
     fn test_recipe_creation() {
         let recipe = Recipe::new("My Recipe", "deep_sky");
-        assert_eq!(recipe.schema_version, "1.0");
+        assert_eq!(recipe.schema_version, SCHEMA_VERSION_CURRENT);
         assert_eq!(recipe.name, "My Recipe");
+        assert_eq!(recipe.version, 1);
+        assert_eq!(recipe.parent_version, None);
+        assert_eq!(recipe.branch, "main");
         assert!(recipe.stages.is_empty());
+    }
+
+    #[test]
+    fn test_v1_json_migrates_to_v2() {
+        let v1_json = r#"{
+            "schema_version": "1.0",
+            "name": "DwarfII",
+            "description": "test",
+            "target_type": "smart_telescope_osc",
+            "stages": [],
+            "required_models": [],
+            "integrity": {
+                "perceptual_models_used": false,
+                "deterministic_models_used": false,
+                "seed_recorded": false,
+                "models": []
+            }
+        }"#;
+        let recipe = Recipe::from_json_migrated(v1_json).unwrap();
+        assert_eq!(recipe.schema_version, SCHEMA_VERSION_CURRENT);
+        assert_eq!(recipe.version, 1);
+        assert_eq!(recipe.parent_version, None);
+        assert_eq!(recipe.branch, "main");
+    }
+
+    #[test]
+    fn test_already_current_is_no_op() {
+        let mut recipe = Recipe::new("X", "y");
+        recipe.version = 7;
+        let result = migrate_recipe(&mut recipe);
+        assert_eq!(result, MigrationResult::AlreadyCurrent);
+        assert_eq!(recipe.version, 7);
+    }
+
+    #[test]
+    fn test_v1_migration_marks_as_migrated() {
+        let mut recipe = Recipe::new("X", "y");
+        recipe.schema_version = SCHEMA_VERSION_V1.into();
+        let result = migrate_recipe(&mut recipe);
+        assert_eq!(result, MigrationResult::Migrated);
+        assert_eq!(recipe.schema_version, SCHEMA_VERSION_CURRENT);
+    }
+
+    #[test]
+    fn test_unknown_future_version_errors() {
+        let future_json = r#"{
+            "schema_version": "99.0",
+            "name": "X",
+            "description": "",
+            "target_type": "deep_sky",
+            "stages": [],
+            "required_models": [],
+            "integrity": {
+                "perceptual_models_used": false,
+                "deterministic_models_used": false,
+                "seed_recorded": false,
+                "models": []
+            },
+            "version": 1,
+            "parent_version": null,
+            "branch": "main",
+            "created_at": "",
+            "flags": []
+        }"#;
+        let result = Recipe::from_json_migrated(future_json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown future"));
     }
 
     #[test]

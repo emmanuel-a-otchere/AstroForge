@@ -387,6 +387,69 @@ fn recipe_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("recipes.sqlite"))
 }
 
+// ─ ─── Multi-format export (M7 T3) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+//
+// Writes the supplied FITS file to each requested format in parallel.
+// The Tauri command takes a raw f32 buffer (channel-major row-major)
+// because we don't have an F32Image at the boundary; the Svelte side
+// loads the image and ships the bytes. The Rust side reshapes the
+// bytes into the F32Image for export.
+#[derive(serde::Deserialize)]
+struct MultiExportArgs {
+    /// Raw float32 pixel data, channel-major (R, G, B, ...) then
+    /// row-major within each channel.
+    pixels: Vec<f32>,
+    width: u32,
+    height: u32,
+    channels: u32,
+    /// Base path without extension; the multi_export dispatcher adds
+    /// the per-format extension.
+    base_path: String,
+    /// Formats to emit (Tiff16, Png8, Jpeg8{quality}, Fits32,
+    /// Xisf{history_json}, SidecarJson{recipe_json}).
+    formats: Vec<astroforge_core::export::ExportFormat>,
+    /// Sidecar context: required when SidecarJson is in the format
+    /// list. Ignored for other formats.
+    report: Option<astroforge_core::export::ProcessingReport>,
+}
+
+#[tauri::command]
+fn export_multi_format(args: MultiExportArgs) -> Result<Vec<String>, CommandError> {
+    use astroforge_core::export::{multi_export, ProcessingReport};
+    use ndarray::Array3;
+    // Reshape the flat pixel buffer into Array3 (channels, height, width).
+    // If the buffer is the wrong length, the reshape fails with a clear
+    // error string rather than a panic.
+    let arr = Array3::from_shape_vec(
+        (args.channels as usize, args.height as usize, args.width as usize),
+        args.pixels,
+    )
+    .map_err(|e| CommandError {
+        message: format!("pixel reshape failed: {e}"),
+    })?;
+    let img = astroforge_core::image::F32Image::from(arr);
+    let report = args.report.unwrap_or_else(|| ProcessingReport {
+        session_id: "unknown".into(),
+        frame_stats: astroforge_core::export::FrameStats {
+            total_frames: 0,
+            lights: 0,
+            darks: 0,
+            flats: 0,
+            biases: 0,
+            total_exposure: 0.0,
+        },
+        rejected_frames: vec![],
+        stage_parameters: vec![],
+        export_path: None,
+    });
+    let base = std::path::PathBuf::from(&args.base_path);
+    let written = multi_export(&img, &report, &base, &args.formats)?;
+    Ok(written
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -432,6 +495,7 @@ fn main() {
             recipe_get,
             recipe_get_head,
             recipe_save,
+            export_multi_format,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

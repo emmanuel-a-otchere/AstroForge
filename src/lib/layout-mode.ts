@@ -104,15 +104,22 @@ export function labelForMode(mode: LayoutMode): string {
 }
 
 /**
- * Available override modes for the mode-switch control. We always include
- * A and B (contextual defaults), and C and D if the current stage
- * supports them.
+ * Available override modes for the mode-switch control.
+ *
+ * We always include A and B (contextual defaults).
+ *
+ * C ("Automagic Pro") and D ("Refine") are NOT exposed until their shells
+ * are wired to live `sessionStore` + `PreviewCanvas`. As of the UI workflow
+ * audit (docs/UI_WORKFLOW_REVIEW.md, G-1), Mode C ships hardcoded mock
+ * params and Mode D renders a placeholder gradient. Surfacing them in the
+ * switcher would land users on fabricated data. Once they ship real
+ * pipelines, restore them here and in `labelForMode`.
  */
 export function availableOverrideModes(
   stage: AppStage
 ): readonly LayoutMode[] {
   if (stage === "processing" || stage === "landing") {
-    return ["a", "b", "c", "d"] as const;
+    return ["a", "b"] as const;
   }
   // In focused Load stages, the only sensible override is to drop back
   // to B (Library) if the user wants to abandon load and view the gallery.

@@ -21,6 +21,7 @@
   import ParameterSidebar from "./components/ParameterSidebar.svelte";
   import ScreenCard from "./components/ScreenCard.svelte";
   import AppShell from "./components/AppShell.svelte";
+  import ProfileManager from "./components/ProfileManager.svelte";
   import ModeA from "./components/ModeA.svelte";
   import ModeB from "./components/ModeB.svelte";
   import ModeC from "./components/ModeC.svelte";
@@ -78,6 +79,8 @@
 
   let pendingProfileId: string | null = null;
   let pendingSessionFlags: Record<string, boolean> = {};
+  // Phase 1.5 PR-C: ProfileManager modal open/close state.
+  let profileManagerOpen = $state(false);
 
   let previewParams: PreviewParams = $state({
     blackPoint: 0,
@@ -273,7 +276,7 @@
   );
 </script>
 
-<AppShell currentStage={currentStep}>
+<AppShell currentStage={currentStep} onOpenProfiles={() => (profileManagerOpen = true)}>
   {#if currentMode === "a"}
     <ModeA>
       <ScreenCard kicker="01 · Load Files" title="Select your image files">
@@ -429,6 +432,10 @@
     <ModeD />
   {/if}
 </AppShell>
+
+{#if profileManagerOpen}
+  <ProfileManager onClose={() => (profileManagerOpen = false)} />
+{/if}
 
 <style>
   .subtitle {

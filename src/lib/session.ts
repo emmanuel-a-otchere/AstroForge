@@ -252,3 +252,81 @@ export async function fetchReceipts(sessionId: string): Promise<StageRunRecord[]
   });
   return rows.map(fromRustRun);
 }
+
+// ─── Stage checkpoints (M7 T1) ─────────────────────────────────────────────
+//
+// Snapshot of per-stage pixel data. The Tauri side persists the path
+// string; the actual PNG bytes live on disk under <app_data_dir>/artifacts/<sessionId>/.
+// Frontend just tracks which stage ran at which path and on which date.
+
+export interface CheckpointRecord {
+  id: number;
+  sessionId: string;
+  stageId: string;
+  artifactPath: string;
+  createdAt: string;
+}
+
+/**
+ * Snapshot the current pixel output of a stage. Returns the checkpoint
+ * row id. Browser fallback returns 0 — no-op in dev mode.
+ */
+export async function saveCheckpoint(
+  sessionId: string,
+  stageId: string,
+  artifactPath: string,
+): Promise<number> {
+  if (!isTauri()) return 0;
+  return invoke<number>("session_save_checkpoint", {
+    sessionId,
+    stageId,
+    artifactPath,
+  });
+}
+
+/**
+ * Latest checkpoint for a session (one row, or null). Browser fallback
+ * returns null.
+ */
+export async function getLatestCheckpoint(
+  sessionId: string,
+): Promise<CheckpointRecord | null> {
+  if (!isTauri()) return null;
+  const info = await invoke<RustCheckpointInfo | null>(
+    "session_get_latest_checkpoint",
+    { sessionId },
+  );
+  return info ? fromRustCheckpoint(info) : null;
+}
+
+/**
+ * All checkpoints for a session, oldest first. Used by the version
+ * timeline in the checkpoint panel.
+ */
+export async function listCheckpoints(
+  sessionId: string,
+): Promise<CheckpointRecord[]> {
+  if (!isTauri()) return [];
+  const rows = await invoke<RustCheckpointInfo[]>("session_get_checkpoints", {
+    sessionId,
+  });
+  return rows.map(fromRustCheckpoint);
+}
+
+interface RustCheckpointInfo {
+  id: number;
+  session_id: string;
+  stage_id: string;
+  artifact_path: string;
+  created_at: string;
+}
+
+function fromRustCheckpoint(r: RustCheckpointInfo): CheckpointRecord {
+  return {
+    id: r.id,
+    sessionId: r.session_id,
+    stageId: r.stage_id,
+    artifactPath: r.artifact_path,
+    createdAt: r.created_at,
+  };
+}

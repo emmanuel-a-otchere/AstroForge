@@ -108,6 +108,33 @@ impl SessionStore {
         .ok()
     }
 
+    /// Returns all checkpoints for a session, oldest first. Used by the
+    /// frontend to rebuild the version timeline per stage (M7 T1).
+    pub fn list_checkpoints(&self, session_id: &str) -> Vec<CheckpointInfo> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, session_id, stage_id, artifact_path, created_at
+             FROM checkpoints WHERE session_id = ?1 ORDER BY id ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok(CheckpointInfo {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                stage_id: row.get(2)?,
+                artifact_path: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        });
+        match rows {
+            Ok(r) => r.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
     pub fn get_session_status(&self, session_id: &str) -> Option<SessionStatus> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
@@ -292,5 +319,77 @@ mod tests {
         let interrupted = store.find_interrupted_sessions();
         assert_eq!(interrupted.len(), 1);
         assert_eq!(interrupted[0], sess1);
+    }
+
+    // ─── M7 T1: stage checkpoint tests (Phase 1.5 PR-B1) ───────────────
+    //
+    // Tests for the versioned artefact store. Each per-stage commit
+    // snapshots the pixel data at a file path; undo / re-apply can
+    // restore the exact pre-operation state without re-executing the
+    // pipeline.
+
+    #[test]
+    fn test_save_and_get_checkpoint() {
+        let db_path = PathBuf::from(":memory:");
+        let store = SessionStore::new(&db_path).unwrap();
+        let proj_id = store.create_project("Test", None).unwrap();
+        let sess_id = store.create_session(&proj_id, None, "beginner").unwrap();
+
+        let id = store
+            .save_checkpoint(&sess_id, "stretch", "/tmp/snap1.png")
+            .unwrap();
+        assert!(id > 0);
+
+        let latest = store.get_latest_checkpoint(&sess_id).unwrap();
+        assert_eq!(latest.stage_id, "stretch");
+        assert_eq!(latest.artifact_path, "/tmp/snap1.png");
+    }
+
+    #[test]
+    fn test_list_checkpoints_returns_ordered_history() {
+        let db_path = PathBuf::from(":memory:");
+        let store = SessionStore::new(&db_path).unwrap();
+        let proj_id = store.create_project("Test", None).unwrap();
+        let sess_id = store.create_session(&proj_id, None, "beginner").unwrap();
+
+        store
+            .save_checkpoint(&sess_id, "ingest", "/snap/1.png")
+            .unwrap();
+        store
+            .save_checkpoint(&sess_id, "stretch", "/snap/2.png")
+            .unwrap();
+        store
+            .save_checkpoint(&sess_id, "sharpen", "/snap/3.png")
+            .unwrap();
+
+        let all = store.list_checkpoints(&sess_id);
+        assert_eq!(all.len(), 3);
+        // Ordered oldest first, so the version timeline walks forward.
+        assert_eq!(all[0].stage_id, "ingest");
+        assert_eq!(all[1].stage_id, "stretch");
+        assert_eq!(all[2].stage_id, "sharpen");
+    }
+
+    #[test]
+    fn test_checkpoint_isolation_between_sessions() {
+        let db_path = PathBuf::from(":memory:");
+        let store = SessionStore::new(&db_path).unwrap();
+        let proj_id = store.create_project("Test", None).unwrap();
+        let sess_a = store.create_session(&proj_id, None, "beginner").unwrap();
+        let sess_b = store.create_session(&proj_id, None, "beginner").unwrap();
+
+        store
+            .save_checkpoint(&sess_a, "stretch", "/a/snap.png")
+            .unwrap();
+        store
+            .save_checkpoint(&sess_b, "denoise", "/b/snap.png")
+            .unwrap();
+
+        let a_checkpoints = store.list_checkpoints(&sess_a);
+        let b_checkpoints = store.list_checkpoints(&sess_b);
+        assert_eq!(a_checkpoints.len(), 1);
+        assert_eq!(a_checkpoints[0].stage_id, "stretch");
+        assert_eq!(b_checkpoints.len(), 1);
+        assert_eq!(b_checkpoints[0].stage_id, "denoise");
     }
 }

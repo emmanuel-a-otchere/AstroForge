@@ -135,6 +135,42 @@ fn session_get_receipts(
     Ok(store.list_stage_runs(&session_id))
 }
 
+// ─ ─── Stage checkpoints (M7 T1: versioned artefact store) ─ ─ ─ ─ ─ ─ ─ ─
+//
+// Saves / reads per-stage pixel-data snapshots so undo / re-apply can
+// restore an exact pre-operation state without re-executing the
+// pipeline (Phase 1.5 PR-B1).
+#[tauri::command]
+fn session_save_checkpoint(
+    state: State<'_, SessionState>,
+    session_id: String,
+    stage_id: String,
+    artifact_path: String,
+) -> Result<i64, CommandError> {
+    let store = state.0.lock().expect("session store mutex poisoned");
+    store
+        .save_checkpoint(&session_id, &stage_id, &artifact_path)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn session_get_latest_checkpoint(
+    state: State<'_, SessionState>,
+    session_id: String,
+) -> Result<Option<astroforge_core::session::CheckpointInfo>, CommandError> {
+    let store = state.0.lock().expect("session store mutex poisoned");
+    Ok(store.get_latest_checkpoint(&session_id))
+}
+
+#[tauri::command]
+fn session_get_checkpoints(
+    state: State<'_, SessionState>,
+    session_id: String,
+) -> Result<Vec<astroforge_core::session::CheckpointInfo>, CommandError> {
+    let store = state.0.lock().expect("session store mutex poisoned");
+    Ok(store.list_checkpoints(&session_id))
+}
+
 // ─ ─── Pipeline IPC ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 //
 // Phase 9 (M2 tranche): wires the Rust ingest + mvp_pipeline modules
@@ -386,6 +422,9 @@ fn main() {
             session_record_stage,
             session_find_interrupted,
             session_get_receipts,
+            session_save_checkpoint,
+            session_get_latest_checkpoint,
+            session_get_checkpoints,
             ingest_scan_directory,
             pipeline_run_session,
             recipe_list,

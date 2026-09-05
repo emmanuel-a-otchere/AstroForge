@@ -9,6 +9,8 @@ export type PipelineStageType =
   | "crop_rotate"
   | "background_extraction"
   | "color_calibration"
+  | "color_wb"
+  | "color_scnr"
   | "sharpen_deconvolution"
   | "denoise"
   | "stretch"

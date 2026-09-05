@@ -11,6 +11,8 @@ export type PipelineStageId =
   | "narrowband_compose"
   | "background_extraction"
   | "color_calibration"
+  | "color_wb"
+  | "color_scnr"
   | "narrowband_color_correction"
   | "crop_and_rotate"
   | "stretching"

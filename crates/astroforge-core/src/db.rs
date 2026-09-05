@@ -72,6 +72,36 @@ CREATE INDEX IF NOT EXISTS idx_gallery_items_updated_at
     ON gallery_items(updated_at DESC);
 "#;
 
+/// Recipe (pipeline profile) store schema. Each row is one version of a
+/// profile; the `profile_id` groups versions of the same logical
+/// profile (same name + target_type). The current/active head of each
+/// profile is the row with the highest `version` for that `profile_id`.
+///
+/// Migration is run when `RecipeStore::new` opens the DB.
+pub const RECIPE_SCHEMA_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS recipes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    target_type TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    parent_version INTEGER,
+    branch TEXT NOT NULL DEFAULT 'main',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    payload_json TEXT NOT NULL,
+    UNIQUE(profile_id, version, branch)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recipes_profile
+    ON recipes(profile_id);
+CREATE INDEX IF NOT EXISTS idx_recipes_target_type
+    ON recipes(target_type);
+CREATE INDEX IF NOT EXISTS idx_recipes_name_target
+    ON recipes(name, target_type);
+"#;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,

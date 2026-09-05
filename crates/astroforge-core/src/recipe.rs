@@ -470,4 +470,97 @@ mod tests {
         };
         assert_eq!(integrity_label(&badge), "No AI models");
     }
+
+    // ─── Phase 1.5 PR-B: apply_recipe + DwarfII seed ────────────────────────
+    //
+    // Mirrors the TS `applyProfileToPipeline` semantics. These tests
+    // guard the round-trip: a recipe saved via the UI should be
+    // re-applicable to a fresh graph with the same params intact.
+
+    #[test]
+    fn test_apply_dwarf2_v1_yields_eight_enabled_stages() {
+        let r = crate::seed::dwarf2_v1();
+        let available: Vec<String> = vec![]; // no models needed for v1
+        let result = apply_recipe(&r, &available).expect("compatible");
+        assert_eq!(result.len(), 8, "all 8 stages are enabled in v1");
+
+        let stage_ids: Vec<&str> = result.iter().map(|(id, _)| id.as_str()).collect();
+        for expected in [
+            "ingest",
+            "background_extraction",
+            "denoise",
+            "color_wb",
+            "stretch",
+            "sharpen_deconvolution",
+            "creative_polish",
+            "color_scnr",
+        ] {
+            assert!(stage_ids.contains(&expected), "missing stage {expected}");
+        }
+    }
+
+    #[test]
+    fn test_apply_dwarf2_v1_params_match_user_published_values() {
+        let r = crate::seed::dwarf2_v1();
+        let result = apply_recipe(&r, &[]).unwrap();
+
+        // Spot-check the most distinctive user-published values to make
+        // sure the seed didn't drift.
+        let by_id: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, serde_json::Value>,
+        > = result.into_iter().collect();
+
+        let stretch = by_id.get("stretch").expect("stretch stage");
+        assert_eq!(
+            stretch.get("midtone").and_then(|v| v.as_f64()),
+            Some(0.40),
+            "midtone must be 0.40 per user"
+        );
+        assert_eq!(
+            stretch.get("blackPoint").and_then(|v| v.as_f64()),
+            Some(0.02)
+        );
+        assert_eq!(
+            stretch.get("highlights").and_then(|v| v.as_f64()),
+            Some(0.98)
+        );
+
+        let deconv = by_id.get("sharpen_deconvolution").expect("deconv stage");
+        assert_eq!(
+            deconv.get("iterations").and_then(|v| v.as_f64()),
+            Some(15.0),
+            "iterations 15 (down from 25) per user core-preservation refinement"
+        );
+        assert_eq!(
+            deconv.get("coreProtectRequired"),
+            Some(&serde_json::json!(true))
+        );
+
+        let scnr = by_id.get("color_scnr").expect("scnr stage");
+        assert_eq!(scnr.get("strength").and_then(|v| v.as_f64()), Some(0.6));
+
+        let polish = by_id.get("creative_polish").expect("polish stage");
+        assert_eq!(
+            polish.get("resampleMethod"),
+            Some(&serde_json::json!("lanczos"))
+        );
+        assert_eq!(
+            polish.get("upscaleTarget"),
+            Some(&serde_json::json!([4096.0, 3072.0]))
+        );
+    }
+
+    #[test]
+    fn test_apply_recipe_skips_disabled_stages() {
+        let mut r = Recipe::new("Custom", "deep_sky");
+        r.add_stage("denoise", Default::default());
+        // Disable denoise by mutating the existing entry.
+        r.stages[0].enabled = false;
+        r.add_stage("stretch", Default::default());
+
+        let result = apply_recipe(&r, &[]).unwrap();
+        let ids: Vec<&str> = result.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["stretch"], "disabled denoise must be skipped");
+    }
 }

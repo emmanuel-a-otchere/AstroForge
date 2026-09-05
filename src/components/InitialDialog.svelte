@@ -1,6 +1,12 @@
 <script lang="ts">
   import type { AnalysisResult } from "../lib/image-analysis";
   import type { TargetType, Verbosity } from "../lib/ipc";
+  import { onMount } from "svelte";
+  import {
+    loadProfiles,
+    profileStore,
+    type RecipeSummary,
+  } from "../lib/profile-store";
 
   export let onConfirm: (data: InitialDialogData) => void;
   export let onCancel: () => void;
@@ -14,6 +20,23 @@
   let detectedObjectType: "deep_sky" | "planetary" | "lunar" | "" = "";
   let userOverrodeObjectType = false;
 
+  // Phase 1.5 PR-B (D-2 = 1): pipeline profile selection. The user picks
+  // a profile here; App.svelte's handleInitialConfirm reads this value
+  // and calls applyProfileToPipeline after initSession.
+  let availableProfiles: RecipeSummary[] = [];
+  let selectedProfileId = ""; // empty = "no profile / use defaults"
+  let coreProtectMask = false; // D-6 session flag
+
+  onMount(async () => {
+    try {
+      availableProfiles = await loadProfiles();
+    } catch (e) {
+      // Browser-mode placeholder already populates the store; if even
+      // that fails, leave the dropdown empty.
+      availableProfiles = $profileStore;
+    }
+  });
+
   interface InitialDialogData {
     targetName: string;
     cameraType: string;
@@ -21,6 +44,8 @@
     lightsOnly: boolean;
     includeDithering: boolean;
     objectType: string;
+    profileId: string | null;
+    sessionFlags: Record<string, boolean>;
   }
 
   $: if (analysis && !focalLength && analysis.focalLength) {
@@ -38,6 +63,8 @@
       lightsOnly,
       includeDithering,
       objectType: detectedObjectType,
+      profileId: selectedProfileId || null,
+      sessionFlags: coreProtectMask ? { coreProtectMask: true } : {},
     });
   }
 
@@ -156,6 +183,35 @@
           <span>Include dithering info</span>
         </label>
       </div>
+
+      {#if availableProfiles.length > 0}
+        <div class="field">
+          <label for="profile">Pipeline profile</label>
+          <select id="profile" bind:value={selectedProfileId}>
+            <option value="">— No profile (use defaults) —</option>
+            {#each availableProfiles as p}
+              <option value={p.profileId}>
+                {p.name} (v{p.version}, {p.targetType})
+              </option>
+            {/each}
+          </select>
+          <p class="auto-filled-note">
+            Telescope-specific presets for stage parameters. DwarfII Smart Telescope ships by default.
+          </p>
+        </div>
+
+        <div class="field-row">
+          <label class="checkbox">
+            <input type="checkbox" bind:checked={coreProtectMask} />
+            <span>Enable core-protection mask (deconvolution)</span>
+          </label>
+          {#if coreProtectMask}
+            <p class="auto-filled-note">
+              When on, the profile's <code>coreProtectRequired</code> params activate (Gaussian falloff around bright regions during deconvolution).
+            </p>
+          {/if}
+        </div>
+      {/if}
 
       <div class="actions">
         <button type="button" class="btn-secondary" on:click={onCancel}>Cancel</button>
@@ -278,7 +334,8 @@
   }
 
   input[type="text"],
-  input[type="number"] {
+  input[type="number"],
+  select {
     width: 100%;
     padding: 0.5rem 0.75rem;
     background: var(--bg-primary);
@@ -290,7 +347,8 @@
   }
 
   input[type="text"]:focus,
-  input[type="number"]:focus {
+  input[type="number"]:focus,
+  select:focus {
     border-color: var(--accent);
   }
 

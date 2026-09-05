@@ -32,6 +32,7 @@
     initSession,
     sessionStore,
     activeStepIndex,
+    applyProfileToPipeline,
   } from "./lib/pipeline-store";
   import {
     setStage,
@@ -40,6 +41,7 @@
     type AppStage,
   } from "./lib/layout-mode";
   import type { PreviewParams } from "./lib/gl-renderer";
+  import { getProfileHead } from "./lib/profile-store";
 
   let showForgeMode = $state(false);
   let isTransitioning = $state(false);
@@ -73,6 +75,9 @@
   } | null = $state(null);
   let analysisResult: AnalysisResult | null = $state(null);
   let analyzing = $state(false);
+
+  let pendingProfileId: string | null = null;
+  let pendingSessionFlags: Record<string, boolean> = {};
 
   let previewParams: PreviewParams = $state({
     blackPoint: 0,
@@ -150,8 +155,14 @@
     lightsOnly: boolean;
     includeDithering: boolean;
     objectType: string;
+    profileId: string | null;
+    sessionFlags: Record<string, boolean>;
   }) {
     sessionData = data;
+    // Stash the profile choice so handleClassificationConfirm can apply
+    // it once we land on the processing view (D-2 = 1).
+    pendingProfileId = data.profileId;
+    pendingSessionFlags = data.sessionFlags;
     if (analysisResult) {
       classificationFrames = analysisResult.frames.map((f) => ({
         path: f.fileName,
@@ -188,7 +199,36 @@
 
   function handleClassificationConfirm() {
     initSession(undefined, "automagic");
+    // Phase 1.5 PR-B: apply pipeline profile if one was selected in
+    // InitialDialog. Fetches the active head via the IPC bridge and
+    // calls applyProfileToPipeline to seed nodes[].params + statuses.
+    void applyPendingProfile();
     currentStep = "processing";
+  }
+
+  async function applyPendingProfile(): Promise<void> {
+    if (!pendingProfileId) return;
+    try {
+      const profile = await getProfileHead(pendingProfileId);
+      const result = applyProfileToPipeline(
+        profile,
+        $sessionStore.pipelineGraph,
+        pendingSessionFlags,
+      );
+      sessionStore.update((s) => ({
+        ...s,
+        pipelineGraph: result.graph,
+        sessionFlags: pendingSessionFlags,
+      }));
+      if (result.warnings.length > 0) {
+        console.info(
+          "[astroforge] profile applied with warnings:",
+          result.warnings,
+        );
+      }
+    } catch (e) {
+      console.warn("[astroforge] failed to apply profile:", e);
+    }
   }
 
   function backToLanding() {
@@ -197,6 +237,8 @@
     sessionData = null;
     classificationFrames = [];
     analysisResult = null;
+    pendingProfileId = null;
+    pendingSessionFlags = {};
   }
 
   function backToSelectFiles() {

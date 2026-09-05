@@ -2,14 +2,25 @@
 
 ## Feature
 
-**Save telescope-specific pipeline editing profiles for image processing, with full version history.**
+**Save telescope-specific pipeline editing profiles for image processing, with full linear version history.**
 
 - Named, reusable profiles (e.g. "DwarfII Smart Telescope · OSC · v3 — Core-Preserved")
 - Telescope class + sensor type drive the profile (Smart Telescope, OSC, mono, etc.)
-- Full version history — every save creates a new version; previous versions remain retrievable
+- **Linear** version history (v1 → v2 → v3 …) — every save increments version
 - Apply profile to a session → seeds `pipeline-store` with the profile's stage params
-- CRUD UI: create, list, view versions, apply, edit, fork
+- CRUD UI: create, list, view versions, apply, edit, save-as-new-version
 - Persistence: rusqlite + Tauri IPC (mirror the existing `GalleryStore` pattern)
+
+## Resolved decisions (2026-09-05)
+
+| # | Decision | Resolution |
+|---|---|---|
+| D-1 | Versioning model | **2 — Linear history** (single `version` integer per profile; parent_version tracked for traceability; no branching) |
+| D-2 | Apply surface | **1 — InitialDialog dropdown + processing-view header menu** |
+| D-3 | Schema migration | **1 — Soft migration on load** (`migrate_v1_to_v2()` fn, persist as `2.0`) |
+| D-4 | `color_calibration` appears twice (G2V WB + SCNR pass) | **Split** into `color_wb` + `color_scnr` (clean stage types; one instance per profile) |
+| D-5 | `creative_polish` packs 5 concerns | **Catch-all** (single stage, multiple params) |
+| D-6 | `coreProtectMask` flag location | **Session-level toggle** (NOT in profile; lives in `sessionStore.sessionFlags`, activates profile params at apply time) |
 
 ## Discovery — what already exists
 
@@ -84,7 +95,7 @@ Three options:
 - **Pro:** middle ground — supports multiple concurrent approaches without full graph; UI is "list of profiles + version history per profile"
 - **Con:** still needs the snapshot store; not much cheaper than A
 
-**Recommendation: C.** Reason — astrophotographers do iterate ("try the same profile with stretch pushed harder"), but they don't typically merge branches. Named heads give them a way to keep two recipes side-by-side without the merge UX cost. This is also closer to how PixInsight, Siril, and ASTAP handle it.
+**Recommendation: 2 — Linear history.** Reason — astrophotographers iterate ("try the same profile with stretch pushed harder"), but rarely need parallel branches. Linear gives them full history without merge UX. A "save as new version" action increments `version`; "revert to v1" reads the v1 row. **RESOLVED 2026-09-05.**
 
 ### D-2: Where does the profile apply?
 
@@ -102,7 +113,7 @@ Three insertion points:
 - **Pro:** zero-click default experience
 - **Con:** hides the feature; users don't learn they can override
 
-**Recommendation: B + C.** InitialDialog gets a new "Telescope profile" selector (DwarfII, generic OSC, generic mono, manual). On select, the matching profile seeds `pipeline-store`. A "Profile" menu in the processing view header lets users swap profiles mid-session (this is also the natural place for "Save as new version of current profile" + "Fork from this version").
+**Recommendation: 1 — InitialDialog dropdown + processing-view header menu.** Reason — discoverable (pick at session start) without forcing a wizard step. Mid-session swap is a power-user feature exposed via header menu. **RESOLVED 2026-09-05.**
 
 ### D-3: Schema migration policy
 
@@ -113,7 +124,7 @@ Options:
 - **B. Soft migration** — on load, if schema_version < current, run a migration function. Persist as `2.0`
 - **C. Dual-read** — accept both schemas, normalize to current on load
 
-**Recommendation: B.** Reason — existing 7 tests already use JSON roundtrip; once real users have saved profiles in the wild, breaking the format is hostile. The migration cost is small (1 fn, ~50 lines) and `validate_compatibility` already exists to gate the read.
+**Recommendation: 1 — Soft migration.** Reason — existing 7 tests already use JSON roundtrip; once real users have saved profiles in the wild, breaking the format is hostile. The migration cost is small (1 fn, ~50 lines) and `validate_compatibility` already exists to gate the read. **RESOLVED 2026-09-05.**
 
 ## Scope proposal (3 milestones, in dependency order)
 
@@ -190,23 +201,31 @@ Recipe {
 }
 ```
 
-(Conceptually; final wiring will need a unique stage_id scheme for the second color_calibration pass — likely `color_calibration_scnr` or splitting color_calibration into `wb` + `scnr` sub-stages. Open question for D-4 below.)
+(Conceptually; final wiring uses split `color_wb` + `color_scnr` per D-4.)
 
-## Open questions (resolve before coding)
+## Resolved during PR-A planning (2026-09-05)
 
-- **D-4:** `color_calibration` appears twice in the DwarfII mapping (G2V WB and SCNR pass). Either split the stage type into two (`color_wb` + `color_scnr`) or allow multi-instance stages with sub-keys. Splitting the enum is cleaner; requires a stage-type migration.
-- **D-5:** `creative_polish` is currently a single stage but the DwarfII profile packs 5 different concerns into it (CLAHE, saturation, upscale, resample, unsharp). Either split into `creative_clahe / creative_color / creative_resample / creative_sharpen` or accept the catch-all.
-- **D-6:** `coreProtectMask` flag is session-level (governs deconv + stretch behavior). Where does it live? Option A: as a top-level `Recipe.flags` field; option B: as a per-stage param (`sharpen_deconvolution.coreProtect + stretch.coreProtect`); option C: as a session-level toggle that activates certain params when set. **Recommendation: C** — keeps profile pure, lets user toggle without re-saving the profile.
-- **D-7:** Profile scope: per-user only, or sharable (export/import JSON)? Sharing is a downstream feature; for v1 keep it local. Recipe's JSON roundtrip is already there.
-- **D-8:** Where does the DwarfII v1 seed live? Option A: hard-coded in Rust core as a `const DWARF2_V1: Recipe` + auto-seeded on first run; option B: a JSON file in `assets/seed/dwarf2_v1.json` loaded by Tauri; option C: shipped only as an example in docs. **Recommendation: A** — keeps the demo experience tight (open the app, profile is already there).
+- **D-4:** **Split** into `color_wb` + `color_scnr` (clean stage types; one instance per profile). Implementation impact:
+  - Add `color_wb` and `color_scnr` to `PipelineStageType` enum in `src/lib/pipeline-store.ts`
+  - Reorder `PIPELINE_STAGES` to place them after `color_calibration`
+  - DwarfII seed maps: G2V WB → `color_wb`, SCNR green → `color_scnr`
+  - **Final taxonomy:** `color_calibration` (background neutralization) + `color_wb` (white balance) + `color_scnr` (green/noise removal)
+- **D-5:** **Catch-all** — `creative_polish` remains a single stage. Splitting it would balloon the enum (CLAHE/saturation/upscale/resample/unsharp = 5 new stage types) without clear benefit. The param set within is rich enough to express all 5 concerns.
+- **D-6:** **Session-level toggle.** Implementation:
+  - Add `SessionState.sessionFlags: Record<string, boolean>` field
+  - `coreProtectMask: true` is set on session start (default `false`)
+  - Profile `sharpen_deconvolution` stage has a `coreProtectRequired: true` param marker
+  - At apply time, if `sessionFlags.coreProtectMask === false`, the param is omitted
+  - Result: profile stays pure; user toggles the mask in the session UI; profile "just works" when the flag is on
+- **D-7:** **Local-only for v1.** Sharing (export/import JSON) is a downstream feature; Recipe's JSON roundtrip is already there.
+- **D-8:** **Hard-coded in Rust core** as `const DWARF2_V1: Recipe` + auto-seeded on first run (no `assets/seed/*.json` file). Keeps the demo experience tight — open the app, profile is already there.
 
 ## Sequencing recommendation
 
-**Resolve D-1, D-2, D-3 in this conversation before any code lands.** D-4–D-8 can be resolved during Milestone A.
+Decisions locked. Proceed in this order:
 
-If D-1 = **C** (snapshots with named variants), D-2 = **B+C** (header dropdown + initial-dialog pick), D-3 = **B** (soft migration), then proceed with:
-1. **Milestone A** as a single PR (~1.5 days): extend Recipe, add RecipeStore + Tauri commands + IPC bridge + TS types. Seed DwarfII v1. No UI changes.
-2. **Milestone B** as a single PR (~0.75 day): applyProfileToPipeline bridge + InitialDialog dropdown. E2E test: pick DwarfII in InitialDialog → see 7 stages pre-populated with DwarfII params.
-3. **Milestone C** as a single PR (~1.5 days): ProfileManager modal + header dropdown + version history. E2E test: open dropdown → save new version → see it in history → fork → see two branches.
+1. **PR-A** Data + persistence (~1.5 days): extend `Recipe` with `version + parent_version + created_at + branch (always "main")`, add `RecipeStore` (rusqlite) mirroring `gallery.rs`, Tauri commands + IPC bridge + TS types, `migrate_v1_to_v2()` fn, seed DwarfII v1. Also: add `color_wb` + `color_scnr` to `PipelineStageType` enum (D-4). No UI changes.
+2. **PR-B** Apply integration (~0.75 day): `applyProfileToPipeline()` bridge, `sessionFlags` on `SessionState`, InitialDialog "Telescope profile" dropdown. E2E test: pick DwarfII → see 7 stages pre-populated with DwarfII params.
+3. **PR-C** UI (~1.5 days): `ProfileManager.svelte` modal, version history timeline, header dropdown with "Save as new version". E2E test: open dropdown → save new version → see it in history → revert to v1.
 
 Total: ~4 days, three PRs, +22 tests, zero new architectural debt.

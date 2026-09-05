@@ -29,7 +29,14 @@
   let {
     currentStage,
     children,
-  }: { currentStage: AppStage; children?: Snippet } = $props();
+    onOpenProfiles,
+  }: {
+    currentStage: AppStage;
+    children?: Snippet;
+    /// Phase 1.5 PR-C: opens the ProfileManager modal. App.svelte wires
+    /// this so the modal can be rendered outside AppShell's slot tree.
+    onOpenProfiles?: () => void;
+  } = $props();
 
   let gpuCapability: GpuCapability = $state("canvas2d");
   let gpuChecked = $state(false);
@@ -94,6 +101,19 @@
           >{labelForMode(mode)}</button>
         {/each}
       </nav>
+    {/if}
+
+    {#if onOpenProfiles}
+      <button
+        type="button"
+        class="profile-btn"
+        onclick={onOpenProfiles}
+        title="Manage saved pipeline profiles"
+        aria-label="Open profile manager"
+      >
+        <span class="material-symbols-outlined">tune</span>
+        <span>Profiles</span>
+      </button>
     {/if}
 
     <div class="gpu-badge" class:gpu-checked={gpuChecked}>
@@ -193,6 +213,30 @@
   .mode-switch-btn.active {
     background: var(--cobalt-accent);
     color: var(--on-primary);
+  }
+
+  .profile-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--surface-container-high);
+    border: 1px solid var(--outline-variant);
+    color: var(--on-surface);
+    border-radius: var(--radius-default);
+    font-family: var(--font-data);
+    font-size: var(--text-label);
+    font-weight: 700;
+    letter-spacing: var(--ls-label);
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: border-color var(--transition-base);
+  }
+  .profile-btn:hover {
+    border-color: var(--cobalt-accent);
+  }
+  .profile-btn .material-symbols-outlined {
+    font-size: 1rem;
   }
 
   .gpu-badge {

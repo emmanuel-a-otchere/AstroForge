@@ -361,12 +361,18 @@ export function undo(): void {
     const updatedNodes = state.pipelineGraph.nodes.map((n) => {
       if (n.id === entry.nodeId) {
         if (entry.action === "commit") {
-          const prevVersion = entry.version - 1;
+          // M7 T5 fix: restore the prior history entry's params instead
+          // of resetting to defaults. Falls back to defaults only when
+          // there is no prior entry (i.e. we're undoing the very first
+          // commit and there's nothing to restore from).
+          const prior = newPointer >= 0 ? state.history[newPointer] : null;
+          const restoredParams =
+            prior?.params ?? PIPELINE_STAGES.find((s) => s.type === n.type)?.defaultParams ?? {};
           return {
             ...n,
-            version: Math.max(prevVersion, 0),
+            version: Math.max(entry.version - 1, 0),
             status: "active" as NodeStatus,
-            params: prevVersion <= 0 ? PIPELINE_STAGES.find((s) => s.type === n.type)?.defaultParams ?? {} : n.params,
+            params: restoredParams,
             receipt: undefined,
           };
         }

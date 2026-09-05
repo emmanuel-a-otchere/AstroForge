@@ -14,11 +14,13 @@
     canUndo,
     canRedo,
     setMode,
+    isDestructiveStage,
     type ProcessingMode,
   } from "../lib/pipeline-store";
   import type { PreviewParams } from "../lib/gl-renderer";
   import { recordStage } from "../lib/session";
   import ReceiptsPanel from "./ReceiptsPanel.svelte";
+  import DestructiveConfirmDialog from "./DestructiveConfirmDialog.svelte";
 
   export let previewParams: PreviewParams;
   export let onParamsChange: (params: Partial<PreviewParams>) => void;
@@ -28,6 +30,10 @@
   let showModeConfirm = false;
   let pendingMode: ProcessingMode | null = null;
   let keepPixelState = true;
+  // M7 T4: staged commit params awaiting destructive-stage confirmation.
+  // When set, DestructiveConfirmDialog renders; on confirm, the commit
+  // fires through `commitStage()`.
+  let pendingCommitParams: Record<string, unknown> | null = null;
 
   $: stepIdx = $activeStepIndex;
   $: stage = stageDefinitions[stepIdx];
@@ -69,6 +75,26 @@
     const sessionId = $sessionStore.sessionId;
     const startedAt = performance.now();
 
+    // M7 T4: gate destructive stages behind an explicit confirmation.
+    // We stash the params and let the modal drive the commit. On
+    // confirm, the dialog's onConfirm handler invokes performCommit()
+    // with the staged values.
+    if (isDestructiveStage(stageId)) {
+      pendingCommitParams = params;
+      return;
+    }
+    await performCommit(params, stageId, sessionId, startedAt);
+  }
+
+  /// The actual commit + receipt-persistence path. Shared between the
+  /// immediate-commit and confirmed-destruct paths so receipt
+  /// formatting stays identical.
+  async function performCommit(
+    params: Record<string, unknown>,
+    stageId: string,
+    sessionId: string,
+    startedAt: number,
+  ) {
     commitStage(params);
     nextStep();
     sliderValue = 0.5;
@@ -97,6 +123,20 @@
     } catch (err) {
       console.warn("session autosave failed (non-blocking):", err);
     }
+  }
+
+  function handleDestructiveConfirm() {
+    if (!pendingCommitParams) return;
+    const params = pendingCommitParams;
+    const stageId = node.type;
+    const sessionId = $sessionStore.sessionId;
+    const startedAt = performance.now();
+    pendingCommitParams = null;
+    void performCommit(params, stageId, sessionId, startedAt);
+  }
+
+  function handleDestructiveCancel() {
+    pendingCommitParams = null;
   }
 
   function handleBack() {
@@ -212,6 +252,16 @@
       </div>
     </div>
   </div>
+{/if}
+
+{#if pendingCommitParams !== null}
+  <DestructiveConfirmDialog
+    stageType={node.type}
+    stageLabel={stage.label}
+    action="commit"
+    onConfirm={handleDestructiveConfirm}
+    onCancel={handleDestructiveCancel}
+  />
 {/if}
 
 <!-- Stepper -->

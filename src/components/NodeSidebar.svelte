@@ -4,9 +4,12 @@
     activeStepIndex,
     goToStep,
     reapplyStage,
+    isDestructiveStage,
     type PipelineNode,
     type NodeStatus,
+    type PipelineStageType,
   } from "../lib/pipeline-store";
+  import DestructiveConfirmDialog from "./DestructiveConfirmDialog.svelte";
 
   $: nodes = $pipelineGraph.nodes;
   $: edges = $pipelineGraph.edges;
@@ -27,6 +30,14 @@
   let menuX = 0;
   let menuY = 0;
 
+  // M7 T4: pending re-apply awaiting destructive-stage confirmation.
+  let pendingReapplyNodeId: string | null = null;
+  $: pendingReapplyNode = pendingReapplyNodeId
+    ? nodes.find((n) => n.id === pendingReapplyNodeId) ?? null
+    : null;
+  $: pendingReapplyType = pendingReapplyNode?.type ?? null;
+  $: pendingReapplyLabel = pendingReapplyNode?.label ?? "";
+
   function openMenu(nodeId: string, event: MouseEvent) {
     event.preventDefault();
     const idx = nodes.findIndex((n) => n.id === nodeId);
@@ -43,9 +54,28 @@
   }
 
   function handleReapply(nodeId: string) {
+    const idx = nodes.findIndex((n) => n.id === nodeId);
+    if (idx < 0) return;
+    // M7 T4: gate destructive stages behind the confirmation modal.
+    if (isDestructiveStage(nodes[idx].type)) {
+      pendingReapplyNodeId = nodeId;
+      closeMenu();
+      return;
+    }
     if (reapplyStage(nodeId)) {
       closeMenu();
     }
+  }
+
+  function handleReapplyConfirm() {
+    if (!pendingReapplyNodeId) return;
+    const id = pendingReapplyNodeId;
+    pendingReapplyNodeId = null;
+    reapplyStage(id);
+  }
+
+  function handleReapplyCancel() {
+    pendingReapplyNodeId = null;
   }
 
   function handleNodeClick(index: number) {
@@ -138,6 +168,16 @@
       Re-run from here
     </button>
   </div>
+{/if}
+
+{#if pendingReapplyNodeId !== null && pendingReapplyType !== null}
+  <DestructiveConfirmDialog
+    stageType={pendingReapplyType}
+    stageLabel={pendingReapplyLabel}
+    action="reapply"
+    onConfirm={handleReapplyConfirm}
+    onCancel={handleReapplyCancel}
+  />
 {/if}
 
 <style>

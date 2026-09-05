@@ -18,6 +18,24 @@ export type PipelineStageType =
   | "creative_polish"
   | "export";
 
+/// M7 T4: stages whose commit / re-apply is genuinely destructive (info
+/// loss or irreversible pixel transform). Re-running these should warn
+/// the user. Per audit decision Q-3 (2026-09-05): gate these five.
+///
+/// crop_rotate is technically reversible from params but UX-feels
+/// destructive — included so users see the warning before pixels move.
+export const DESTRUCTIVE_STAGES: ReadonlySet<PipelineStageType> = new Set([
+  "crop_rotate",
+  "background_extraction",
+  "color_calibration",
+  "sharpen_deconvolution",
+  "denoise",
+]);
+
+export function isDestructiveStage(type: PipelineStageType): boolean {
+  return DESTRUCTIVE_STAGES.has(type);
+}
+
 export type NodeStatus = "pending" | "running" | "completed" | "failed" | "skipped" | "active";
 
 export interface PipelineNode {

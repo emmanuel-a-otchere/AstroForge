@@ -286,11 +286,11 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 | ID | Task | CR ref | Status | Depends on |
 |---|---|---|---|---|
-| P1.5-M7-T1 | [#179](https://github.com/emmanuel-a-otchere/AstroForge/issues/179) | Implement versioned artefact store: each stage commit stores params + mask separately from pixel data | §4.2 | pending | P1.5-M1-T5 |
+| P1.5-M7-T1 | [#179](https://github.com/emmanuel-a-otchere/AstroForge/issues/179) | Implement versioned artefact store: each stage commit stores params + mask separately from pixel data | §4.2 | in_progress | P1.5-M1-T5 |
 | P1.5-M7-T2 | [#180](https://github.com/emmanuel-a-otchere/AstroForge/issues/180) | Implement "re-apply from here": re-running an earlier stage re-executes it and all downstream stages with current params | §4.2 | pending | T1 |
 | P1.5-M7-T3 | [#181](https://github.com/emmanuel-a-otchere/AstroForge/issues/181) | Implement multi-save: export multiple formats/versions without terminating session | §4.2 | pending | P1.5-M6-T10 |
 | P1.5-M7-T4 | [#182](https://github.com/emmanuel-a-otchere/AstroForge/issues/182) | Implement explicit warning when re-running an already-applied AI or irreversible-looking step | §4.2 | pending | T1 |
-| P1.5-M7-T5 | [#183](https://github.com/emmanuel-a-otchere/AstroForge/issues/183) | Implement exact reversibility for crop, stretch, and star-replace (restore exact pre-operation state) | §4.2, §6 AC3 | pending | T1, P1.5-M6-T7, P1.5-M6-T8 |
+| P1.5-M7-T5 | [#183](https://github.com/emmanuel-a-otchere/AstroForge/issues/183) | Implement exact reversibility for crop, stretch, and star-replace (restore exact pre-operation state) | §4.2, §6 AC3 | in_progress | T1, P1.5-M6-T7, P1.5-M6-T8 |
 
 ### Milestone 1.5.8 — Smart-Telescope & Data-Type Awareness
 

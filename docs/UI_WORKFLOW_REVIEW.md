@@ -166,7 +166,7 @@ This is a clean hierarchy. The `ScreenCard` `footer` snippet pattern (`App.svelt
 
 | # | Recommendation | Effort | Impact | Blocks |
 |---|---|---|---|---|
-| R-1 | Hide Mode C and D from mode-switcher until they ship real `PreviewCanvas` wiring (or wire Mode D to `PreviewCanvas` + `ParameterSidebar` first) | 1 day | HIGH | User dead-ends |
+| R-1 | Hide Mode C and D from mode-switcher until they ship real `PreviewCanvas` wiring (or wire Mode D to `PreviewCanvas` + `ParameterSidebar` first) | 1 day | HIGH | User dead-ends | **CLOSED via PR #219** (`layout-mode.ts` defensive path returns `["a","b"]`). Full Mode D wiring deferred. |
 | R-2 | Make `sessionStore` the single source of truth for params; remove `previewParams` mirror in `App.svelte` | 1 day | HIGH | Undo/redo correctness |
 | R-3 | `viewPreview(sessionId)` rehydrates `sessionStore` before `setModeOverride("d")` | 0.5 day | MEDIUM | Gallery navigation |
 | R-4 | `backToLanding()` calls `initSession(undefined)` to reset graph | 0.25 day | MEDIUM | Fresh-session race |
@@ -176,7 +176,7 @@ This is a clean hierarchy. The `ScreenCard` `footer` snippet pattern (`App.svelt
 | R-8 | Either remove GPU badge or gate a path on it | 0.25 day | LOW | UI honesty |
 | R-9 | Add frontend smoke test (Vitest + Svelte Testing Library) | 1–2 days | MEDIUM | Regression safety |
 
-**Recommended next milestone scope:** R-1 + R-2 + R-3 + R-4 as a single "UI workflow integrity" tranche (~3–4 days). This addresses all user-facing dead-ends and correctness bugs without yet requiring real AI service work (M5 service scaffold is in place; full integration is M7+).
+**Recommended next milestone scope:** R-2 + R-3 + R-4 as a single "UI workflow integrity" tranche (~2–3 days). R-1 closed via PR #219 (defensive path). See `docs/UI_WORKFLOW_AUDIT.md` (2026-09-05) for the implementation audit.
 
 ---
 

@@ -3,6 +3,7 @@
     pipelineGraph,
     activeStepIndex,
     goToStep,
+    reapplyStage,
     type PipelineNode,
     type NodeStatus,
   } from "../lib/pipeline-store";
@@ -20,6 +21,33 @@
     active: "var(--cobalt-accent)",
   };
 
+  // Context menu state. Set by right-click / long-press on a node card;
+  // cleared on outside-click or Escape. Only one menu open at a time.
+  let menuNodeId: string | null = null;
+  let menuX = 0;
+  let menuY = 0;
+
+  function openMenu(nodeId: string, event: MouseEvent) {
+    event.preventDefault();
+    const idx = nodes.findIndex((n) => n.id === nodeId);
+    if (idx < 0) return;
+    // Anchor the menu near the clicked card so it appears adjacent.
+    const card = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    menuNodeId = nodeId;
+    menuX = card.right + 4;
+    menuY = card.top;
+  }
+
+  function closeMenu() {
+    menuNodeId = null;
+  }
+
+  function handleReapply(nodeId: string) {
+    if (reapplyStage(nodeId)) {
+      closeMenu();
+    }
+  }
+
   function handleNodeClick(index: number) {
     goToStep(index);
   }
@@ -28,6 +56,23 @@
     return index * 72 + 16;
   }
 </script>
+
+<svelte:window
+  onclick={(e) => {
+    // Close the context menu on any window click. The menu's own
+    // onclick handlers stopPropagation so they don't trip this.
+    if (menuNodeId !== null) {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(".node-context-menu")) return;
+      closeMenu();
+    }
+  }}
+  onkeydown={(e) => {
+    if (e.key === "Escape" && menuNodeId !== null) {
+      closeMenu();
+    }
+  }}
+/>
 
 <div class="node-sidebar">
   <div class="sidebar-header">
@@ -57,7 +102,8 @@
           class:active={i === activeIdx}
           class:completed={node.status === "completed"}
           style="--node-color: {statusColors[node.status]}"
-          on:click={() => handleNodeClick(i)}
+          onclick={() => handleNodeClick(i)}
+          oncontextmenu={(e) => openMenu(node.id, e)}
           type="button"
         >
           <span class="node-led" style="background: {statusColors[node.status]}"></span>
@@ -73,6 +119,26 @@
     </div>
   </div>
 </div>
+
+{#if menuNodeId !== null}
+  <div
+    class="node-context-menu"
+    role="menu"
+    style="left: {menuX}px; top: {menuY}px"
+    onclick={(e) => e.stopPropagation()}
+    onkeydown={(e) => e.stopPropagation()}
+  >
+    <button
+      type="button"
+      class="menu-item"
+      role="menuitem"
+      onclick={() => handleReapply(menuNodeId!)}
+    >
+      <span class="material-symbols-outlined">restart_alt</span>
+      Re-run from here
+    </button>
+  </div>
+{/if}
 
 <style>
   .node-sidebar {
@@ -179,5 +245,42 @@
     font-size: 16px;
     color: var(--tertiary-container);
     flex-shrink: 0;
+  }
+
+  .node-context-menu {
+    position: fixed;
+    z-index: 300;
+    min-width: 180px;
+    background: var(--surface-container-high);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-default, 8px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    color: var(--on-surface);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    border-radius: var(--radius-default, 6px);
+  }
+
+  .menu-item:hover {
+    background: var(--surface-container-highest, var(--cobalt-accent));
+    color: var(--on-surface);
+  }
+
+  .menu-item .material-symbols-outlined {
+    font-size: 16px;
   }
 </style>

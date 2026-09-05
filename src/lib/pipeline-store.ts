@@ -321,6 +321,71 @@ export function commitStage(
   });
 }
 
+/**
+ * M7 T2: re-apply a stage (and implicitly, all downstream stages).
+ *
+ * Marks the named node as `active` and bumps its version, then sets
+ * every downstream node back to `active` with bumped versions. Pushes
+ * a `reapply` history entry so the change is reversible via undo().
+ *
+ * The actual re-execution of the Rust pipeline is a follow-up
+ * (separate Tauri command lands in a future PR); this PR ships the
+ * store-level side so the UI can wire a "Re-run from here" button
+ * and undo() continues to work.
+ *
+ * @param nodeId the node to re-apply (defaults to active step)
+ * @returns true if the node was found and reapplied
+ */
+export function reapplyStage(nodeId?: string): boolean {
+  let ok = false;
+  sessionStore.update((state) => {
+    const targetIndex = nodeId
+      ? state.pipelineGraph.nodes.findIndex((n) => n.id === nodeId)
+      : state.activeStepIndex;
+    if (targetIndex < 0) return state;
+    ok = true;
+
+    const target = state.pipelineGraph.nodes[targetIndex];
+    const newVersion = target.version + 1;
+    const now = new Date().toISOString();
+
+    // Mark target + every downstream node as `active` with bumped
+    // version. Params are preserved (user might have tweaked them
+    // since the last commit; re-apply uses the current params).
+    const updatedNodes = state.pipelineGraph.nodes.map((n, i) => {
+      if (i < targetIndex) return n;
+      return {
+        ...n,
+        status: "active" as NodeStatus,
+        version: n.version + 1,
+        receipt: undefined,
+      };
+    });
+
+    const entry: HistoryEntry = {
+      nodeId: target.id,
+      version: newVersion,
+      params: { ...target.params },
+      status: "active",
+      timestamp: now,
+      action: "reapply",
+    };
+
+    const newHistory = [...state.history.slice(0, state.historyPointer + 1), entry];
+
+    return {
+      ...state,
+      pipelineGraph: { ...state.pipelineGraph, nodes: updatedNodes },
+      activeStepIndex: targetIndex,
+      history: newHistory,
+      historyPointer: newHistory.length - 1,
+      canUndo: true,
+      canRedo: false,
+    };
+  });
+  return ok;
+}
+
 export function goToStep(index: number): void {
   sessionStore.update((state) => {
     if (index < 0 || index >= state.pipelineGraph.nodes.length) return state;

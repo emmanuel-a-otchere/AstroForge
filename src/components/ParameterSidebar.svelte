@@ -3,7 +3,6 @@
     activeStepIndex,
     pipelineGraph,
     stageDefinitions,
-    updateNodeParams,
   } from "../lib/pipeline-store";
   import type { PreviewParams } from "../lib/gl-renderer";
 
@@ -14,10 +13,11 @@
   $: node = $pipelineGraph.nodes[stepIdx];
   $: stage = stageDefinitions[stepIdx];
 
+  // R-2: single write path — the change propagates via onParamsChange to
+  // App.handleParamsChange, which routes through updateNodeParams. The
+  // sidebar no longer writes the store directly (that was the second
+  // source of truth this tranche removes).
   function handleParam(key: string, value: number) {
-    if (node) {
-      updateNodeParams(node.id, { [key]: value });
-    }
     onParamsChange({ [key]: value } as Partial<PreviewParams>);
   }
 </script>

@@ -1,4 +1,5 @@
 import { writable, derived, get } from "svelte/store";
+import type { PreviewParams } from "./gl-renderer";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -525,6 +526,58 @@ export function updateNodeParams(nodeId: string, params: Record<string, unknown>
       pipelineGraph: { ...state.pipelineGraph, nodes: updatedNodes },
     };
   });
+}
+
+// ─── Preview Param Derivation (R-2 / tranche T1) ────────────────────────────
+
+/// Safe defaults for the live-preview renderer when no session node is
+/// available (pre-session or empty graph). Matches the historical
+/// App.svelte local-mirror defaults so pre-session behavior is unchanged.
+export const DEFAULT_PREVIEW_PARAMS: PreviewParams = {
+  blackPoint: 0,
+  midtones: 0.25,
+  highlights: 1,
+  strength: 0,
+  scnrStrength: 0,
+  scnrMethod: 0,
+};
+
+function numParam(p: Record<string, unknown>, key: string, fallback: number): number {
+  const v = p[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+/// R-2 single source of truth: derive the live-preview params from the
+/// active pipeline node instead of a local `$state` mirror. Slider writes
+/// route through `updateNodeParams`, so the store stays authoritative and
+/// undo/redo re-derives the preview from the restored node params.
+///
+/// Key alias: the recipe/seed side uses `midtone` (singular, see
+/// crates/astroforge-core/src/seed.rs); the UI-facing key is `midtones`.
+export function derivePreviewParams(
+  graph: PipelineGraph,
+  stepIndex: number,
+): PreviewParams {
+  const node = graph.nodes[stepIndex];
+  if (!node) return { ...DEFAULT_PREVIEW_PARAMS };
+  const p = node.params;
+  return {
+    blackPoint: numParam(p, "blackPoint", DEFAULT_PREVIEW_PARAMS.blackPoint),
+    midtones: numParam(
+      p,
+      "midtones",
+      numParam(p, "midtone", DEFAULT_PREVIEW_PARAMS.midtones),
+    ),
+    highlights: numParam(p, "highlights", DEFAULT_PREVIEW_PARAMS.highlights),
+    strength: numParam(p, "strength", DEFAULT_PREVIEW_PARAMS.strength),
+    scnrStrength: numParam(p, "scnrStrength", DEFAULT_PREVIEW_PARAMS.scnrStrength),
+    scnrMethod: numParam(p, "scnrMethod", DEFAULT_PREVIEW_PARAMS.scnrMethod),
+    denoiseStrength: numParam(p, "denoiseStrength", 0),
+    denoiseThreshold: numParam(p, "denoiseThreshold", 0),
+    colorSaturation: numParam(p, "colorSaturation", 1),
+    sharpenStrength: numParam(p, "sharpenStrength", 0),
+    sharpenRadius: numParam(p, "sharpenRadius", 1),
+  };
 }
 
 export function setImageStats(stats: ImageStats): void {

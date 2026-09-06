@@ -54,8 +54,8 @@ Drift risk: any future change to one path risks breaking the other. The contract
 
 | Phase | Status | Reference |
 |-------|--------|-----------|
-| P0 | in_progress | this PR (doc + plan + orientation + README pointer) |
-| P1 | pending | `core::import_scan` + `core::import_metadata` (scan + metadata extraction + content hash + duplicate detection) |
+| P0 | done | #249 |
+| P1 | in_progress | this PR (`core::import_scan` + metadata extraction + content hash + duplicate detection) |
 | P2 | pending | `core::classification` (Light/Dark/Flat/Bias/Unknown/Unsupported/Invalid + confidence) |
 | P3 | pending | `core::bayer_intelligence` (wrap existing `bayer_detection.rs` with confidence + evidence + change-route) |
 | P4 | pending | `core::target_detection` (FITS OBJECT, user metadata, filename patterns, evidence hierarchy) |

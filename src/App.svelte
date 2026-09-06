@@ -21,6 +21,9 @@
   import ParameterSidebar from "./components/ParameterSidebar.svelte";
   import ScreenCard from "./components/ScreenCard.svelte";
   import AppShell from "./components/AppShell.svelte";
+  import ApplicationShell from "./components/ApplicationShell.svelte";
+  import HomeScreen from "./components/HomeScreen.svelte";
+  import { applicationNavTarget } from "./state/application";
   import ProfileManager from "./components/ProfileManager.svelte";
   import ModeA from "./components/ModeA.svelte";
   import ModeB from "./components/ModeB.svelte";
@@ -86,6 +89,12 @@
   let pendingSessionFlags: Record<string, boolean> = {};
   // Phase 1.5 PR-C: ProfileManager modal open/close state.
   let profileManagerOpen = $state(false);
+
+  // CR-03 P1: toggle to render the new ApplicationShell + Home workspace
+  // instead of the wizard. Defaults to false so the existing demo flow
+  // is undisturbed. Future phases replace this with the Studio shell
+  // swap and remove the wizard fallback.
+  let useNewShell = $state(false);
 
   let renderMode: "identity" | "mtf" | "scnr" | "difference" | "composite" =
     $state("mtf");
@@ -311,7 +320,22 @@
   );
 </script>
 
-<AppShell currentStage={currentStep} onOpenProfiles={() => (profileManagerOpen = true)}>
+{#if useNewShell}
+  <ApplicationShell projectLabel="No project open">
+    {#if $applicationNavTarget === "home"}
+      <HomeScreen />
+    {:else}
+      <section class="placeholder-screen font-body" aria-live="polite">
+        <p>This screen is a placeholder in CR-03 P1.</p>
+        <p class="placeholder-hint">
+          Available application screens in P1: Home. Other screens (Projects,
+          Recipes, AI Models, Settings, Help) ship in later phases.
+        </p>
+      </section>
+    {/if}
+  </ApplicationShell>
+{:else}
+  <AppShell currentStage={currentStep} onOpenProfiles={() => (profileManagerOpen = true)}>
   {#if currentMode === "a"}
     <ModeA>
       <ScreenCard kicker="01 · Load Files" title="Select your image files">
@@ -467,6 +491,7 @@
     <ModeD {previewSessionId} />
   {/if}
 </AppShell>
+{/if}
 
 {#if sessionToast}
   <div class="session-toast" role="alert" transition:fly={{ y: 20, duration: 200 }}>

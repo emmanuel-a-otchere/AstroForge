@@ -10,9 +10,17 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import ScreenCard from "./ScreenCard.svelte";
+  import PreviewCanvas from "./PreviewCanvas.svelte";
   import { galleryStore, type GalleryItem } from "../lib/gallery";
 
-  let { children }: { children?: Snippet } = $props();
+  // R-3: when the user arrived via "View stretched preview", App passes
+  // the session id whose bitmap lives in previewStore. The preview pane
+  // then renders a real PreviewCanvas for THAT session instead of the
+  // placeholder gradient.
+  let {
+    children,
+    previewSessionId = null,
+  }: { children?: Snippet; previewSessionId?: string | null } = $props();
 
   let activeItem: GalleryItem | null = $state(
     $galleryStore.find((it: GalleryItem) => it.status === "completed") ?? $galleryStore[0] ?? null
@@ -199,11 +207,17 @@
         </section>
 
         <section class="refine-preview">
-          <div class="preview-placeholder" aria-label="Image preview">
-            <span class="material-symbols-outlined preview-icon">image</span>
-            <div class="preview-label">{activeItem.target}</div>
-            <span class="preview-meta">{activeItem.integrationHours}h · {activeItem.palette}</span>
-          </div>
+          {#if previewSessionId}
+            <div class="preview-live" aria-label="Image preview">
+              <PreviewCanvas sessionId={previewSessionId} />
+            </div>
+          {:else}
+            <div class="preview-placeholder" aria-label="Image preview">
+              <span class="material-symbols-outlined preview-icon">image</span>
+              <div class="preview-label">{activeItem.target}</div>
+              <span class="preview-meta">{activeItem.integrationHours}h · {activeItem.palette}</span>
+            </div>
+          {/if}
         </section>
       </div>
 
@@ -214,6 +228,21 @@
         <button class="btn-primary" type="button">Apply</button>
       </div>
       {/snippet}
+    </ScreenCard>
+  {:else if previewSessionId}
+    <!-- R-3: gallery may be empty even though a preview exists (e.g.
+         fresh session before any gallery row). Still show the bitmap. -->
+    <ScreenCard
+      kicker="Preview"
+      title="Session preview"
+      variant="overlay"
+      maxWidth="1100px"
+    >
+      <div class="refine-preview">
+        <div class="preview-live" aria-label="Image preview">
+          <PreviewCanvas sessionId={previewSessionId} />
+        </div>
+      </div>
     </ScreenCard>
   {:else}
     <div class="mode-d-empty">No completed sessions to refine yet.</div>
@@ -384,6 +413,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+
+  .preview-live {
+    width: 100%;
+    aspect-ratio: 3 / 2;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
   }
 
   .preview-placeholder {

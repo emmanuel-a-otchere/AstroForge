@@ -29,6 +29,8 @@
   import ManifestReview from "./components/ManifestReview.svelte";
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
+  import { get } from "svelte/store";
+  import { previewStore } from "./lib/preview-store";
   import {
     initSession,
     sessionStore,
@@ -94,16 +96,37 @@
 
   let currentMode = $derived($currentLayoutMode);
 
+  // R-3: session id whose preview Mode D should render, and the Q-2(b)
+  // error toast shown when a session has no loadable preview.
+  let previewSessionId: string | null = $state(null);
+  let sessionToast: string | null = $state(null);
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function showSessionToast(message: string) {
+    sessionToast = message;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (sessionToast = null), 5000);
+  }
+
   function goToSelectFiles() {
     currentStep = "select-files";
   }
 
-  function viewPreview(_sessionId: string) {
-    // Navigate to ModeD (full-image workflow view). PreviewCanvas
-    // reads the matching preview from previewStore by session ID.
-    setModeOverride("d");
-    if (typeof console !== "undefined") {
-      console.info(`[astroforge] navigating to preview for ${_sessionId}`);
+  function viewPreview(sessionId: string) {
+    // R-3 (preview-forward direction): land on Mode D only when
+    // previewStore actually holds THIS session's bitmap. Mode D renders
+    // a real PreviewCanvas keyed by session id, so the user sees the
+    // clicked session — never a different session's image. When no
+    // matching preview exists, surface a Q-2(b) error toast instead of
+    // navigating to a stale/empty view.
+    const rec = get(previewStore);
+    if (rec && rec.sessionId === sessionId) {
+      previewSessionId = sessionId;
+      setModeOverride("d");
+    } else {
+      showSessionToast(
+        "No preview available for this session — run the pipeline first."
+      );
     }
   }
 
@@ -435,15 +458,42 @@
   {:else if currentMode === "c"}
     <ModeC />
   {:else if currentMode === "d"}
-    <ModeD />
+    <ModeD {previewSessionId} />
   {/if}
 </AppShell>
+
+{#if sessionToast}
+  <div class="session-toast" role="alert" transition:fly={{ y: 20, duration: 200 }}>
+    <span class="material-symbols-outlined">error</span>
+    <span>{sessionToast}</span>
+  </div>
+{/if}
 
 {#if profileManagerOpen}
   <ProfileManager onClose={() => (profileManagerOpen = false)} />
 {/if}
 
 <style>
+  .session-toast {
+    position: fixed;
+    bottom: var(--sp-xl);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-sm);
+    padding: var(--sp-sm) var(--sp-lg);
+    background: var(--surface-container-highest);
+    border: 1px solid var(--error-fg);
+    border-radius: var(--radius-lg);
+    color: var(--on-surface);
+    z-index: 1000;
+  }
+
+  .session-toast .material-symbols-outlined {
+    color: var(--error-fg);
+  }
+
   .subtitle {
     color: var(--on-surface-variant);
     margin-bottom: var(--sp-md);

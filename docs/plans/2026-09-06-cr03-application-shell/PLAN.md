@@ -184,5 +184,6 @@ Every PR must pass:
 | P2 | done | #243 |
 | P3 | done | #244 |
 | P4a | done | #245 |
-| P4b | in_progress | this PR (wizard deprecation) |
-| P5, P6 | pending | — |
+| P4b | done | #246 |
+| P5  | in_progress | this PR (versions + AI recs + Compare picker + Export picker) |
+| P6  | pending | save indicator + error UX + keyboard |

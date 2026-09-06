@@ -15,6 +15,7 @@
 <script lang="ts">
   import { activeProject } from "../state/project-context";
   import { stageStatuses } from "../state/workspace";
+  import VersionTimeline from "./VersionTimeline.svelte";
 
   interface ChecklistStage {
     id: "import" | "analyze" | "process" | "review" | "export";
@@ -105,6 +106,18 @@
       workspace.
     </p>
   </footer>
+
+  <section class="timeline-section" aria-labelledby="timeline-title">
+    <h2 id="timeline-title" class="font-display section-title">
+      Version timeline
+    </h2>
+    <p class="section-subtitle font-body">
+      Each version captures a snapshot of the project's working image and
+      the action that produced it. Selecting a version highlights the
+      row that produced it.
+    </p>
+    <VersionTimeline />
+  </section>
 </section>
 
 <style>
@@ -250,6 +263,25 @@
 
   .state-icon.blocked {
     color: #ff8a80;
+  }
+
+  .timeline-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-sm);
+    margin-top: var(--sp-md);
+  }
+
+  .section-title {
+    font-size: 1.25rem;
+    margin: 0;
+  }
+
+  .section-subtitle {
+    margin: 0;
+    color: var(--on-surface-variant);
+    font-size: 0.85rem;
+    max-width: 70ch;
   }
 
   .overview-footer .hint {

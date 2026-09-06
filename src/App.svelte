@@ -34,6 +34,8 @@
     sessionStore,
     activeStepIndex,
     applyProfileToPipeline,
+    derivePreviewParams,
+    updateNodeParams,
   } from "./lib/pipeline-store";
   import {
     setStage,
@@ -81,15 +83,6 @@
   let pendingSessionFlags: Record<string, boolean> = {};
   // Phase 1.5 PR-C: ProfileManager modal open/close state.
   let profileManagerOpen = $state(false);
-
-  let previewParams: PreviewParams = $state({
-    blackPoint: 0,
-    midtones: 0.25,
-    highlights: 1,
-    strength: 0,
-    scnrStrength: 0,
-    scnrMethod: 0,
-  });
 
   let renderMode: "identity" | "mtf" | "scnr" | "difference" | "composite" =
     $state("mtf");
@@ -248,11 +241,24 @@
     currentStep = "select-files";
   }
 
+  // R-2: slider writes go straight to the pipeline store (single source
+  // of truth); the live preview re-derives from the store via
+  // derivePreviewParams below. Stage persistence still happens at
+  // commitStage() (commit-on-blur pattern, per audit Q-1).
   function handleParamsChange(params: Partial<PreviewParams>) {
-    previewParams = { ...previewParams, ...params };
+    const node = $sessionStore.pipelineGraph.nodes[stepIdx];
+    if (node) {
+      updateNodeParams(node.id, params as Record<string, unknown>);
+    }
   }
 
   let stepIdx = $derived($activeStepIndex);
+  // R-2: preview params derive from the active node's params in the
+  // pipeline store — no local mirror. Undo/redo restores node params,
+  // and this derivation picks the restored values up automatically.
+  let previewParams = $derived(
+    derivePreviewParams($sessionStore.pipelineGraph, stepIdx)
+  );
   let isStretchStage = $derived(
     $sessionStore?.pipelineGraph.nodes[stepIdx]?.type === "stretch"
   );

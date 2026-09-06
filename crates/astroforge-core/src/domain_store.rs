@@ -11,8 +11,9 @@
 //! other stores.
 
 use crate::domain::{
-    Artifact, ArtifactCategory, Project, ProjectEvent, ProjectEventKind, ProjectStatus, Session,
-    SourceAsset, Target, DOMAIN_SCHEMA_VERSION,
+    Artifact, ArtifactCategory, PipelineRun, PipelineRunStatus, Project, ProjectEvent,
+    ProjectEventKind, ProjectStatus, Session, SourceAsset, StageRunRecord, Target,
+    DOMAIN_SCHEMA_VERSION,
 };
 use rusqlite::{params, Connection};
 use std::path::Path;
@@ -140,6 +141,48 @@ CREATE TABLE artifacts (
 
 CREATE INDEX idx_artifacts_hash ON artifacts(artifact_hash);
 CREATE INDEX idx_artifacts_run ON artifacts(pipeline_run_id);
+"#,
+    ),
+    (
+        3,
+        r#"
+-- CR-02.5 — pipeline persistence (CR-02 §11/§12). Run-keyed stage runs
+-- replace the session-keyed stage_runs model for new runs; the v1
+-- session_keyed row type stays untouched (D-1).
+CREATE TABLE pipeline_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    session_ids_json TEXT NOT NULL DEFAULT '[]',
+    recipe_id TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    application_version TEXT NOT NULL DEFAULT '',
+    engine_version TEXT NOT NULL DEFAULT '',
+    hardware_profile TEXT,
+    execution_mode TEXT,
+    input_artifacts_json TEXT NOT NULL DEFAULT '[]',
+    output_artifacts_json TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX idx_pipeline_runs_project ON pipeline_runs(project_id);
+CREATE INDEX idx_pipeline_runs_status ON pipeline_runs(status);
+
+CREATE TABLE stage_run_records (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES pipeline_runs(id),
+    stage_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempt INTEGER NOT NULL DEFAULT 1,
+    params_json TEXT,
+    metrics_json TEXT,
+    error TEXT,
+    started_at TEXT,
+    completed_at TEXT
+);
+
+CREATE INDEX idx_stage_run_records_run ON stage_run_records(run_id);
+CREATE INDEX idx_stage_run_records_stage ON stage_run_records(stage_id);
 "#,
     ),
 ];
@@ -569,6 +612,185 @@ impl DomainStore {
         Ok(out)
     }
 
+    // ─── Pipeline runs + stage runs (CR-02 §11/§12) — migration v3 ────
+
+    /// Create a pipeline run in `Queued` status, optionally linked to a
+    /// recipe. Returns the minted run id.
+    pub fn create_pipeline_run(
+        &self,
+        project_id: &str,
+        session_ids: &[String],
+        recipe_id: Option<&str>,
+        application_version: &str,
+        engine_version: &str,
+    ) -> Result<String> {
+        let id = new_id("run");
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO pipeline_runs (
+                id, project_id, session_ids_json, recipe_id, status,
+                application_version, engine_version
+             ) VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?6)",
+            params![
+                id,
+                project_id,
+                serde_json::to_string(session_ids)?,
+                recipe_id,
+                application_version,
+                engine_version,
+            ],
+        )?;
+        drop(conn);
+        self.record_event(project_id, ProjectEventKind::PipelineStarted, Some(&id))?;
+        Ok(id)
+    }
+
+    pub fn get_pipeline_run(&self, run_id: &str) -> Result<PipelineRun> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, project_id, session_ids_json, recipe_id, started_at,
+                    completed_at, status, application_version, engine_version,
+                    hardware_profile, execution_mode, input_artifacts_json,
+                    output_artifacts_json
+             FROM pipeline_runs WHERE id = ?1",
+            params![run_id],
+            pipeline_run_row,
+        )
+        .map_err(|e| not_found_if_missing(e, "pipeline_run", run_id))
+        .and_then(pipeline_run_from_row)
+    }
+
+    pub fn list_pipeline_runs(&self, project_id: &str) -> Result<Vec<PipelineRun>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, session_ids_json, recipe_id, started_at,
+                    completed_at, status, application_version, engine_version,
+                    hardware_profile, execution_mode, input_artifacts_json,
+                    output_artifacts_json
+             FROM pipeline_runs WHERE project_id = ?1
+             ORDER BY COALESCE(started_at, '') DESC",
+        )?;
+        let rows = stmt.query_map(params![project_id], pipeline_run_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(pipeline_run_from_row(r?)?);
+        }
+        Ok(out)
+    }
+
+    /// CR-02 §28 crash-recovery substrate: any run not in a terminal state
+    /// is presumed interrupted. The `PipelineRunStatus::is_terminal` set
+    /// defines "terminal" — matches `is_terminal()` in `domain.rs`.
+    pub fn find_interrupted_runs(&self) -> Result<Vec<PipelineRun>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, session_ids_json, recipe_id, started_at,
+                    completed_at, status, application_version, engine_version,
+                    hardware_profile, execution_mode, input_artifacts_json,
+                    output_artifacts_json
+             FROM pipeline_runs
+             WHERE status NOT IN ('completed', 'failed', 'cancelled')
+             ORDER BY COALESCE(started_at, '') ASC",
+        )?;
+        let rows = stmt.query_map([], pipeline_run_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(pipeline_run_from_row(r?)?);
+        }
+        Ok(out)
+    }
+
+    pub fn mark_run_started(&self, run_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE pipeline_runs
+             SET status = 'running', started_at = datetime('now')
+             WHERE id = ?1",
+            params![run_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_run_finished(&self, run_id: &str, status: PipelineRunStatus) -> Result<()> {
+        let terminal = status.is_terminal();
+        let conn = self.conn.lock().unwrap();
+        if terminal {
+            conn.execute(
+                "UPDATE pipeline_runs
+                 SET status = ?1, completed_at = datetime('now')
+                 WHERE id = ?2",
+                params![enum_str(&status)?, run_id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE pipeline_runs SET status = ?1 WHERE id = ?2",
+                params![enum_str(&status)?, run_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn record_stage_run(&self, record: &StageRunRecord) -> Result<String> {
+        let id = if record.stage_run_id.is_empty() {
+            new_id("sr")
+        } else {
+            record.stage_run_id.clone()
+        };
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO stage_run_records (
+                id, run_id, stage_id, status, attempt, params_json,
+                metrics_json, error, started_at, completed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                id,
+                record.run_id,
+                record.stage_id,
+                record.status,
+                record.attempt as i64,
+                record.params_json,
+                record.metrics_json,
+                record.error,
+                record.started_at,
+                record.completed_at,
+            ],
+        )?;
+        Ok(id)
+    }
+
+    /// List stage runs for a pipeline run in insertion order — the DAG's
+    /// execution history at a glance.
+    pub fn list_stage_runs(&self, run_id: &str) -> Result<Vec<StageRunRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, stage_id, status, attempt, params_json,
+                    metrics_json, error, started_at, completed_at
+             FROM stage_run_records WHERE run_id = ?1
+             ORDER BY COALESCE(started_at, '') ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![run_id], stage_run_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(stage_run_from_row(r?)?);
+        }
+        Ok(out)
+    }
+
+    /// CR-02 §12: stages can be rerun independently. The next attempt
+    /// counter is max(prior attempts) + 1.
+    pub fn next_stage_attempt(&self, run_id: &str, stage_id: &str) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        let n: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(attempt), 0) FROM stage_run_records
+                 WHERE run_id = ?1 AND stage_id = ?2",
+                params![run_id, stage_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        Ok((n + 1) as u32)
+    }
+
     // ─── Project events (CR-02 §35) ─────────────────────────────────────
 
     pub fn record_event(
@@ -708,6 +930,105 @@ fn project_from_row(r: ProjectRow) -> Result<Project> {
     })
 }
 
+/// Column order shared by the pipeline_runs queries.
+#[allow(clippy::type_complexity)]
+type PipelineRunRow = (
+    String,         // id
+    String,         // project_id
+    String,         // session_ids_json
+    Option<String>, // recipe_id
+    Option<String>, // started_at
+    Option<String>, // completed_at
+    String,         // status
+    String,         // application_version
+    String,         // engine_version
+    Option<String>, // hardware_profile
+    Option<String>, // execution_mode
+    String,         // input_artifacts_json
+    String,         // output_artifacts_json
+);
+
+fn pipeline_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PipelineRunRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+        row.get(12)?,
+    ))
+}
+
+fn pipeline_run_from_row(r: PipelineRunRow) -> Result<PipelineRun> {
+    Ok(PipelineRun {
+        run_id: r.0,
+        project_id: r.1,
+        session_ids: serde_json::from_str(&r.2)?,
+        recipe_id: r.3,
+        started_at: r.4,
+        completed_at: r.5,
+        status: parse_enum(&r.6)?,
+        application_version: r.7,
+        engine_version: r.8,
+        hardware_profile: r.9,
+        execution_mode: r.10,
+        input_artifacts: serde_json::from_str(&r.11)?,
+        output_artifacts: serde_json::from_str(&r.12)?,
+    })
+}
+
+/// Column order shared by the stage_run_records queries.
+#[allow(clippy::type_complexity)]
+type StageRunRow = (
+    String,         // id
+    String,         // run_id
+    String,         // stage_id
+    String,         // status
+    i64,            // attempt
+    Option<String>, // params_json
+    Option<String>, // metrics_json
+    Option<String>, // error
+    Option<String>, // started_at
+    Option<String>, // completed_at
+);
+
+fn stage_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StageRunRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+    ))
+}
+
+fn stage_run_from_row(r: StageRunRow) -> Result<StageRunRecord> {
+    Ok(StageRunRecord {
+        stage_run_id: r.0,
+        run_id: r.1,
+        stage_id: r.2,
+        status: r.3,
+        attempt: r.4 as u32,
+        params_json: r.5,
+        metrics_json: r.6,
+        error: r.7,
+        started_at: r.8,
+        completed_at: r.9,
+    })
+}
+
 /// Column order shared by the artifacts queries.
 #[allow(clippy::type_complexity)]
 type ArtifactRow = (
@@ -840,10 +1161,10 @@ mod tests {
     #[test]
     fn migrations_apply_once_and_are_idempotent() {
         let s = store();
-        assert_eq!(s.schema_version(), 2);
+        assert_eq!(s.schema_version(), 3);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 2);
+        assert_eq!(s2.schema_version(), 3);
     }
 
     #[test]
@@ -992,5 +1313,112 @@ mod tests {
             s.get_project("proj_nope"),
             Err(DomainStoreError::NotFound(_))
         ));
+    }
+
+    #[test]
+    fn pipeline_run_lifecycle_records_events() {
+        let s = store();
+        let pid = s.create_project("M42", None, "0.1.0").unwrap();
+        let sid = s.create_session(&pid, "night 1").unwrap();
+        let run = s
+            .create_pipeline_run(&pid, &[sid.clone()], None, "0.1.0", "engine-1.0")
+            .unwrap();
+        assert!(run.starts_with("run_"));
+
+        let created = s.get_pipeline_run(&run).unwrap();
+        assert_eq!(created.status, PipelineRunStatus::Queued);
+        assert_eq!(created.session_ids, vec![sid]);
+        assert_eq!(created.application_version, "0.1.0");
+
+        s.mark_run_started(&run).unwrap();
+        assert_eq!(
+            s.get_pipeline_run(&run).unwrap().status,
+            PipelineRunStatus::Running
+        );
+        // mark_run_started wrote started_at; a second call must not reset it
+        // to "now" again? — current impl does, which is acceptable: the run
+        // is genuinely re-starting. Verify only that started_at stays set.
+        assert!(s.get_pipeline_run(&run).unwrap().started_at.is_some());
+
+        s.mark_run_finished(&run, PipelineRunStatus::Completed)
+            .unwrap();
+        let done = s.get_pipeline_run(&run).unwrap();
+        assert_eq!(done.status, PipelineRunStatus::Completed);
+        assert!(done.completed_at.is_some());
+
+        // PIPELINE_STARTED event was recorded at create time.
+        let events = s.list_events(&pid).unwrap();
+        assert!(events
+            .iter()
+            .any(|e| e.kind == ProjectEventKind::PipelineStarted
+                && e.payload_json.as_deref() == Some(run.as_str())));
+    }
+
+    #[test]
+    fn stage_runs_persist_with_independent_attempts() {
+        let s = store();
+        let pid = s.create_project("M42", None, "0.1.0").unwrap();
+        let run = s
+            .create_pipeline_run(&pid, &[], None, "0.1.0", "engine-1.0")
+            .unwrap();
+
+        // First attempt.
+        let mut rec = StageRunRecord {
+            stage_run_id: String::new(),
+            run_id: run.clone(),
+            stage_id: "stretch".into(),
+            status: "running".into(),
+            attempt: 1,
+            params_json: Some(r#"{"blackPoint":0.02}"#.into()),
+            metrics_json: None,
+            error: None,
+            started_at: Some("2026-09-06T00:00:00Z".into()),
+            completed_at: None,
+        };
+        let id = s.record_stage_run(&rec).unwrap();
+        assert!(id.starts_with("sr_"));
+
+        // Completed first attempt.
+        rec.status = "completed".into();
+        rec.attempt = s.next_stage_attempt(&run, "stretch").unwrap();
+        rec.completed_at = Some("2026-09-06T00:00:05Z".into());
+        s.record_stage_run(&rec).unwrap();
+
+        let all = s.list_stage_runs(&run).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].attempt, 1);
+        assert_eq!(all[1].attempt, 2);
+        assert_eq!(all[1].stage_id, "stretch");
+        assert_eq!(all[1].status, "completed");
+
+        // CR-02 §12: reruns are independent. next_stage_attempt is monotonic.
+        assert_eq!(s.next_stage_attempt(&run, "stretch").unwrap(), 3);
+        assert_eq!(s.next_stage_attempt(&run, "denoise").unwrap(), 1);
+    }
+
+    #[test]
+    fn crash_recovery_finds_non_terminal_runs() {
+        let s = store();
+        let pid = s.create_project("M42", None, "0.1.0").unwrap();
+        let running = s
+            .create_pipeline_run(&pid, &[], None, "0.1.0", "engine-1.0")
+            .unwrap();
+        s.mark_run_started(&running).unwrap();
+        let queued = s
+            .create_pipeline_run(&pid, &[], None, "0.1.0", "engine-1.0")
+            .unwrap();
+        let done = s
+            .create_pipeline_run(&pid, &[], None, "0.1.0", "engine-1.0")
+            .unwrap();
+        s.mark_run_started(&done).unwrap();
+        s.mark_run_finished(&done, PipelineRunStatus::Completed)
+            .unwrap();
+
+        let interrupted = s.find_interrupted_runs().unwrap();
+        assert_eq!(interrupted.len(), 2);
+        let ids: Vec<_> = interrupted.iter().map(|r| r.run_id.clone()).collect();
+        assert!(ids.contains(&running));
+        assert!(ids.contains(&queued));
+        assert!(!ids.contains(&done));
     }
 }

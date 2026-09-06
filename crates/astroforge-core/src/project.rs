@@ -346,7 +346,7 @@ mod tests {
 
         let reopened = mgr.open_project("m31").unwrap();
         assert_eq!(reopened.manifest.project_id, pid);
-        assert_eq!(reopened.store.schema_version(), 2);
+        assert_eq!(reopened.store.schema_version(), 3);
 
         // Tampered manifest is rejected.
         let mut bad = reopened.manifest.clone();

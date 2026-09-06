@@ -76,5 +76,6 @@ Processing algorithms, AI models, histogram UI, recipe marketplace, cloud sync, 
 | P2 | done | #235 |
 | P3 | done | #236 |
 | P4 | done | #237 |
-| P5 | in_progress | this PR |
-| P6 | pending | — |
+| P5 | done | #238 |
+| P6 | in_progress | this PR (scaffold) |
+| — | — | — |

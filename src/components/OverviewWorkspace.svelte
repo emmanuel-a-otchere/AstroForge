@@ -14,45 +14,39 @@
 -->
 <script lang="ts">
   import { activeProject } from "../state/project-context";
+  import { stageStatuses } from "../state/workspace";
 
   interface ChecklistStage {
     id: "import" | "analyze" | "process" | "review" | "export";
     label: string;
     description: string;
-    /** Placeholder state. P4 replaces with real store-derived status. */
-    status: "complete" | "pending" | "blocked";
   }
 
-  const stages: ChecklistStage[] = [
+  const stageDefs: ChecklistStage[] = [
     {
       id: "import",
       label: "Import",
       description: "Source files loaded into the project workspace.",
-      status: "pending",
     },
     {
       id: "analyze",
       label: "Analyze",
       description: "Plate-solve, calibration, and target classification.",
-      status: "pending",
     },
     {
       id: "process",
       label: "Process",
       description: "At least one completed pipeline run.",
-      status: "pending",
     },
     {
       id: "review",
       label: "Review",
       description: "Final image version is rendered and reviewed.",
-      status: "pending",
     },
     {
       id: "export",
       label: "Export",
       description: "At least one image version exported.",
-      status: "pending",
     },
   ];
 </script>
@@ -78,19 +72,19 @@
   {/if}
 
   <ol class="checklist" aria-label="Processing-stage checklist">
-    {#each stages as stage, idx (stage.id)}
-      <li class="checklist-item" data-status={stage.status}>
+    {#each stageDefs as stage, idx (stage.id)}
+      <li class="checklist-item" data-status={$stageStatuses[stage.id]}>
         <div class="step-number font-label">{idx + 1}</div>
         <div class="step-body">
           <h2 class="step-title font-display">{stage.label}</h2>
           <p class="step-description font-body">{stage.description}</p>
         </div>
-        <div class="step-state" aria-label="Status: {stage.status}">
-          {#if stage.status === "complete"}
+        <div class="step-state" aria-label="Status: {$stageStatuses[stage.id]}">
+          {#if $stageStatuses[stage.id] === "complete"}
             <span class="material-symbols-outlined state-icon complete" aria-hidden="true">
               check_circle
             </span>
-          {:else if stage.status === "blocked"}
+          {:else if $stageStatuses[stage.id] === "blocked"}
             <span class="material-symbols-outlined state-icon blocked" aria-hidden="true">
               block
             </span>

@@ -19,21 +19,28 @@
 
   let {
     overview,
-    import: importSnippet,
+    import_,
     process: processSnippet,
     enhance,
     compare,
-    export: exportSnippet,
-  }: Partial<Record<StudioView, Snippet>> = $props();
+    export_,
+  }: {
+    overview?: Snippet;
+    import_?: Snippet;
+    process?: Snippet;
+    enhance?: Snippet;
+    compare?: Snippet;
+    export_?: Snippet;
+  } = $props();
 
   function snippetFor(view: StudioView): Snippet | undefined {
     switch (view) {
       case "overview": return overview;
-      case "import": return importSnippet;
+      case "import": return import_;
       case "process": return processSnippet;
       case "enhance": return enhance;
       case "compare": return compare;
-      case "export": return exportSnippet;
+      case "export": return export_;
     }
   }
 

@@ -182,5 +182,7 @@ Every PR must pass:
 | P0 | done | #241 |
 | P1 | done | #242 |
 | P2 | done | #243 |
-| P3 | in_progress | this PR |
-| P4–P6 | pending | — |
+| P3 | done | #244 |
+| P4a | in_progress | this PR (workspaces + Overview checklist wiring) |
+| P4b | pending | wizard deprecation |
+| P5, P6 | pending | — |

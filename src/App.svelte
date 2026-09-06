@@ -33,6 +33,7 @@
   import { applicationNavTarget, studioViewport } from "./state/application";
   import { projectContext } from "./state/project-context";
   import { workspaceState } from "./state/workspace";
+  import { versionStore } from "./state/versions";
   import { projectsStore } from "./state/projects";
   import type { ProjectAction } from "./state/projects";
   import type { ProjectSummary } from "./lib/astroforge-api";
@@ -80,6 +81,7 @@
         name: project.name,
       });
       void workspaceState.load(project);
+      versionStore.load(project.project_id);
       return;
     }
   }

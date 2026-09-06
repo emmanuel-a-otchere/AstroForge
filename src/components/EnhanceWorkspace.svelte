@@ -8,6 +8,8 @@
 -->
 <script lang="ts">
   import WorkspaceScreen from "./WorkspaceScreen.svelte";
+  import RecommendationCard from "./RecommendationCard.svelte";
+  import { versionStore } from "../state/versions";
 </script>
 
 <WorkspaceScreen
@@ -15,20 +17,27 @@
   icon="tune"
   description="AI-assisted recommendations that propose tweaks to the latest image version. Accept or reject each suggestion; every accepted change is recorded on the version timeline."
 >
-  <div class="empty-state">
-    <span class="material-symbols-outlined empty-icon" aria-hidden="true">
-      auto_awesome
-    </span>
-    <p class="empty-title font-display">No recommendations yet</p>
-    <p class="empty-body font-body">
-      Once a pipeline run completes, AstroForge analyses the result and
-      proposes a small set of targeted enhancements. Each recommendation
-      explains what it would change and why.
-    </p>
-    <p class="hint font-body">
-      Recommendations + accept/reject UI + change provenance land in P5.
-    </p>
-  </div>
+  {#if $versionStore.recommendations.length === 0}
+    <div class="empty-state">
+      <span class="material-symbols-outlined empty-icon" aria-hidden="true">
+        auto_awesome
+      </span>
+      <p class="empty-title font-display">No recommendations yet</p>
+      <p class="empty-body font-body">
+        Once a pipeline run completes, AstroForge analyses the result and
+        proposes a small set of targeted enhancements. Each recommendation
+        explains what it would change and why.
+      </p>
+    </div>
+  {:else}
+    <ul class="rec-list" aria-label="AI recommendations">
+      {#each $versionStore.recommendations as rec (rec.id)}
+        <li>
+          <RecommendationCard recommendation={rec} />
+        </li>
+      {/each}
+    </ul>
+  {/if}
 </WorkspaceScreen>
 
 <style>
@@ -60,9 +69,12 @@
     max-width: 60ch;
   }
 
-  .hint {
-    font-size: 0.8rem;
-    color: var(--on-surface-variant);
+  .rec-list {
+    list-style: none;
+    padding: 0;
     margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-md);
   }
 </style>

@@ -26,7 +26,10 @@
   import ProjectsScreen from "./components/ProjectsScreen.svelte";
   import ProjectDialog from "./components/ProjectDialog.svelte";
   import DeleteProjectDialog from "./components/DeleteProjectDialog.svelte";
-  import { applicationNavTarget } from "./state/application";
+  import StudioShell from "./components/StudioShell.svelte";
+  import OverviewWorkspace from "./components/OverviewWorkspace.svelte";
+  import { applicationNavTarget, studioViewport } from "./state/application";
+  import { projectContext } from "./state/project-context";
   import { projectsStore } from "./state/projects";
   import type { ProjectAction } from "./state/projects";
   import type { ProjectSummary } from "./lib/astroforge-api";
@@ -137,10 +140,13 @@
       return;
     }
     if (action === "open" && project) {
-      // P3 wires the actual Studio entry. P2 navigates to Projects and
-      // shows the selected project as a confirmation.
-      applicationNavTarget.set("projects");
-      void projectsStore.refresh();
+      // P3: opening a project enters Studio context.
+      projectContext.open(project);
+      studioViewport.openProject({
+        project_id: project.project_id,
+        name: project.name,
+      });
+      useNewShell = true;
       return;
     }
   }
@@ -408,20 +414,27 @@
 </script>
 
 {#if useNewShell}
-  <ApplicationShell projectLabel="No project open">
-    {#if $applicationNavTarget === "home"}
-      <HomeScreen />
-    {:else if $applicationNavTarget === "projects"}
-      <ProjectsScreen onAction={handleProjectAction} />
-    {:else}
-      <section class="placeholder-screen font-body" aria-live="polite">
-        <p>This screen is a placeholder in CR-03 P2.</p>
-        <p class="placeholder-hint">
-          Available application screens in P2: Home, Projects. Other screens
-          (Recipes, AI Models, Settings, Help) ship in later phases.
-        </p>
-      </section>
-    {/if}
+  <ApplicationShell projectLabel={$studioViewport.project?.name ?? "No project open"}>
+      {#if $studioViewport.project}
+        <StudioShell>
+          {#snippet overview()}
+            <OverviewWorkspace />
+          {/snippet}
+        </StudioShell>
+      {:else if $applicationNavTarget === "home"}
+        <HomeScreen />
+      {:else if $applicationNavTarget === "projects"}
+        <ProjectsScreen onAction={handleProjectAction} />
+      {:else}
+        <section class="placeholder-screen font-body" aria-live="polite">
+          <p>This screen is a placeholder in CR-03 P3.</p>
+          <p class="placeholder-hint">
+            Available application screens in P3: Home, Projects. Studio overlay
+            is active when a project is open. Other screens (Recipes, AI
+            Models, Settings, Help) ship in later phases.
+          </p>
+        </section>
+      {/if}
     </ApplicationShell>
   {:else}
   <AppShell currentStage={currentStep} onOpenProfiles={() => (profileManagerOpen = true)}>

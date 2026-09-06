@@ -253,6 +253,20 @@ export function initSession(sessionId?: string, mode?: ProcessingMode): void {
   sessionStore.set(state);
 }
 
+/// R-4 / T3: full reset to a fresh session state — new sessionId, clean
+/// pipelineGraph, empty history, activeStepIndex 0, and cleared
+/// sessionFlags/imageStats/dataType (Q-3: yes, reset everything;
+/// createInitialSession() already produces a fully clean state).
+///
+/// Called from App.backToLanding() so a previous session's graph and
+/// step position cannot leak into the next workflow run before the user
+/// re-confirms a fresh classification. Any in-flight fire-and-forget
+/// persist IPC may still land a stale stage_runs row — acceptable per
+/// the audit's edge-case analysis.
+export function resetSession(): void {
+  sessionStore.set(createInitialSession());
+}
+
 export function setMode(mode: ProcessingMode, keepPixelState: boolean = true): void {
   sessionStore.update((state) => {
     const entry: HistoryEntry = {

@@ -11,8 +11,8 @@
 //! other stores.
 
 use crate::domain::{
-    Project, ProjectEvent, ProjectEventKind, ProjectStatus, Session, SourceAsset, Target,
-    DOMAIN_SCHEMA_VERSION,
+    Artifact, ArtifactCategory, Project, ProjectEvent, ProjectEventKind, ProjectStatus, Session,
+    SourceAsset, Target, DOMAIN_SCHEMA_VERSION,
 };
 use rusqlite::{params, Connection};
 use std::path::Path;
@@ -22,9 +22,10 @@ use std::sync::Mutex;
 
 /// Versioned migrations, applied in order inside a transaction and recorded
 /// in `schema_migrations`. Never edit an applied entry — append new ones.
-const MIGRATIONS: &[(u32, &str)] = &[(
-    1,
-    r#"
+const MIGRATIONS: &[(u32, &str)] = &[
+    (
+        1,
+        r#"
 CREATE TABLE targets (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -111,7 +112,37 @@ CREATE INDEX idx_sessions_project ON sessions(project_id);
 CREATE INDEX idx_source_assets_session ON source_assets(session_id);
 CREATE INDEX idx_project_events_project ON project_events(project_id);
 "#,
-)];
+    ),
+    (
+        2,
+        r#"
+-- CR-02.3 — canonical artifact records (lineage + producer linkage).
+-- The bytes live in the content-addressed store (artifact.rs::ContentStore);
+-- this table is the metadata/index half (CR-02 §17 division).
+CREATE TABLE artifacts (
+    id TEXT PRIMARY KEY,
+    artifact_hash TEXT NOT NULL,
+    artifact_type TEXT NOT NULL,
+    format TEXT NOT NULL,
+    path TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    producer_stage TEXT,
+    pipeline_run_id TEXT,
+    parent_artifact_ids_json TEXT NOT NULL DEFAULT '[]',
+    width INTEGER,
+    height INTEGER,
+    channels INTEGER,
+    bit_depth INTEGER,
+    color_space TEXT,
+    linear_or_nonlinear INTEGER
+);
+
+CREATE INDEX idx_artifacts_hash ON artifacts(artifact_hash);
+CREATE INDEX idx_artifacts_run ON artifacts(pipeline_run_id);
+"#,
+    ),
+];
 
 // ─── Store ──────────────────────────────────────────────────────────────────
 
@@ -451,6 +482,93 @@ impl DomainStore {
         Ok(out)
     }
 
+    // ─── Artifacts (CR-02 §8) — migration v2 ────────────────────────────
+
+    /// Record an artifact's metadata. The BYTES must already be durable in
+    /// the ContentStore (CR-02 §29 ordering: write → validate → hash →
+    /// rename → commit row). Mints an id when `artifact.artifact_id` is
+    /// empty.
+    pub fn record_artifact(&self, artifact: &Artifact) -> Result<String> {
+        let id = if artifact.artifact_id.is_empty() {
+            new_id("art")
+        } else {
+            artifact.artifact_id.clone()
+        };
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO artifacts (
+                id, artifact_hash, artifact_type, format, path, size,
+                producer_stage, pipeline_run_id, parent_artifact_ids_json,
+                width, height, channels, bit_depth, color_space, linear_or_nonlinear
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            params![
+                id,
+                artifact.artifact_hash,
+                enum_str(&artifact.artifact_type)?,
+                artifact.format,
+                artifact.path,
+                artifact.size as i64,
+                artifact.producer_stage,
+                artifact.pipeline_run_id,
+                serde_json::to_string(&artifact.parent_artifact_ids)?,
+                artifact.width,
+                artifact.height,
+                artifact.channels,
+                artifact.bit_depth,
+                artifact.color_space,
+                artifact.linear_or_nonlinear,
+            ],
+        )?;
+        Ok(id)
+    }
+
+    pub fn get_artifact(&self, artifact_id: &str) -> Result<Artifact> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, artifact_hash, artifact_type, format, path, size, created_at,
+                    producer_stage, pipeline_run_id, parent_artifact_ids_json,
+                    width, height, channels, bit_depth, color_space, linear_or_nonlinear
+             FROM artifacts WHERE id = ?1",
+            params![artifact_id],
+            artifact_row,
+        )
+        .map_err(|e| not_found_if_missing(e, "artifact", artifact_id))
+        .and_then(artifact_from_row)
+    }
+
+    /// CR-02 §7 reuse: find all records pointing at identical content.
+    pub fn find_artifacts_by_hash(&self, hash: &str) -> Result<Vec<Artifact>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, artifact_hash, artifact_type, format, path, size, created_at,
+                    producer_stage, pipeline_run_id, parent_artifact_ids_json,
+                    width, height, channels, bit_depth, color_space, linear_or_nonlinear
+             FROM artifacts WHERE artifact_hash = ?1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![hash], artifact_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(artifact_from_row(r?)?);
+        }
+        Ok(out)
+    }
+
+    pub fn list_artifacts_for_run(&self, run_id: &str) -> Result<Vec<Artifact>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, artifact_hash, artifact_type, format, path, size, created_at,
+                    producer_stage, pipeline_run_id, parent_artifact_ids_json,
+                    width, height, channels, bit_depth, color_space, linear_or_nonlinear
+             FROM artifacts WHERE pipeline_run_id = ?1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![run_id], artifact_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(artifact_from_row(r?)?);
+        }
+        Ok(out)
+    }
+
     // ─── Project events (CR-02 §35) ─────────────────────────────────────
 
     pub fn record_event(
@@ -590,6 +708,69 @@ fn project_from_row(r: ProjectRow) -> Result<Project> {
     })
 }
 
+/// Column order shared by the artifacts queries.
+#[allow(clippy::type_complexity)]
+type ArtifactRow = (
+    String,         // id
+    String,         // artifact_hash
+    String,         // artifact_type (serde token)
+    String,         // format
+    String,         // path
+    i64,            // size
+    String,         // created_at
+    Option<String>, // producer_stage
+    Option<String>, // pipeline_run_id
+    String,         // parent_artifact_ids_json
+    Option<u32>,    // width
+    Option<u32>,    // height
+    Option<u32>,    // channels
+    Option<u32>,    // bit_depth
+    Option<String>, // color_space
+    Option<bool>,   // linear_or_nonlinear
+);
+
+fn artifact_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+        row.get(12)?,
+        row.get(13)?,
+        row.get(14)?,
+        row.get(15)?,
+    ))
+}
+
+fn artifact_from_row(r: ArtifactRow) -> Result<Artifact> {
+    Ok(Artifact {
+        artifact_id: r.0,
+        artifact_hash: r.1,
+        artifact_type: parse_enum::<ArtifactCategory>(&r.2)?,
+        format: r.3,
+        path: r.4,
+        size: r.5 as u64,
+        created_at: r.6,
+        producer_stage: r.7,
+        pipeline_run_id: r.8,
+        parent_artifact_ids: serde_json::from_str(&r.9)?,
+        width: r.10,
+        height: r.11,
+        channels: r.12,
+        bit_depth: r.13,
+        color_space: r.14,
+        linear_or_nonlinear: r.15,
+    })
+}
+
 fn not_found_if_missing(e: rusqlite::Error, what: &str, id: &str) -> DomainStoreError {
     match e {
         rusqlite::Error::QueryReturnedNoRows => DomainStoreError::NotFound(format!("{what} {id}")),
@@ -659,10 +840,52 @@ mod tests {
     #[test]
     fn migrations_apply_once_and_are_idempotent() {
         let s = store();
-        assert_eq!(s.schema_version(), 1);
+        assert_eq!(s.schema_version(), 2);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 1);
+        assert_eq!(s2.schema_version(), 2);
+    }
+
+    #[test]
+    fn artifact_record_and_lookup_round_trip() {
+        let s = store();
+        let art = Artifact {
+            artifact_id: String::new(), // minted by the store
+            artifact_hash: "deadbeef".into(),
+            artifact_type: ArtifactCategory::Derived,
+            format: "fits".into(),
+            path: "/artifacts/de/deadbeef.fits".into(),
+            size: 4096,
+            created_at: String::new(), // sqlite default
+            producer_stage: Some("stretch".into()),
+            pipeline_run_id: Some("run_1".into()),
+            parent_artifact_ids: vec!["art_parent".into()],
+            width: Some(1280),
+            height: Some(960),
+            channels: Some(3),
+            bit_depth: Some(32),
+            color_space: Some("linear".into()),
+            linear_or_nonlinear: Some(false),
+        };
+        let id = s.record_artifact(&art).unwrap();
+        assert!(id.starts_with("art_"));
+
+        let got = s.get_artifact(&id).unwrap();
+        assert_eq!(got.artifact_hash, "deadbeef");
+        assert_eq!(got.artifact_type, ArtifactCategory::Derived);
+        assert_eq!(got.parent_artifact_ids, vec!["art_parent"]);
+        assert_eq!(got.producer_stage.as_deref(), Some("stretch"));
+        assert_eq!(got.linear_or_nonlinear, Some(false));
+
+        // §7 reuse: lookup by content hash.
+        let by_hash = s.find_artifacts_by_hash("deadbeef").unwrap();
+        assert_eq!(by_hash.len(), 1);
+        assert_eq!(by_hash[0].artifact_id, id);
+
+        // Lineage queries by run.
+        let for_run = s.list_artifacts_for_run("run_1").unwrap();
+        assert_eq!(for_run.len(), 1);
+        assert!(s.list_artifacts_for_run("run_other").unwrap().is_empty());
     }
 
     #[test]

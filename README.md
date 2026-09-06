@@ -41,6 +41,18 @@ While this started as a solo hobby project, building a robust astrophotography e
 * **Backend Engineering:** Contribute to the Rust-based DAG orchestrator, FITS parsing, and high-performance image math routines.
 * **Documentation and Translation:** Help write user guides, document the pipeline stages, and translate the interface for the global astrophotography community.
 
+## Documentation
+
+AstroForge's architecture is established by three sequential Change Requests. Each one answers a distinct question.
+
+* **[CR-01 — Product & UX Foundation](docs/specs/):** How should AstroForge work? The product journey, the three user modes (Auto / Guided / Expert), and the principle that the image is the primary object.
+* **[CR-02 — Project, Session & Artifact Architecture](docs/CR-02-PROJECT-SESSION-ARTIFACT-ARCHITECTURE.md):** What does AstroForge own and remember? The durable Project / Session / Pipeline Run / Artifact / Image Version / Export hierarchy. SQLite for lineage, content-addressed filesystem for artifacts.
+* **[CR-03 — Application Shell & Studio Workspace](docs/CR-03-APPLICATION-SHELL-STUDIO.md):** How does the user interact with the persistent model? The two navigation contexts (Application and Studio), the three-zone workspace, AI as intelligence throughout the workflow.
+
+New visitors: start with **[docs/ORIENTATION.md](docs/ORIENTATION.md)** for a plain-language summary of how these three CRs fit together.
+
+For the durable data model and the application shell implementation plans: `docs/plans/`.
+
 ## Getting Started
 *(Build instructions, dependency lists, and contribution guidelines will be added here as the repository structure is finalized.)*
 

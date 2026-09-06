@@ -100,3 +100,83 @@ export function readApplicationNavTarget(): ApplicationNavTarget {
   internal.subscribe((v) => (current = v))();
   return current;
 }
+
+// ─── Studio viewport (CR-03 P3) ──────────────────────────────────────────
+//
+// The Studio viewport is a layered overlay (CR-03 §4 + §10). When a
+// project is open, the Studio renders on top of the application
+// shell with its own header + tab rail + workspace. P3 ships the
+// types and a separate store; the ApplicationShell does not yet
+// consume them — that lands in P3 wiring.
+
+export type StudioView =
+  | "overview"
+  | "import"
+  | "process"
+  | "enhance"
+  | "compare"
+  | "export";
+
+export const STUDIO_VIEWS: readonly StudioView[] = [
+  "overview",
+  "import",
+  "process",
+  "enhance",
+  "compare",
+  "export",
+] as const;
+
+export interface StudioNavItem {
+  id: StudioView;
+  label: string;
+  icon: string;
+}
+
+export const STUDIO_NAV_ITEMS: readonly StudioNavItem[] = [
+  { id: "overview", label: "Overview", icon: "dashboard" },
+  { id: "import", label: "Import", icon: "upload_file" },
+  { id: "process", label: "Process", icon: "auto_fix_high" },
+  { id: "enhance", label: "Enhance", icon: "tune" },
+  { id: "compare", label: "Compare", icon: "compare" },
+  { id: "export", label: "Export", icon: "download" },
+] as const;
+
+function isStudioView(value: string): value is StudioView {
+  return (STUDIO_VIEWS as readonly string[]).includes(value);
+}
+
+interface StudioState {
+  /** Currently-open project (null = no project open). */
+  project: { project_id: string; name: string } | null;
+  /** Active tab inside the studio. */
+  view: StudioView;
+}
+
+const studioInternal = writable<StudioState>({
+  project: null,
+  view: "overview",
+});
+
+export const studioViewport = {
+  subscribe: studioInternal.subscribe,
+  /** Open a project in the Studio. Sets the active view to overview. */
+  openProject(project: { project_id: string; name: string }) {
+    studioInternal.set({ project, view: "overview" });
+  },
+  /** Close the active project. */
+  closeProject() {
+    studioInternal.set({ project: null, view: "overview" });
+  },
+  /** Set the active tab inside the studio. */
+  setView(view: StudioView) {
+    studioInternal.update((s) => ({ ...s, view }));
+  },
+  setViewFromString(value: string) {
+    if (isStudioView(value)) {
+      studioInternal.update((s) => ({ ...s, view: value }));
+    }
+  },
+  reset() {
+    studioInternal.set({ project: null, view: "overview" });
+  },
+};

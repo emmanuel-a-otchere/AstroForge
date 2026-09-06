@@ -7,11 +7,15 @@ use astroforge_core::fits;
 use astroforge_core::gallery::{GalleryItemUpdate, GalleryStore};
 use astroforge_core::ingest::{self, FrameInfo};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig, PipelineResult, Verbosity};
+use astroforge_core::domain_store::DomainStore;
+use astroforge_core::project::ProjectManager;
 use astroforge_core::recipe::Recipe;
 use astroforge_core::recipe_store::{RecipeStore, RecipeSummary, RecipeVersion};
 use astroforge_core::session::SessionStore;
 use serde::Serialize;
 use tauri::{Manager, State};
+
+mod commands_project;
 
 /// Tauri-managed state: holds the GalleryStore (rusqlite) behind a
 /// mutex so the IPC handlers can borrow it immutably across awaits.
@@ -387,6 +391,16 @@ fn recipe_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("recipes.sqlite"))
 }
 
+/// CR-02.6 — durable project root. Each child of this directory is one
+/// AstroForge Project (§18 self-contained layout).
+fn projects_root_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("failed to resolve app data dir: {e}"))?;
+    Ok(dir.join("projects"))
+}
+
 // ─ ─── Multi-format export (M7 T3) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 //
 // Writes the supplied FITS file to each requested format in parallel.
@@ -474,6 +488,21 @@ fn main() {
                 .map_err(|e| format!("failed to seed recipe store: {e}"))?;
             app.manage(RecipeState(Mutex::new(recipes)));
 
+            // CR-02.6 — durable project state (additive; no existing
+            // reader is touched). One global DomainStore for cross-project
+            // queries, plus a ProjectManager over the projects_root.
+            let projects_root = projects_root_path(&app.handle())?;
+            std::fs::create_dir_all(&projects_root)
+                .map_err(|e| format!("failed to create projects root: {e}"))?;
+            let project_db = projects_root.join("projects.db");
+            let project_store = DomainStore::new(&project_db)
+                .map_err(|e| format!("failed to open project store: {e}"))?;
+            app.manage(commands_project::ProjectState {
+                manager: Mutex::new(ProjectManager::new(projects_root.clone())),
+                store: Mutex::new(project_store),
+                projects_root,
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -496,6 +525,19 @@ fn main() {
             recipe_get_head,
             recipe_save,
             export_multi_format,
+            // CR-02.6 — project / pipeline-run commands (additive).
+            commands_project::project_list,
+            commands_project::project_get,
+            commands_project::project_create,
+            commands_project::project_open,
+            commands_project::project_rename,
+            commands_project::project_archive,
+            commands_project::project_delete,
+            commands_project::project_recover,
+            commands_project::pipeline_run_list,
+            commands_project::pipeline_run_get,
+            commands_project::pipeline_run_list_stages,
+            commands_project::pipeline_run_find_interrupted,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

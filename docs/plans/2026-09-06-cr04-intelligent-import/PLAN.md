@@ -56,8 +56,8 @@ Drift risk: any future change to one path risks breaking the other. The contract
 |-------|--------|-----------|
 | P0 | done | #249 |
 | P1 | done | #250 |
-| P2 | in_progress | this PR (`core::classification` — Light/Dark/Flat/Bias/Unknown/Unsupported/Invalid + confidence + evidence) |
-| P3 | pending | `core::bayer_intelligence` (wrap existing `bayer_detection.rs` with confidence + evidence + change-route) |
+| P2 | done | #251 |
+| P3 | in_progress | this PR (`core::bayer_intelligence` — Explicit metadata / Strong inferred / Weak inference / No Bayer pattern + confidence + evidence + route) |
 | P4 | pending | `core::target_detection` (FITS OBJECT, user metadata, filename patterns, evidence hierarchy) |
 | P5 | pending | `core::session_grouping` (target/date/instrument/filter/binning/exposure/directory relationships) |
 | P6 | pending | `core::capture_analysis` (deep-sky vs planetary/lunar routing, confidence + ambiguity flag) |

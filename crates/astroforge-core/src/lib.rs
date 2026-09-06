@@ -13,6 +13,7 @@ pub mod dialog_modes;
 pub mod dip;
 pub mod dng_parser;
 pub mod domain;
+pub mod domain_store;
 pub mod export;
 pub mod fits;
 pub mod gallery;

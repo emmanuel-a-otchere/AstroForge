@@ -2,6 +2,7 @@ pub mod artifact;
 pub mod background;
 pub mod bayer_detection;
 pub mod calibration;
+pub mod classification;
 pub mod color_calibration;
 pub mod cosmetic;
 pub mod crop;

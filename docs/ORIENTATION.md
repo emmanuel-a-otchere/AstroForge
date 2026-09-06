@@ -55,7 +55,19 @@ The Studio uses a three-zone workspace (left context / center image / right cont
 
 Cross-reference: `docs/CR-03-APPLICATION-SHELL-STUDIO.md` for the full specification; `docs/plans/2026-09-06-cr03-application-shell/PLAN.md` for the phased implementation plan.
 
-## The architectural direction (CR-01 + CR-02 + CR-03 together)
+### CR-04 — Intelligent Import, Session Understanding & Target Detection
+
+**Question:** *How does AstroForge understand what the user has given it?*
+
+Import is not a file picker. When the user drops a folder of raw telescope captures into a project, AstroForge scans it, identifies every file, extracts whatever metadata is available (FITS headers, EXIF, image dimensions), classifies each frame as Light / Dark / Flat / Bias / Unknown / Unsupported / Invalid, detects the Bayer pattern with explicit confidence + evidence, groups files into coherent Sessions belonging to a Target, determines whether the dataset is deep-sky or planetary/lunar, identifies narrowband acquisition groups, and produces a recommendation: the appropriate processing recipe for this dataset.
+
+Every inference carries **observation → evidence → confidence → decision**. Ambiguity triggers a user-confirmation prompt; AstroForge never silently routes an ambiguous dataset into an irreversible pipeline. Every user override becomes part of provenance.
+
+The intelligence hierarchy is: deterministic metadata first, deterministic image statistics second, AI third, user authority fourth (per ADR-04.5).
+
+Cross-reference: `docs/CR-04-INTELLIGENT-IMPORT.md` for the full specification; `docs/plans/2026-09-06-cr04-intelligent-import/PLAN.md` for the phased implementation plan (P0–P10).
+
+## The architectural direction (CR-01 + CR-02 + CR-03 + CR-04 together)
 
 ```
 SQLite (durable state)
@@ -81,7 +93,7 @@ The UI is a *projection* of persistent state, not the canonical source. This pre
 ## How the data flows
 
 1. User creates a Project (Application → Tauri `project_create` → `ProjectManager::create_project` → SQLite + filesystem layout).
-2. User imports a Session (CR-04 will own the intelligent ingest; the workspace shell ships in CR-03).
+2. User imports a Session (CR-04 owns the intelligent ingest: drop-folder scan → metadata extraction → frame classification → target/session grouping → deep-sky/planetary routing → narrowband detection → recommendation → user confirmation → persistent Session). The Import workspace shell ships in CR-03; the intelligence lives in CR-04.
 3. User starts a pipeline (Tauri `pipeline_run_list` etc.; the persistent DAG driver from CR-02.5 records every stage).
 4. User reviews image versions; selects one; exports (the existing `export_multi_format` IPC handles the export).
 5. User closes AstroForge. State is durable; on next launch, the user returns to the same project with the same context.
@@ -92,10 +104,14 @@ The UI is a *projection* of persistent state, not the canonical source. This pre
 - For the full product specification: `docs/specs/`
 - For the durable data model: `docs/CR-02-PROJECT-SESSION-ARTIFACT-ARCHITECTURE.md`
 - For the application shell + studio: `docs/CR-03-APPLICATION-SHELL-STUDIO.md`
-- For implementation history and decisions: `docs/plans/` (CR-02 and CR-03 plans live here)
+- For intelligent import + session understanding: `docs/CR-04-INTELLIGENT-IMPORT.md`
+- For implementation history and decisions: `docs/plans/` (CR-02, CR-03, and CR-04 plans live here)
 - For audit history: `docs/M*_AUDIT.md` (the milestone audits that established each tranche)
 - For closed phase work: `docs/PHASE_8_CLOSE.md`, `docs/PHASE_9_CLOSE.md`
+- For housekeeping follow-ups: `docs/HOUSEKEEPING.md` (wizard dead-code cleanup, ingest/import-scan consolidation; created in CR-04 P0)
 
 ## Roadmap note
 
-CR-04 — Intelligent Import, Session Understanding & Target Detection — is the next major CR after CR-03 lands. It takes the existing ingest, Bayer detection, frame classification, session grouping, and deep-sky/planetary routing logic and turns them into the first genuinely intelligent user experience: Drop Folder → Detect → Classify → Explain → Confirm → Build Session → Recommend Pipeline. That is the point where AstroForge begins to demonstrate its intelligence before a single processing stage is executed.
+CR-04 — Intelligent Import, Session Understanding & Target Detection — implementation is in flight (P0–P10 phase structure; see `docs/plans/2026-09-06-cr04-intelligent-import/PLAN.md`). It takes the existing ingest, Bayer detection, frame classification, session grouping, and deep-sky/planetary routing logic and turns them into the first genuinely intelligent user experience: Drop Folder → Detect → Classify → Explain → Confirm → Build Session → Recommend Pipeline. That is the point where AstroForge begins to demonstrate its intelligence before a single processing stage is executed.
+
+After CR-04 ships, the next CR is CR-05 — Intelligent Processing Workspace & Adaptive Pipeline Execution — which takes the Session Understanding + Recommendation produced by CR-04 and turns it into the actual image-processing experience (human-readable pipeline, live previews, execution controls, checkpoints, adaptive parameter recommendations, progress, recovery, and creation of Image Versions).

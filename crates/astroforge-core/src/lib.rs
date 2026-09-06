@@ -43,6 +43,7 @@ pub mod session;
 pub mod stacking;
 pub mod star_segmentation;
 pub mod stretching;
+pub mod target_detection;
 pub mod telemetry;
 
 pub fn version() -> &'static str {

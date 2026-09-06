@@ -185,5 +185,5 @@ Every PR must pass:
 | P3 | done | #244 |
 | P4a | done | #245 |
 | P4b | done | #246 |
-| P5  | in_progress | this PR (versions + AI recs + Compare picker + Export picker) |
-| P6  | pending | save indicator + error UX + keyboard |
+| P5  | done | #247 |
+| P6  | in_progress | this PR (save indicator + keyboard shortcuts + error UX) |

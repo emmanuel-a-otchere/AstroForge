@@ -15,6 +15,7 @@
     type StudioView,
   } from "../state/application";
   import { projectContext } from "../state/project-context";
+  import SaveIndicator from "./SaveIndicator.svelte";
   import type { Snippet } from "svelte";
 
   let {
@@ -67,10 +68,7 @@
         </div>
       </div>
       <div class="header-actions">
-        <span class="save-indicator" data-state="saved" title="All changes saved">
-          <span class="dot" aria-hidden="true"></span>
-          <span class="save-label font-body">Saved</span>
-        </span>
+        <SaveIndicator />
         <button
           type="button"
           class="close-cta font-display"
@@ -178,26 +176,7 @@
     gap: var(--sp-md);
   }
 
-  .save-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-xs);
-    padding: var(--sp-xs) var(--sp-sm);
-    border-radius: var(--radius-md);
-    background: var(--surface-container);
-  }
-
-  .save-indicator .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-full);
-    background: #6fbf73;
-  }
-
-  .save-label {
-    font-size: 0.8rem;
-    color: var(--on-surface-variant);
-  }
+  /* SaveIndicator handles its own styling (see SaveIndicator.svelte). */
 
   .close-cta {
     display: inline-flex;

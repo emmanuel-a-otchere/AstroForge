@@ -34,6 +34,8 @@
   import { projectContext } from "./state/project-context";
   import { workspaceState } from "./state/workspace";
   import { versionStore } from "./state/versions";
+  import { dialogOpen as dialogOpenStore, deleteDialogOpen as deleteDialogOpenStore } from "./state/dialog-state";
+  import { useKeyboardShortcuts } from "./state/keyboard-shortcuts";
   import { projectsStore } from "./state/projects";
   import type { ProjectAction } from "./state/projects";
   import type { ProjectSummary } from "./lib/astroforge-api";
@@ -47,6 +49,25 @@
   let deleteDialogOpen = $state(false);
   let deleteTarget: ProjectSummary | null = $state(null);
   let dialogError = $state<string | null>(null);
+
+  // Mirror the local dialog state into the cross-component stores
+  // so the keyboard-shortcut handler can read whether a dialog
+  // is currently open (and let the dialog handle its own Escape).
+  $effect(() => {
+    dialogOpenStore.set(dialogOpen);
+  });
+  $effect(() => {
+    deleteDialogOpenStore.set(deleteDialogOpen);
+  });
+
+  // Wire global keyboard shortcuts (Cmd/Ctrl+N/O/S/1-6, Escape).
+  useKeyboardShortcuts({
+    onCreateProject: () => {
+      dialogMode = "create";
+      dialogProject = null;
+      dialogOpen = true;
+    },
+  });
 
   function handleProjectAction(action: ProjectAction, project?: ProjectSummary) {
     dialogError = null;
@@ -127,26 +148,32 @@
 
 <ApplicationShell projectLabel={$studioViewport.project?.name ?? "No project open"}>
   {#if $studioViewport.project}
-    <StudioShell>
-      {#snippet overview()}
-        <OverviewWorkspace />
-      {/snippet}
-      {#snippet import_()}
-        <ImportWorkspace />
-      {/snippet}
-      {#snippet process()}
-        <ProcessWorkspace />
-      {/snippet}
-      {#snippet enhance()}
-        <EnhanceWorkspace />
-      {/snippet}
-      {#snippet compare()}
-        <CompareWorkspace />
-      {/snippet}
-      {#snippet export_()}
-        <ExportWorkspace />
-      {/snippet}
-    </StudioShell>
+  <StudioShell>
+    {#snippet overview()}
+      <OverviewWorkspace />
+    {/snippet}
+    {#snippet import_()}
+      <ImportWorkspace />
+    {/snippet}
+    {#snippet process()}
+      <ProcessWorkspace />
+    {/snippet}
+    {#snippet enhance()}
+      <EnhanceWorkspace />
+    {/snippet}
+    {#snippet compare()}
+      <CompareWorkspace />
+    {/snippet}
+    {#snippet export_()}
+      <ExportWorkspace />
+    {/snippet}
+  </StudioShell>
+  <div class="shortcut-strip" aria-label="Keyboard shortcuts">
+    <span class="shortcut-hint font-label">
+      <kbd>⌘N</kbd> New project · <kbd>⌘O</kbd> Open · <kbd>⌘S</kbd> Save ·
+      <kbd>⌘1</kbd>–<kbd>⌘6</kbd> Switch tab · <kbd>Esc</kbd> Close project
+    </span>
+  </div>
   {:else if $applicationNavTarget === "home"}
     <HomeScreen />
   {:else if $applicationNavTarget === "projects"}
@@ -235,5 +262,34 @@
     color: var(--on-surface-variant);
     font-size: 0.85rem;
     max-width: 60ch;
+  }
+
+  .shortcut-strip {
+    position: fixed;
+    bottom: var(--sp-sm);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: var(--sp-xs) var(--sp-md);
+    background: var(--surface-container-highest);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-full);
+    z-index: 50;
+    pointer-events: none;
+  }
+
+  .shortcut-hint {
+    font-size: 0.75rem;
+    color: var(--on-surface-variant);
+  }
+
+  .shortcut-strip kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--surface-container);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-data, monospace);
+    font-size: 0.7rem;
+    margin: 0 2px;
   }
 </style>

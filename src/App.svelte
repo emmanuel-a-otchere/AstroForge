@@ -28,8 +28,14 @@
   import DeleteProjectDialog from "./components/DeleteProjectDialog.svelte";
   import StudioShell from "./components/StudioShell.svelte";
   import OverviewWorkspace from "./components/OverviewWorkspace.svelte";
+  import ImportWorkspace from "./components/ImportWorkspace.svelte";
+  import ProcessWorkspace from "./components/ProcessWorkspace.svelte";
+  import EnhanceWorkspace from "./components/EnhanceWorkspace.svelte";
+  import CompareWorkspace from "./components/CompareWorkspace.svelte";
+  import ExportWorkspace from "./components/ExportWorkspace.svelte";
   import { applicationNavTarget, studioViewport } from "./state/application";
   import { projectContext } from "./state/project-context";
+  import { workspaceState } from "./state/workspace";
   import { projectsStore } from "./state/projects";
   import type { ProjectAction } from "./state/projects";
   import type { ProjectSummary } from "./lib/astroforge-api";
@@ -146,6 +152,7 @@
         project_id: project.project_id,
         name: project.name,
       });
+      void workspaceState.load(project);
       useNewShell = true;
       return;
     }
@@ -419,6 +426,21 @@
         <StudioShell>
           {#snippet overview()}
             <OverviewWorkspace />
+          {/snippet}
+          {#snippet import_()}
+            <ImportWorkspace />
+          {/snippet}
+          {#snippet process()}
+            <ProcessWorkspace />
+          {/snippet}
+          {#snippet enhance()}
+            <EnhanceWorkspace />
+          {/snippet}
+          {#snippet compare()}
+            <CompareWorkspace />
+          {/snippet}
+          {#snippet export_()}
+            <ExportWorkspace />
           {/snippet}
         </StudioShell>
       {:else if $applicationNavTarget === "home"}

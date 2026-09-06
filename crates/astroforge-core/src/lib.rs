@@ -57,6 +57,7 @@ pub mod stacking;
 pub mod stage_error;
 pub mod star_segmentation;
 pub mod stretching;
+pub mod target_detection;
 pub mod telemetry;
 
 pub fn version() -> &'static str {

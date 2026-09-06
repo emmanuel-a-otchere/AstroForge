@@ -23,7 +23,14 @@
   import AppShell from "./components/AppShell.svelte";
   import ApplicationShell from "./components/ApplicationShell.svelte";
   import HomeScreen from "./components/HomeScreen.svelte";
+  import ProjectsScreen from "./components/ProjectsScreen.svelte";
+  import ProjectDialog from "./components/ProjectDialog.svelte";
+  import DeleteProjectDialog from "./components/DeleteProjectDialog.svelte";
   import { applicationNavTarget } from "./state/application";
+  import { projectsStore } from "./state/projects";
+  import type { ProjectAction } from "./state/projects";
+  import type { ProjectSummary } from "./lib/astroforge-api";
+  import * as api from "./lib/astroforge-api";
   import ProfileManager from "./components/ProfileManager.svelte";
   import ModeA from "./components/ModeA.svelte";
   import ModeB from "./components/ModeB.svelte";
@@ -95,6 +102,86 @@
   // is undisturbed. Future phases replace this with the Studio shell
   // swap and remove the wizard fallback.
   let useNewShell = $state(false);
+
+  // CR-03 P2: project dialog state for create + delete gates.
+  let dialogOpen = $state(false);
+  let dialogMode = $state<"create" | "rename">("create");
+  let dialogProject: ProjectSummary | null = $state(null);
+  let deleteDialogOpen = $state(false);
+  let deleteTarget: ProjectSummary | null = $state(null);
+  let dialogError = $state<string | null>(null);
+
+  function handleProjectAction(action: ProjectAction, project?: ProjectSummary) {
+    dialogError = null;
+    if (action === "create") {
+      dialogMode = "create";
+      dialogProject = null;
+      dialogOpen = true;
+      return;
+    }
+    if (action === "rename" && project) {
+      dialogMode = "rename";
+      dialogProject = project;
+      dialogOpen = true;
+      return;
+    }
+    if (action === "delete" && project) {
+      deleteTarget = project;
+      deleteDialogOpen = true;
+      return;
+    }
+    if (action === "archive" && project) {
+      void api.projectArchive(slugFromName(project.name))
+        .then(() => projectsStore.refresh())
+        .catch((e) => (dialogError = e instanceof Error ? e.message : String(e)));
+      return;
+    }
+    if (action === "open" && project) {
+      // P3 wires the actual Studio entry. P2 navigates to Projects and
+      // shows the selected project as a confirmation.
+      applicationNavTarget.set("projects");
+      void projectsStore.refresh();
+      return;
+    }
+  }
+
+  async function handleDialogSubmit(value: { name: string }) {
+    try {
+      if (dialogMode === "create") {
+        await api.projectCreate({
+          name: value.name,
+          applicationVersion: "0.1.0",
+        });
+      } else if (dialogMode === "rename" && dialogProject) {
+        await api.projectRename(slugFromName(dialogProject.name), value.name);
+      }
+      dialogOpen = false;
+      await projectsStore.refresh();
+    } catch (e) {
+      dialogError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function handleDeleteConfirm() {
+    if (!deleteTarget) return;
+    const slug = slugFromName(deleteTarget.name);
+    try {
+      await api.projectDelete(slug);
+      deleteDialogOpen = false;
+      deleteTarget = null;
+      await projectsStore.refresh();
+    } catch (e) {
+      dialogError = e instanceof Error ? e.message : String(e);
+      deleteDialogOpen = false;
+    }
+  }
+
+  function slugFromName(name: string): string {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+  }
 
   let renderMode: "identity" | "mtf" | "scnr" | "difference" | "composite" =
     $state("mtf");
@@ -324,17 +411,19 @@
   <ApplicationShell projectLabel="No project open">
     {#if $applicationNavTarget === "home"}
       <HomeScreen />
+    {:else if $applicationNavTarget === "projects"}
+      <ProjectsScreen onAction={handleProjectAction} />
     {:else}
       <section class="placeholder-screen font-body" aria-live="polite">
-        <p>This screen is a placeholder in CR-03 P1.</p>
+        <p>This screen is a placeholder in CR-03 P2.</p>
         <p class="placeholder-hint">
-          Available application screens in P1: Home. Other screens (Projects,
-          Recipes, AI Models, Settings, Help) ship in later phases.
+          Available application screens in P2: Home, Projects. Other screens
+          (Recipes, AI Models, Settings, Help) ship in later phases.
         </p>
       </section>
     {/if}
-  </ApplicationShell>
-{:else}
+    </ApplicationShell>
+  {:else}
   <AppShell currentStage={currentStep} onOpenProfiles={() => (profileManagerOpen = true)}>
   {#if currentMode === "a"}
     <ModeA>
@@ -502,6 +591,38 @@
 
 {#if profileManagerOpen}
   <ProfileManager onClose={() => (profileManagerOpen = false)} />
+{/if}
+
+{#if dialogOpen}
+  <ProjectDialog
+    mode={dialogMode}
+    project={dialogProject ?? undefined}
+    open={dialogOpen}
+    onSubmit={handleDialogSubmit}
+    onCancel={() => {
+      dialogOpen = false;
+      dialogError = null;
+    }}
+  />
+{/if}
+
+{#if deleteDialogOpen && deleteTarget}
+  <DeleteProjectDialog
+    project={deleteTarget}
+    open={deleteDialogOpen}
+    onConfirm={handleDeleteConfirm}
+    onCancel={() => {
+      deleteDialogOpen = false;
+      deleteTarget = null;
+    }}
+  />
+{/if}
+
+{#if dialogError}
+  <div class="action-error" role="alert" transition:fly={{ y: 20, duration: 200 }}>
+    <span class="material-symbols-outlined" aria-hidden="true">error</span>
+    <span>{dialogError}</span>
+  </div>
 {/if}
 
 <style>

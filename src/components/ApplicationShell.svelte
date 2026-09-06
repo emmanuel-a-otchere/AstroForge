@@ -19,6 +19,7 @@
     applicationNavTarget,
     type ApplicationNavTarget,
   } from "../state/application";
+  import SaveIndicator from "./SaveIndicator.svelte";
 
   let {
     children,
@@ -55,14 +56,7 @@
       {projectLabel}
     </span>
     <span class="header-spacer"></span>
-    <span
-      class="save-indicator font-label"
-      aria-label="Save state"
-      data-state="saved"
-    >
-      <span class="dot" aria-hidden="true"></span>
-      Saved
-    </span>
+    <SaveIndicator />
   </header>
 
   <div class="app-body">
@@ -157,22 +151,7 @@
     flex: 1 1 auto;
   }
 
-  .save-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-xs);
-    font-size: 0.85rem;
-    color: var(--on-surface-variant);
-  }
-
-  .save-indicator .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-full);
-    background: #6fbf73; /* green — green for "Saved" per §24 */
-  }
-
-  /* Saving/failed indicators land in P6 alongside the §29 save state UX. */
+  /* SaveIndicator handles its own styling (see SaveIndicator.svelte). */
 
   .app-body {
     display: grid;

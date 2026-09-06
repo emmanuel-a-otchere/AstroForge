@@ -180,5 +180,6 @@ Every PR must pass:
 | Phase | Status | Reference |
 |-------|--------|-----------|
 | P0 | done | #241 |
-| P1 | in_progress | this PR |
-| P2–P6 | pending | — |
+| P1 | done | #242 |
+| P2 | in_progress | this PR |
+| P3–P6 | pending | — |

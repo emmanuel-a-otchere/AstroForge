@@ -10,7 +10,7 @@
 |---|---|---|---|
 | **R-1** | Hide Mode C/D from mode-switcher until real | **CLOSED (PR #219)** | `src/lib/layout-mode.ts:118-127` `availableOverrideModes()` returns `["a","b"]` for `processing` and `landing`; Mode C/D are no longer reachable via the UI. Defensive path sufficient for v1 — full Mode D `PreviewCanvas` wiring deferred to a future milestone. |
 | **R-2** | `sessionStore` as single source of truth for params; remove `previewParams` mirror | **CLOSED (PR-1, this tranche)** | Local `$state` mirror in `src/App.svelte` removed; `previewParams` now derives from the active node via `derivePreviewParams()` in `pipeline-store.ts`. `handleParamsChange` routes through `updateNodeParams()`; `ParameterSidebar` no longer writes the store directly. Undo/redo re-derives the preview from restored node params. |
-| **R-3** | `viewPreview(sessionId)` rehydrates `sessionStore` | **pending (MEDIUM)** | `src/App.svelte:108-115` accepts `_sessionId` but ignores it (`_` prefix signals unused). Only `setModeOverride("d")` fires. Mode D renders `$galleryStore[0]`, not the clicked session. |
+| **R-3** | `viewPreview(sessionId)` rehydrates `sessionStore` | **CLOSED (PR-2, preview-forward)** | Investigation found the audit's assumed mechanism absent: no per-session session JSON is persisted (checkpoints store artifact paths, not state) and `onViewPreview` already passes the *current* session id. Re-scoped with user approval to the preview-forward fix: `viewPreview` validates `previewStore` holds the clicked session's bitmap before navigating; Mode D renders a real `PreviewCanvas` keyed by that session id (replacing the placeholder gradient); on miss, a Q-2(b) error toast fires. Full pipeline-state rehydration deferred to the Mode D wiring milestone. |
 | **R-4** | `backToLanding()` resets pipeline state | **pending (MEDIUM)** | `src/App.svelte:237-245` clears wizard local state but never calls `initSession()`. `sessionStore.pipelineGraph` from the previous session survives until the user re-confirms a fresh classification. |
 | R-5 | Forge toggle in `AppShell` | pending | Out of scope for this tranche (orthogonal UI work). |
 | R-6 | Per-file errors in file list | pending (LOW) | Out of scope. |
@@ -56,24 +56,23 @@ This audit closes **R-2, R-3, R-4** — the user-facing correctness bugs from th
 
 **Edge case:** When `pipelineGraph.nodes` is empty (no session), `previewParams` should fall back to safe defaults. Use the existing `PIPELINE_STAGES` defaultParams as the fallback.
 
-### T2 — Gallery session rehydration (MEDIUM)
+### T2 — Gallery session rehydration (MEDIUM) — re-scoped during PR-2
 
 **Where:**
 - `src/App.svelte:108-115` `viewPreview(_sessionId)` ignores the param (note the `_` prefix) and only calls `setModeOverride("d")`.
-- `src/lib/gallery.ts` likely has `loadSession(sessionId)` or `getSession(sessionId)` already (M1 work). Confirm during PR.
+- ~~`src/lib/gallery.ts` likely has `loadSession(sessionId)` or `getSession(sessionId)`~~ — **confirmed absent during PR-2.** No per-session session JSON is persisted anywhere: checkpoints store artifact paths, and `deserializeSession()` has no producer. `onViewPreview` is wired only from `ManifestReview` and already passes the current session id.
 
 **Impact:**
-- Clicking a session card in `<ManifestReview>` silently lands on a different session's image (or no image if `galleryStore` is empty).
-- The most-recent `sessionStore` state from `initSession()` leaks across gallery clicks.
+- Clicking "View stretched preview" lands on Mode D's mock refinement UI (placeholder gradient, mock sliders) rather than the session's actual bitmap — even though `previewStore` holds the real preview for that session id.
+- Mode D picks `$galleryStore[0]` (first completed item) for its header — unrelated to the clicked session.
 
-**Fix:**
-- Look up the session metadata from the gallery store (likely `getSessionMetadata(sessionId)`).
-- Call `deserializeSession(json)` from `pipeline-store:546` — already implemented (M1-T4 work).
-- Then `setModeOverride("d")` to land on Mode D.
-- Add a brief loading state ("Loading session…") while deserialization completes.
-- If the session has no persisted JSON (e.g. ad-hoc viewer session), fall back to current behavior with a warning chip.
+**Fix (preview-forward direction, user-approved 2026-09-06):**
+- `viewPreview(sessionId)` validates `previewStore` holds a record matching the session id before navigating; `previewSessionId` is passed to Mode D.
+- Mode D renders a real `PreviewCanvas sessionId={previewSessionId}` in its preview pane (placeholder kept as fallback when no preview is in flight; preview-only card when the gallery is empty).
+- Q-2(b): on a miss, App shows an error toast ("No preview available for this session") instead of navigating.
+- Full pipeline-state rehydration (persisted SessionState JSON per session + `deserializeSession`) is deferred to the Mode D wiring milestone — it requires new Rust persistence and is out of tranche scope.
 
-**Edge case:** `sessionStore.sessionId` is the only stable identifier. After deserialization, the store's sessionId should match the gallery's sessionId; if not, surface a warning.
+**Edge case:** `previewStore` holds a single record (most recent run). Re-opening an older session's preview after a newer run reports "no preview" via the toast — honest behavior, no stale-image confusion.
 
 ### T3 — `backToLanding()` state reset (MEDIUM)
 

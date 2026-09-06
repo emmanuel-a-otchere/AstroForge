@@ -33,6 +33,7 @@
   import { previewStore } from "./lib/preview-store";
   import {
     initSession,
+    resetSession,
     sessionStore,
     activeStepIndex,
     applyProfileToPipeline,
@@ -258,6 +259,11 @@
     analysisResult = null;
     pendingProfileId = null;
     pendingSessionFlags = {};
+    previewSessionId = null;
+    // R-4: reset the pipeline store as well — previously the previous
+    // session's pipelineGraph, activeStepIndex, and sessionFlags
+    // survived until the user re-confirmed a fresh classification.
+    resetSession();
   }
 
   function backToSelectFiles() {

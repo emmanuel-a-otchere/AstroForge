@@ -43,6 +43,11 @@ pub struct PipelinePlanState {
     /// load source assets / write artifacts. None is allowed for
     /// tests; production sets this in `main.rs` setup.
     pub domain_store: Option<Arc<astroforge_core::domain_store::DomainStore>>,
+    /// CR-05 P3 slice 2 — recommendation engine. When present,
+    /// every successful stage dispatch that produced a metric
+    /// snapshot triggers `engine.evaluate()` and persists the
+    /// resulting rows. None means the engine is dormant (tests).
+    pub recommendation_engine: Option<Arc<astroforge_core::recommendation::RecommendationEngine>>,
 }
 
 /// CR-05 P1 — input to `create_pipeline_plan`. Mirrors the `astroforge-api.ts`
@@ -265,10 +270,11 @@ pub fn start_pipeline_run(
 ) -> Result<RunOutcomeResponse, String> {
     let runner = {
         let store = state.store.clone();
-        PipelineRunner::with_handlers(
+        PipelineRunner::with_engine(
             store,
             state.handler_registry.clone(),
             state.domain_store.clone(),
+            state.recommendation_engine.clone(),
         )
     };
     let cancel_handle = runner.cancel_handle();
@@ -329,10 +335,11 @@ pub fn resume_pipeline_run(
 ) -> Result<RunOutcomeResponse, String> {
     let runner = {
         let store = state.store.clone();
-        PipelineRunner::with_handlers(
+        PipelineRunner::with_engine(
             store,
             state.handler_registry.clone(),
             state.domain_store.clone(),
+            state.recommendation_engine.clone(),
         )
     };
     // Pause handle is re-registered so the UI can pause mid-resume.
@@ -472,4 +479,73 @@ fn store_err_to_string(e: PipelinePlanStoreError) -> String {
 #[allow(dead_code)]
 fn _touch_status() -> PipelinePlanStatus {
     PipelinePlanStatus::Draft
+}
+
+// ─── CR-05 P3 slice 2 — recommendation Tauri commands ───────────────
+
+/// CR-05 P3 slice 2 — DTO mirroring `Recommendation` for IPC. The
+/// JSON shape is stable so the Svelte side can serialise /
+/// deserialise without translation.
+#[derive(Debug, Serialize)]
+pub struct RecommendationDto {
+    pub id: String,
+    pub stage_execution_id: String,
+    pub rule_id: String,
+    pub stage_type: String,
+    pub decision_json: serde_json::Value,
+    pub confidence: f64,
+    pub evidence_summary: String,
+    pub created_at: String,
+}
+
+impl From<&astroforge_core::recommendation::Recommendation> for RecommendationDto {
+    fn from(r: &astroforge_core::recommendation::Recommendation) -> Self {
+        // Re-serialise the decision so the frontend gets
+        // `{stage_type, parameters, rationale}` in the standard
+        // shape rather than the `parameters` flattened.
+        let decision_json = serde_json::to_value(&r.decision)
+            .unwrap_or_else(|_| serde_json::json!({"error": "serialise"}));
+        Self {
+            id: r.id.clone(),
+            stage_execution_id: r.stage_execution_id.clone(),
+            rule_id: r.rule_id.clone(),
+            stage_type: r.decision.stage_type.clone(),
+            decision_json,
+            confidence: r.confidence,
+            evidence_summary: r.evidence_summary.clone(),
+            created_at: r.created_at.clone(),
+        }
+    }
+}
+
+/// CR-05 P3 slice 2 — list every recommendation emitted for a
+/// given stage execution. Returns an empty list when no
+/// recommendation has been generated (no metric snapshot yet, or
+/// snapshot was uniform / failed).
+#[tauri::command]
+pub fn get_recommendations_for_stage_execution(
+    state: State<'_, PipelinePlanState>,
+    stage_execution_id: String,
+) -> Result<Vec<RecommendationDto>, String> {
+    let store = state.store.lock().map_err(lock_err)?;
+    let recs = store
+        .list_recommendations_for_stage_execution(&stage_execution_id)
+        .map_err(store_err_to_string)?;
+    Ok(recs.iter().map(RecommendationDto::from).collect())
+}
+
+/// CR-05 P3 slice 2 — list every recommendation emitted for every
+/// stage execution in a plan. Used by the IntelligencePanel to
+/// show the full set of current picks without the UI needing to
+/// iterate over stage executions.
+#[tauri::command]
+pub fn get_recommendations_for_plan(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+) -> Result<Vec<RecommendationDto>, String> {
+    let store = state.store.lock().map_err(lock_err)?;
+    let recs = store
+        .list_recommendations_for_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    Ok(recs.iter().map(RecommendationDto::from).collect())
 }

@@ -167,6 +167,24 @@ CREATE INDEX IF NOT EXISTS idx_stage_executions_plan
     ON stage_executions(plan_id);
 CREATE INDEX IF NOT EXISTS idx_stage_executions_stage
     ON stage_executions(stage_id);
+
+-- CR-05 P3 slice 2 — recommendation engine output. One row per
+-- Recommendation emitted by the engine. Decisions are stored as
+-- JSON so future rule additions don't require schema changes.
+CREATE TABLE IF NOT EXISTS recommendations (
+    id TEXT PRIMARY KEY,
+    stage_execution_id TEXT NOT NULL,
+    rule_id TEXT NOT NULL,
+    stage_type TEXT NOT NULL,
+    decision_json TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    evidence_summary TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recommendations_stage_execution
+    ON recommendations(stage_execution_id);
+CREATE INDEX IF NOT EXISTS idx_recommendations_rule
+    ON recommendations(rule_id);
 "#;
 
 // CR-05 P3 slice 1 — schema migrations live in

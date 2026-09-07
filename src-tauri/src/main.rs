@@ -573,6 +573,13 @@ fn main() {
                     reg
                 }),
                 domain_store: Some(std::sync::Arc::new(domain_store)),
+                // CR-05 P3 slice 2 — recommendation engine wired in
+                // with the default rule set (stretch / denoise /
+                // background). Future slices register more rules
+                // before app boot.
+                recommendation_engine: Some(std::sync::Arc::new(
+                    astroforge_core::recommendation::RecommendationEngine::with_defaults(),
+                )),
             });
 
             Ok(())
@@ -622,6 +629,10 @@ fn main() {
             commands_pipeline_plan::pause_pipeline_run,
             commands_pipeline_plan::resume_pipeline_run,
             commands_pipeline_plan::pipeline_plan_list_resumable_for_project,
+            // CR-05 P3 slice 2 — recommendation engine commands
+            // (additive; IntelligencePanel will consume them).
+            commands_pipeline_plan::get_recommendations_for_stage_execution,
+            commands_pipeline_plan::get_recommendations_for_plan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

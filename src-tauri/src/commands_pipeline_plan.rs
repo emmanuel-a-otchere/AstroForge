@@ -16,7 +16,7 @@ use astroforge_core::domain::{ObjectType, PipelinePlan, PipelinePlanStatus};
 use astroforge_core::pipeline_plan::{
     builtin::deep_sky_osc_balanced,
     plan::{generate_plan as generate_plan_inner, GenerationContext, SessionUnderstanding},
-    runner::{CancelHandle, PipelineRunner, RunOutcome},
+    runner::{CancelHandle, PauseHandle, PipelineRunner, RunOutcome},
     AcquisitionMode, CalibrationAvailability,
 };
 use astroforge_core::pipeline_plans_store::{PipelinePlanStore, PipelinePlanStoreError};
@@ -27,9 +27,11 @@ use tauri::State;
 pub struct PipelinePlanState {
     pub store: Arc<Mutex<PipelinePlanStore>>,
     /// P2 slice 1 — per-plan cancel handles. Keyed by plan_id so the
-    /// UI can request cancel after start has returned. P2.5 adds
-    /// per-plan pause handles alongside.
+    /// UI can request cancel after start has returned.
     pub cancel_handles: Mutex<std::collections::HashMap<String, CancelHandle>>,
+    /// P2.5 — per-plan pause handles. Independent of cancel handles
+    /// (per Decision D-CR05-6).
+    pub pause_handles: Mutex<std::collections::HashMap<String, PauseHandle>>,
 }
 
 /// CR-05 P1 — input to `create_pipeline_plan`. Mirrors the `astroforge-api.ts`
@@ -239,6 +241,9 @@ pub fn pipeline_plan_get(
 
 /// CR-05 P2 slice 1 — start a plan. Returns the run outcome
 /// (`completed` / `cancelled` / `failed`).
+///
+/// P2.5 — also registers the pause handle so the UI can pause during
+/// execution.
 #[tauri::command]
 pub fn start_pipeline_run(
     state: State<'_, PipelinePlanState>,
@@ -249,25 +254,97 @@ pub fn start_pipeline_run(
         PipelineRunner::new(store)
     };
     let cancel_handle = runner.cancel_handle();
+    let pause_handle = runner.pause_handle();
 
-    // Register the cancel handle so the UI can flip it later.
+    // Register the handles so the UI can flip them later.
     {
-        let mut handles = state.cancel_handles.lock().map_err(lock_err)?;
-        handles.insert(plan_id.clone(), cancel_handle.clone());
+        let mut cancels = state.cancel_handles.lock().map_err(lock_err)?;
+        cancels.insert(plan_id.clone(), cancel_handle.clone());
+    }
+    {
+        let mut pauses = state.pause_handles.lock().map_err(lock_err)?;
+        pauses.insert(plan_id.clone(), pause_handle.clone());
     }
 
     let result = runner.start(&plan_id);
 
-    // Clean up the cancel handle now that the run has finished.
+    // Clean up both handles now that the run has finished.
     {
-        let mut handles = state.cancel_handles.lock().map_err(lock_err)?;
-        handles.remove(&plan_id);
+        let mut cancels = state.cancel_handles.lock().map_err(lock_err)?;
+        cancels.remove(&plan_id);
+    }
+    {
+        let mut pauses = state.pause_handles.lock().map_err(lock_err)?;
+        pauses.remove(&plan_id);
     }
 
     match result {
         Ok(outcome) => Ok(RunOutcomeResponse::from(outcome)),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// CR-05 P2.5 — pause a running plan. The runner notices the flag
+/// between stages, finishes the current stage, and exits with
+/// `RunOutcome::Paused`. Idempotent — returns `false` if no live run
+/// is in flight.
+#[tauri::command]
+pub fn pause_pipeline_run(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+) -> Result<bool, String> {
+    let mut handles = state.pause_handles.lock().map_err(lock_err)?;
+    if let Some(handle) = handles.get_mut(&plan_id) {
+        handle.pause();
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// CR-05 P2.5 — resume a paused plan. Walks stages from the first one
+/// without a completed `StageExecution` row; returns the run outcome.
+#[tauri::command]
+pub fn resume_pipeline_run(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+) -> Result<RunOutcomeResponse, String> {
+    let runner = {
+        let store = state.store.clone();
+        PipelineRunner::new(store)
+    };
+    // Pause handle is re-registered so the UI can pause mid-resume.
+    let pause_handle = runner.pause_handle();
+    {
+        let mut pauses = state.pause_handles.lock().map_err(lock_err)?;
+        pauses.insert(plan_id.clone(), pause_handle);
+    }
+
+    let result = runner.resume(&plan_id);
+
+    {
+        let mut pauses = state.pause_handles.lock().map_err(lock_err)?;
+        pauses.remove(&plan_id);
+    }
+
+    match result {
+        Ok(outcome) => Ok(RunOutcomeResponse::from(outcome)),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// CR-05 P2.5 — list resumable plans for a project (status = Paused).
+/// Used by `RecoveryBanner.svelte` to render the per-project banner on
+/// Project open.
+#[tauri::command]
+pub fn pipeline_plan_list_resumable_for_project(
+    state: State<'_, PipelinePlanState>,
+    project_id: String,
+) -> Result<Vec<astroforge_core::pipeline_plans_store::PipelinePlanSummary>, String> {
+    let store = state.store.lock().map_err(lock_err)?;
+    store
+        .list_resumable_plans_for_project(&project_id)
+        .map_err(store_err_to_string)
 }
 
 /// CR-05 P2 slice 1 — cancel a running plan. The runner notices the
@@ -289,13 +366,14 @@ pub fn cancel_pipeline_run(
     }
 }
 
-/// CR-05 P2 slice 1 — frontend-facing outcome shape.
+/// CR-05 P2.5 — frontend-facing outcome shape.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunOutcomeResponse {
     Completed,
     Cancelled,
     Failed,
+    Paused,
 }
 
 impl From<RunOutcome> for RunOutcomeResponse {
@@ -304,6 +382,7 @@ impl From<RunOutcome> for RunOutcomeResponse {
             RunOutcome::Completed => Self::Completed,
             RunOutcome::Cancelled => Self::Cancelled,
             RunOutcome::Failed => Self::Failed,
+            RunOutcome::Paused => Self::Paused,
         }
     }
 }

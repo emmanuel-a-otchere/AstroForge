@@ -20,9 +20,12 @@ import { derived, get, writable, type Readable } from "svelte/store";
 import {
   cancelPipelinePlan,
   createPipelinePlan,
+  pausePipelinePlan,
   pipelinePlanGet,
   pipelinePlanListForProject,
+  pipelinePlanListResumableForProject,
   pipelinePlanListStageExecutions,
+  resumePipelinePlan,
   startPipelinePlan,
   type CreatePipelinePlanRequest,
   type PipelinePlanDto,
@@ -50,6 +53,14 @@ export const lastError = writable<string | null>(null);
 export const runStatus = writable<"idle" | "running" | "error">("idle");
 export const lastRunOutcome = writable<RunOutcome | null>(null);
 export const stageExecutions = writable<Record<string, StageExecutionSummary[]>>({});
+
+// ─── CR-05 P2.5 — recovery stores ─────────────────────────────────────────
+//
+// `resumablePlans` lists every `Paused` plan for a project. The
+// RecoveryBanner subscribes; clicking "Resume" calls resumePipelineRun
+// and re-fetches both `activePlan` and `resumablePlans`.
+
+export const resumablePlans = writable<PipelinePlanSummary[]>([]);
 
 // Derived: a human-readable processing journey string per CR-05 §2.1
 // ("M31 — Deep Sky OSC / ✓ Calibrate / ✓ Debayer / …"). Components
@@ -205,6 +216,52 @@ export async function refreshStageExecutions(
     const execs = await pipelinePlanListStageExecutions(planId);
     stageExecutions.update((map) => ({ ...map, [planId]: execs }));
     return execs;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return [];
+  }
+}
+
+// ─── CR-05 P2.5 — pause / resume / refresh operations ─────────────────────
+
+export async function pausePipelineRun(planId: string): Promise<boolean> {
+  try {
+    return await pausePipelinePlan(planId);
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return false;
+  }
+}
+
+export async function resumePipelineRun(
+  planId: string,
+): Promise<RunOutcome | null> {
+  runStatus.set("running");
+  lastError.set(null);
+  lastRunOutcome.set(null);
+  try {
+    const outcome = await resumePipelinePlan(planId);
+    lastRunOutcome.set(outcome);
+    await refreshStageExecutions(planId);
+    return outcome;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    runStatus.set("error");
+    return null;
+  } finally {
+    if (get(runStatus) === "running") {
+      runStatus.set("idle");
+    }
+  }
+}
+
+export async function refreshResumablePlans(
+  projectId: string,
+): Promise<PipelinePlanSummary[]> {
+  try {
+    const list = await pipelinePlanListResumableForProject(projectId);
+    resumablePlans.set(list);
+    return list;
   } catch (err) {
     lastError.set(toMessage(err));
     return [];

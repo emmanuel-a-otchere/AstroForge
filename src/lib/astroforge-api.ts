@@ -117,3 +117,89 @@ export const pipelineRunListStages = (runId: string): Promise<StageRunSummary[]>
 
 export const pipelineRunFindInterrupted = (): Promise<PipelineRunSummary[]> =>
   invoke("pipeline_run_find_interrupted");
+
+// ─── CR-05 P1 — PipelinePlan commands (additive) ─────────────────────────
+//
+// PipelinePlan is the user-facing, human-readable processing workflow
+// (CR-05 §3, §26). The wizard `mvp_pipeline` path still owns execution
+// through P2; P1 lets the UI generate a Plan and render its stages. No
+// component is wired to these yet — this is the IPC surface only.
+
+export type PipelinePlanMode = "auto" | "guided" | "expert";
+
+export type PipelinePlanStatus =
+  | "draft"
+  | "ready"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface PipelineStageDto {
+  stage_id: string;
+  plan_id: string;
+  stage_type: string;
+  sequence: number;
+  label: string;
+  required: boolean;
+  enabled: boolean;
+  parameters_json: string | null;
+  produces_image_version: boolean;
+  undo_supported: boolean;
+}
+
+export interface PipelinePlanDto {
+  plan_id: string;
+  project_id: string;
+  session_id: string;
+  recipe_id: string | null;
+  mode: PipelinePlanMode;
+  target_type: string;
+  status: PipelinePlanStatus;
+  created_at: string;
+  schema_version: number;
+  stages: PipelineStageDto[];
+}
+
+export interface PipelinePlanSummary {
+  plan_id: string;
+  project_id: string;
+  session_id: string;
+  recipe_id: string | null;
+  mode: PipelinePlanMode;
+  target_type: string;
+  status: PipelinePlanStatus;
+  created_at: string;
+  schema_version: number;
+}
+
+export interface SessionUnderstandingPayload {
+  target_type: "deep_sky" | "planet" | "lunar" | "solar" | "unknown";
+  acquisition: "osc" | "mono" | "narrowband" | "planetary" | "lunar" | "solar";
+  light_frame_count: number;
+  calibration: "none" | "partial" | "full";
+  bayer_pattern: string | null;
+  narrowband_filters: string[];
+}
+
+export interface CreatePipelinePlanRequest {
+  project_id: string;
+  session_id: string;
+  recipe_id?: string | null;
+  mode?: PipelinePlanMode;
+  session_understanding?: SessionUnderstandingPayload | null;
+}
+
+export const createPipelinePlan = (
+  request: CreatePipelinePlanRequest,
+): Promise<PipelinePlanDto> =>
+  invoke("create_pipeline_plan", { request });
+
+export const pipelinePlanListForProject = (
+  projectId: string,
+): Promise<PipelinePlanSummary[]> =>
+  invoke("pipeline_plan_list_for_project", { projectId });
+
+export const pipelinePlanGet = (planId: string): Promise<PipelinePlanDto> =>
+  invoke("pipeline_plan_get", { planId });

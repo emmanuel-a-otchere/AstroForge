@@ -336,6 +336,115 @@ pub struct StageRunRecord {
     pub completed_at: Option<String>,
 }
 
+// ─── CR-05 §26: PipelinePlan / PipelineStage / StageExecution ───────────────
+//
+// Three new persistent entities introduced by CR-05 P1. They sit alongside
+// CR-02's PipelineRun + StageRunRecord: a Plan is the user-facing
+// human-readable processing recipe adapted for a specific Session
+// Understanding; a Stage is one node in that plan; a StageExecution is the
+// actual run of that stage (a 1:N expansion of StageRunRecord keyed by plan
+// rather than run, so the same plan can be branched — see CR-05 §17).
+//
+// P1 introduces the types and the plan generator. P2 adds the runner that
+// writes StageExecution rows. P3–P5 extend StageExecution with quality
+// metrics, preview runs, and resource usage.
+
+/// CR-05 §26 — a concrete, dataset-aware processing plan. Generated from a
+/// Session Understanding (CR-04) plus a Recipe (CR-02 §14); consumed by
+/// P2's stage runner and P5's Expert DAG view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelinePlan {
+    pub plan_id: String,
+    pub project_id: String,
+    pub session_id: String,
+    pub recipe_id: Option<String>,
+    /// "auto" | "guided" | "expert" (per Decision D-CR05-7). The engine
+    /// does not branch on mode; the UI renders more controls as mode
+    /// escalates. Stored for provenance and reproducibility.
+    pub mode: String,
+    /// ObjectType at plan-creation time, for provenance.
+    pub target_type: ObjectType,
+    pub status: PipelinePlanStatus,
+    /// Plan generation time (ISO-8601 UTC).
+    pub created_at: String,
+    /// Plan-level schema version; bump if PipelinePlan shape changes.
+    pub schema_version: u32,
+    pub stages: Vec<PipelineStage>,
+}
+
+/// CR-05 §26 — one node in a PipelinePlan. Sequence is 0-based, ascending.
+/// `required` vs `optional` is the canonical distinction a Guided-mode UI
+/// surfaces (per CR-05 §6.1 / §18).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineStage {
+    pub stage_id: String,
+    pub plan_id: String,
+    /// CR-05 §31 — `StageType` for the underlying engine call. Mirrors
+    /// `pipeline::StageType` in the legacy trait surface so the P2 runner
+    /// can dispatch without a translation table.
+    pub stage_type: String,
+    pub sequence: u32,
+    /// User-visible label (Calibrate / Stack / Color / Stretch / ...).
+    pub label: String,
+    pub required: bool,
+    pub enabled: bool,
+    pub parameters_json: Option<String>,
+    /// Per CR-05 §6 Zone A: this stage creates an Image Version when it
+    /// commits. Optional stages that produce no visible artifact can
+    /// leave this false.
+    pub produces_image_version: bool,
+    /// CR-05 §9 — whether the stage supports undo. Set false for stages
+    /// that mutate the source asset (e.g. ingest). Decision D-CR05-12:
+    /// this flag is the authoritative signal; wizard `undo()` becomes a
+    /// wrapper over the runner after P2.
+    pub undo_supported: bool,
+}
+
+/// CR-05 §26 — one execution of a PipelineStage. Distinct from CR-02
+/// `StageRunRecord` (which is keyed by PipelineRun). Keyed by plan_id +
+/// stage_id + attempt so the same plan can be branched and re-run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageExecution {
+    pub stage_execution_id: String,
+    pub plan_id: String,
+    pub stage_id: String,
+    /// 1-based attempt counter (per CR-05 §9 Re-run semantics).
+    pub attempt: u32,
+    pub status: String,
+    pub input_version_id: Option<String>,
+    pub output_artifact_id: Option<String>,
+    pub parameters_json: Option<String>,
+    /// SHA-256 of the canonicalised parameters; P4 PreviewRun uses this
+    /// to guarantee that a full-resolution run re-validates against the
+    /// same parameters that produced the preview (Decision D-CR05-5).
+    pub parameters_hash: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub resource_usage_json: Option<String>,
+    pub error_json: Option<String>,
+}
+
+/// CR-05 §26 — status of a PipelinePlan. Mirrors the §8 state vocabulary
+/// (Not started / Ready / Running / Completed / Paused / Needs attention /
+/// Failed / Recovering) but as a persisted, queryable enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelinePlanStatus {
+    Draft,
+    Ready,
+    Running,
+    Paused,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl Default for PipelinePlanStatus {
+    fn default() -> Self {
+        Self::Draft
+    }
+}
+
 /// CR-02 §15 — AI provenance. Deterministic is the default; stochastic /
 /// generative operations are explicitly labeled and seed-recorded.
 #[derive(Debug, Clone, Serialize, Deserialize)]

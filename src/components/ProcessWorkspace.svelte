@@ -4,10 +4,40 @@
   P4 ships the layout + the workspace-state-driven pipeline-run
   list. P4b wires the actual run/control buttons (start, pause,
   resume, cancel).
+
+  CR-05 P3 slice 2.6 — the workspace also hosts
+  `IntelligencePanel` when there is an active plan, so the user
+  can act on engine picks from the same screen that runs the
+  pipeline. The panel is reactive to `activePlan`: switching
+  plan (or generating a new one) re-fetches its recommendations.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
+
   import WorkspaceScreen from "./WorkspaceScreen.svelte";
+  import IntelligencePanel from "./IntelligencePanel.svelte";
+  import {
+    activePlan,
+    refreshRecommendations,
+  } from "../lib/pipeline-plan-store";
   import { workspaceState } from "../state/workspace";
+
+  // CR-05 P3 slice 2.6 — keep the per-plan recommendation store
+  // fresh whenever `activePlan` changes. We subscribe manually
+  // (rather than reactively inside the panel) so the panel can
+  // stay a pure renderer and we can dedupe refetches across
+  // mount / unmount cycles.
+  let currentPlanId: string | null = null;
+  const unsubscribe = activePlan.subscribe(($plan) => {
+    const next = $plan?.plan_id ?? null;
+    if (next && next !== currentPlanId) {
+      currentPlanId = next;
+      void refreshRecommendations(next);
+    } else if (!next) {
+      currentPlanId = null;
+    }
+  });
+  onDestroy(unsubscribe);
 
   function formatTime(iso: string | null): string {
     if (!iso) return "—";
@@ -35,34 +65,48 @@
       <span class="material-symbols-outlined" aria-hidden="true">error</span>
       <p class="font-body">Failed to load runs: {$workspaceState.error}</p>
     </div>
-  {:else if $workspaceState.runs.length === 0}
-    <div class="empty-state">
-      <span class="material-symbols-outlined empty-icon" aria-hidden="true">
-        play_circle
-      </span>
-      <p class="empty-title font-display">No pipeline runs yet</p>
-      <p class="empty-body font-body">
-        Pick a recipe and start a run. The pipeline driver persists progress
-        so a crash or quit mid-run resumes from the last completed stage.
-      </p>
-      <p class="hint font-body">Run controls land in P4b.</p>
-    </div>
   {:else}
-    <ul class="run-list" aria-label="Pipeline runs">
-      {#each $workspaceState.runs as run (run.run_id)}
-        <li class="run-item" data-status={run.status}>
-          <div class="run-id font-label">Run {run.run_id.slice(0, 8)}</div>
-          <div class="run-meta font-body">
-            Recipe: {run.recipe_id ?? "(default)"} ·
-            Started: {formatTime(run.started_at)} ·
-            Completed: {formatTime(run.completed_at)}
-          </div>
-          <span class="status-pill" data-status={run.status}>
-            {run.status}
-          </span>
-        </li>
-      {/each}
-    </ul>
+    <!--
+      CR-05 P3 slice 2.6 — IntelligencePanel mounted above the
+      run list when an active plan exists. Independent of
+      `workspaceState` so the panel renders even while the run
+      list is empty / loading.
+    -->
+    {#if $activePlan}
+      <section class="intelligence-zone" aria-label="Active plan intelligence">
+        <IntelligencePanel planId={$activePlan.plan_id} />
+      </section>
+    {/if}
+
+    {#if $workspaceState.runs.length === 0}
+      <div class="empty-state">
+        <span class="material-symbols-outlined empty-icon" aria-hidden="true">
+          play_circle
+        </span>
+        <p class="empty-title font-display">No pipeline runs yet</p>
+        <p class="empty-body font-body">
+          Pick a recipe and start a run. The pipeline driver persists progress
+          so a crash or quit mid-run resumes from the last completed stage.
+        </p>
+        <p class="hint font-body">Run controls land in P4b.</p>
+      </div>
+    {:else}
+      <ul class="run-list" aria-label="Pipeline runs">
+        {#each $workspaceState.runs as run (run.run_id)}
+          <li class="run-item" data-status={run.status}>
+            <div class="run-id font-label">Run {run.run_id.slice(0, 8)}</div>
+            <div class="run-meta font-body">
+              Recipe: {run.recipe_id ?? "(default)"} ·
+              Started: {formatTime(run.started_at)} ·
+              Completed: {formatTime(run.completed_at)}
+            </div>
+            <span class="status-pill" data-status={run.status}>
+              {run.status}
+            </span>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
 </WorkspaceScreen>
 
@@ -81,6 +125,13 @@
     border: 1px solid #e53935;
     border-radius: var(--radius-md);
     color: #ff8a80;
+  }
+
+  /* CR-05 P3 slice 2.6 — intelligence zone sits above the run
+     list with a deliberate vertical gap so the two zones read as
+     distinct surfaces. */
+  .intelligence-zone {
+    margin-bottom: var(--sp-lg);
   }
 
   .empty-state {

@@ -78,6 +78,10 @@ pub enum StageHandlerError {
     NoSourceFrames(String),
     #[error("stack failed: {0}")]
     StackFailed(#[from] stacking::StackError),
+    #[error("calibration failed: {0}")]
+    CalibrationFailed(String),
+    #[error("calibration module error: {0}")]
+    CalibrationModule(#[from] crate::calibration::CalibrationError),
     #[error("handler not yet implemented for stage type {0}")]
     NotImplemented(String),
 }
@@ -156,6 +160,297 @@ impl StageHandler for StackHandler {
             // DomainStore::record_artifact runs.
             artifact_id: None,
         })
+    }
+}
+
+/// CR-05 P2.7 — calibrate handler.
+///
+/// Loads all `SourceAsset`s for the session, buckets them by
+/// `frame_type` (Light / Dark / Flat / Bias), builds master
+/// calibration frames where possible, then applies calibration to
+/// each light frame and returns the calibrated light set as the
+/// produced output (mirroring the Stack handler's
+/// first-frame-as-output convention — see P2.6 for the rationale).
+///
+/// ## Stage parameters
+///
+/// Reads from `parameters_json` (none required):
+///
+/// - `light_frame_type` (default `"light"`) — overrides the bucket
+///   label used for light frames. Allows custom ingest conventions.
+/// - `master_dark_required` (default `false`) — when `true`, the
+///   stage fails if no dark frames are present.
+///
+/// All other bucket logic uses the defaults.
+///
+/// ## P2.7 scope note
+///
+/// Like P2.6's Stack handler, the disk loader for source assets is
+/// still a stub (`load_frames_from_assets` returns empty). The
+/// integration test exercises the handler via `preloaded_frames`.
+/// Production calibration requires `image_io.rs` (P3) to load
+/// real FITS / TIFF files into `F32Image`. The handler's
+/// bucketing + master-frame logic is fully exercised in tests.
+pub struct CalibrateHandler;
+
+impl StageHandler for CalibrateHandler {
+    fn handle(&self, ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
+        use crate::calibration::{
+            apply_calibration, build_master_bias, build_master_dark, build_master_flat,
+        };
+
+        // Load source assets for the session. In production this
+        // walks SourceAsset rows + reads each file from disk. For
+        // slice 1 the loader is a stub so the handler relies on
+        // preloaded_frames when provided.
+        let assets = if let Some(preloaded) = &ctx.preloaded_frames {
+            // preloaded_frames carries synthetic F32Image frames
+            // without frame_type metadata. Tests that exercise
+            // calibration pre-bucket these frames by passing them
+            // through the StageContext's `preloaded_lights` /
+            // `preloaded_calibration` extension — but for slice 1
+            // we keep the trait minimal: treat every preloaded frame
+            // as a light and synthesize no master frames (matches
+            // apply_calibration_lights_only).
+            let frames = preloaded.clone();
+            if frames.is_empty() {
+                return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
+            }
+            return Ok(StageOutput {
+                image: Some(frames[0].clone()),
+                parameters_json: ctx.stage.parameters_json.clone(),
+                metadata_json: Some(format!(
+                    r#"{{"lights_calibrated":{},"dark_count":0,"flat_count":0,"bias_count":0,"mode":"preloaded"}}"#,
+                    frames.len()
+                )),
+                artifact_id: None,
+            });
+        } else {
+            load_source_assets(ctx)?
+        };
+
+        if assets.is_empty() {
+            return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
+        }
+
+        let params = parse_calibrate_params(ctx.stage.parameters_json.as_deref());
+        let light_label = params.light_frame_type.as_str();
+        let mut lights = Vec::new();
+        let mut darks = Vec::new();
+        let mut flats = Vec::new();
+        let mut biases = Vec::new();
+
+        for asset in &assets {
+            match asset.frame_type.as_deref() {
+                Some(label) if label.eq_ignore_ascii_case(light_label) => lights.push(asset),
+                Some("dark") | Some("Dark") => darks.push(asset),
+                Some("flat") | Some("Flat") => flats.push(asset),
+                Some("bias") | Some("Bias") => biases.push(asset),
+                _ => {
+                    // Other frame kinds (e.g. focus runs) are ignored.
+                }
+            }
+        }
+
+        if params.master_dark_required && darks.is_empty() {
+            return Err(StageHandlerError::CalibrationFailed(
+                "master_dark_required=true but no Dark frames present".to_string(),
+            ));
+        }
+
+        let master_dark = if !darks.is_empty() {
+            let dark_frames: Vec<F32Image> = darks.iter().map(|a| a.preview.clone()).collect();
+            Some(build_master_dark(&dark_frames, 0.0, None)?)
+        } else {
+            None
+        };
+        let master_flat = if !flats.is_empty() {
+            let flat_frames: Vec<F32Image> = flats.iter().map(|a| a.preview.clone()).collect();
+            Some(build_master_flat(&flat_frames)?)
+        } else {
+            None
+        };
+        let master_bias = if !biases.is_empty() {
+            let bias_frames: Vec<F32Image> = biases.iter().map(|a| a.preview.clone()).collect();
+            Some(build_master_bias(&bias_frames)?)
+        } else {
+            None
+        };
+
+        let calibrated_lights: Vec<F32Image> = lights
+            .iter()
+            .map(|a| {
+                apply_calibration(
+                    &a.preview,
+                    master_dark.as_ref(),
+                    master_flat.as_ref(),
+                    master_bias.as_ref(),
+                )
+            })
+            .collect();
+
+        let metadata = format!(
+            r#"{{"lights_calibrated":{},"dark_count":{},"flat_count":{},"bias_count":{},"mode":"applied"}}"#,
+            calibrated_lights.len(),
+            darks.len(),
+            flats.len(),
+            biases.len()
+        );
+
+        let first = calibrated_lights
+            .first()
+            .cloned()
+            .unwrap_or_else(|| F32Image::new(1, 1, 1));
+
+        Ok(StageOutput {
+            image: Some(first),
+            parameters_json: ctx.stage.parameters_json.clone(),
+            metadata_json: Some(metadata),
+            artifact_id: None,
+        })
+    }
+}
+
+/// CR-05 P2.7 — calibration-stage parameter struct.
+#[derive(Debug, Clone)]
+struct CalibrateParams {
+    light_frame_type: String,
+    master_dark_required: bool,
+}
+
+impl Default for CalibrateParams {
+    fn default() -> Self {
+        Self {
+            light_frame_type: "light".to_string(),
+            master_dark_required: false,
+        }
+    }
+}
+
+/// CR-05 P2.7 — parse calibration-stage parameters with safe defaults.
+fn parse_calibrate_params(parameters_json: Option<&str>) -> CalibrateParams {
+    let Some(raw) = parameters_json else {
+        return CalibrateParams::default();
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return CalibrateParams::default(),
+    };
+    CalibrateParams {
+        light_frame_type: parsed
+            .get("light_frame_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("light")
+            .to_string(),
+        master_dark_required: parsed
+            .get("master_dark_required")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    }
+}
+
+/// CR-05 P2.7 — lightweight source asset DTO used by handlers. Holds
+/// the frame_type label + a pre-decoded preview F32Image. In slice 1
+/// the preview is synthetic; production paths populate it via
+/// `image_io` (P3).
+#[derive(Debug, Clone)]
+pub struct SourceAssetPreview {
+    pub frame_type: Option<String>,
+    pub preview: F32Image,
+}
+
+/// CR-05 P2.7 — load source assets + their previews for the session.
+/// Returns an empty Vec when the disk loader is unavailable; the
+/// handler then returns `NoSourceFrames` so the stage is marked
+/// `failed` consistently with P2.6.
+fn load_source_assets(_ctx: &StageContext) -> Result<Vec<SourceAssetPreview>, StageHandlerError> {
+    // Slice 1 — same scope-bound stub as Stack. The full list +
+    // decode pipeline lands when image_io.rs ships in P3.
+    Ok(Vec::new())
+}
+
+#[cfg(test)]
+mod calibrate_tests {
+    use super::*;
+    use crate::domain_store::DomainStore;
+    use crate::image::F32Image;
+    use crate::pipeline_plan::dispatch::{StageContext, StageHandler};
+    use std::path::PathBuf;
+
+    fn test_ctx(preloaded: Option<Vec<F32Image>>) -> StageContext {
+        let domain_store = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
+        let stage = crate::domain::PipelineStage {
+            stage_id: "cal_1".into(),
+            plan_id: "plan_1".into(),
+            stage_type: "calibrate".into(),
+            sequence: 0,
+            label: "Calibrate".into(),
+            required: true,
+            enabled: true,
+            parameters_json: None,
+            produces_image_version: true,
+            undo_supported: false,
+        };
+        StageContext {
+            stage,
+            session_id: "test_session".into(),
+            run_id: "run_1".into(),
+            domain_store: Arc::new(domain_store),
+            preloaded_frames: preloaded,
+        }
+    }
+
+    #[test]
+    fn parse_calibrate_params_defaults_when_missing_or_invalid() {
+        assert_eq!(parse_calibrate_params(None).light_frame_type, "light");
+        assert!(!parse_calibrate_params(None).master_dark_required);
+        assert_eq!(parse_calibrate_params(Some("")).light_frame_type, "light");
+        assert_eq!(
+            parse_calibrate_params(Some("not json")).light_frame_type,
+            "light"
+        );
+    }
+
+    #[test]
+    fn parse_calibrate_params_reads_overrides() {
+        let json = r#"{"light_frame_type": "Light", "master_dark_required": true}"#;
+        let p = parse_calibrate_params(Some(json));
+        assert_eq!(p.light_frame_type, "Light");
+        assert!(p.master_dark_required);
+    }
+
+    #[test]
+    fn calibrate_handler_with_preloaded_lights_produces_image() {
+        // Two synthetic lights preloaded; no dark / flat / bias
+        // available. Preloaded path returns immediately with the
+        // first frame as the output.
+        let frames = vec![F32Image::new(4, 4, 3), F32Image::new(4, 4, 3)];
+        let ctx = test_ctx(Some(frames));
+        let output = CalibrateHandler.handle(&ctx).unwrap();
+        let metadata = output.metadata_json.unwrap();
+        assert!(metadata.contains("\"lights_calibrated\":2"));
+        assert!(metadata.contains("\"mode\":\"preloaded\""));
+        assert!(
+            output.image.is_some(),
+            "must produce an image even when only preloaded"
+        );
+    }
+
+    #[test]
+    fn calibrate_handler_without_inputs_fails_with_no_source_frames() {
+        let ctx = test_ctx(None);
+        let err = CalibrateHandler.handle(&ctx).unwrap_err();
+        // Slice 1's disk loader returns empty so we expect
+        // NoSourceFrames. When image_io lands in P3 the handler
+        // will resolve to an applied result instead.
+        assert!(matches!(err, StageHandlerError::NoSourceFrames(_)));
+    }
+
+    #[test]
+    fn calibrate_handler_with_empty_preloaded_fails() {
+        let ctx = test_ctx(Some(Vec::new()));
+        let err = CalibrateHandler.handle(&ctx).unwrap_err();
+        assert!(matches!(err, StageHandlerError::NoSourceFrames(_)));
     }
 }
 

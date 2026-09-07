@@ -519,7 +519,8 @@ fn main() {
             let pipeline_plans_store = astroforge_core::pipeline_plans_store::PipelinePlanStore::new(&pipeline_plans_db)
                 .map_err(|e| format!("failed to open pipeline plans store: {e}"))?;
             app.manage(commands_pipeline_plan::PipelinePlanState {
-                store: Mutex::new(pipeline_plans_store),
+                store: std::sync::Arc::new(Mutex::new(pipeline_plans_store)),
+                cancel_handles: Mutex::new(std::collections::HashMap::new()),
             });
 
             Ok(())
@@ -561,6 +562,10 @@ fn main() {
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,
             commands_pipeline_plan::pipeline_plan_get,
+            // CR-05 P2 slice 1 — start + cancel commands (additive).
+            commands_pipeline_plan::start_pipeline_run,
+            commands_pipeline_plan::cancel_pipeline_run,
+            commands_pipeline_plan::pipeline_plan_list_stage_executions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

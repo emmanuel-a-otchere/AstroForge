@@ -20,10 +20,12 @@
 
 pub mod builtin;
 pub mod plan;
+pub mod runner;
 pub mod stage;
 
 pub use plan::{
     generate_plan, now_unix_ms, AcquisitionMode, CalibrationAvailability, GenerationContext,
     PlanError, PlanGenerator, SessionUnderstanding,
 };
+pub use runner::{CancelHandle, PipelineRunner, RunOutcome, RunnerError};
 pub use stage::{StageSpec, StageType};

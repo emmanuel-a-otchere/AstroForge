@@ -10,12 +10,13 @@
 //! produces `StageExecution` rows; P3 will wire the recommendation
 //! engine; P5 will expose the Expert-mode DAG view.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use astroforge_core::domain::{ObjectType, PipelinePlan, PipelinePlanStatus};
 use astroforge_core::pipeline_plan::{
     builtin::deep_sky_osc_balanced,
     plan::{generate_plan as generate_plan_inner, GenerationContext, SessionUnderstanding},
+    runner::{CancelHandle, PipelineRunner, RunOutcome},
     AcquisitionMode, CalibrationAvailability,
 };
 use astroforge_core::pipeline_plans_store::{PipelinePlanStore, PipelinePlanStoreError};
@@ -24,7 +25,11 @@ use tauri::State;
 
 /// CR-05 P1 — Tauri-managed state for the PipelinePlan store.
 pub struct PipelinePlanState {
-    pub store: Mutex<PipelinePlanStore>,
+    pub store: Arc<Mutex<PipelinePlanStore>>,
+    /// P2 slice 1 — per-plan cancel handles. Keyed by plan_id so the
+    /// UI can request cancel after start has returned. P2.5 adds
+    /// per-plan pause handles alongside.
+    pub cancel_handles: Mutex<std::collections::HashMap<String, CancelHandle>>,
 }
 
 /// CR-05 P1 — input to `create_pipeline_plan`. Mirrors the `astroforge-api.ts`
@@ -222,6 +227,127 @@ pub fn pipeline_plan_get(
     let store = state.store.lock().map_err(lock_err)?;
     let plan = store.load_plan(&plan_id).map_err(store_err_to_string)?;
     Ok(PipelinePlanDto::from(&plan))
+}
+
+// ─── CR-05 P2 slice 1 — start + cancel commands ────────────────────────────
+//
+// Pause / resume land in P2.5. The runner is synchronous and small:
+// start walks the plan's stages, persisting stage_executions, and
+// returns RunOutcome. cancel flips an atomic flag that the runner
+// checks between stages; the current stage completes (no half-written
+// artifacts) before the runner returns RunOutcome::Cancelled.
+
+/// CR-05 P2 slice 1 — start a plan. Returns the run outcome
+/// (`completed` / `cancelled` / `failed`).
+#[tauri::command]
+pub fn start_pipeline_run(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+) -> Result<RunOutcomeResponse, String> {
+    let runner = {
+        let store = state.store.clone();
+        PipelineRunner::new(store)
+    };
+    let cancel_handle = runner.cancel_handle();
+
+    // Register the cancel handle so the UI can flip it later.
+    {
+        let mut handles = state.cancel_handles.lock().map_err(lock_err)?;
+        handles.insert(plan_id.clone(), cancel_handle.clone());
+    }
+
+    let result = runner.start(&plan_id);
+
+    // Clean up the cancel handle now that the run has finished.
+    {
+        let mut handles = state.cancel_handles.lock().map_err(lock_err)?;
+        handles.remove(&plan_id);
+    }
+
+    match result {
+        Ok(outcome) => Ok(RunOutcomeResponse::from(outcome)),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// CR-05 P2 slice 1 — cancel a running plan. The runner notices the
+/// flag between stages, finishes the current stage, and exits with
+/// `RunOutcome::Cancelled`. Idempotent — calling cancel on a plan that
+/// has no live handle is a no-op (returns `false` so the UI can show
+/// "no run to cancel").
+#[tauri::command]
+pub fn cancel_pipeline_run(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+) -> Result<bool, String> {
+    let mut handles = state.cancel_handles.lock().map_err(lock_err)?;
+    if let Some(handle) = handles.get_mut(&plan_id) {
+        handle.cancel();
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// CR-05 P2 slice 1 — frontend-facing outcome shape.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunOutcomeResponse {
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+impl From<RunOutcome> for RunOutcomeResponse {
+    fn from(o: RunOutcome) -> Self {
+        match o {
+            RunOutcome::Completed => Self::Completed,
+            RunOutcome::Cancelled => Self::Cancelled,
+            RunOutcome::Failed => Self::Failed,
+        }
+    }
+}
+
+/// CR-05 P2 slice 1 — frontend-facing stage execution summary.
+#[derive(Debug, Serialize)]
+pub struct StageExecutionSummary {
+    pub stage_execution_id: String,
+    pub plan_id: String,
+    pub stage_id: String,
+    pub attempt: u32,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub error_json: Option<String>,
+}
+
+impl From<&astroforge_core::domain::StageExecution> for StageExecutionSummary {
+    fn from(e: &astroforge_core::domain::StageExecution) -> Self {
+        Self {
+            stage_execution_id: e.stage_execution_id.clone(),
+            plan_id: e.plan_id.clone(),
+            stage_id: e.stage_id.clone(),
+            attempt: e.attempt,
+            status: e.status.clone(),
+            started_at: e.started_at.clone(),
+            completed_at: e.completed_at.clone(),
+            error_json: e.error_json.clone(),
+        }
+    }
+}
+
+/// CR-05 P2 slice 1 — list stage executions for a plan. Used by the
+/// ProcessingControls component to render per-stage state.
+#[tauri::command]
+pub fn pipeline_plan_list_stage_executions(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+) -> Result<Vec<StageExecutionSummary>, String> {
+    let store = state.store.lock().map_err(lock_err)?;
+    let execs = store
+        .list_stage_executions_for_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    Ok(execs.iter().map(StageExecutionSummary::from).collect())
 }
 
 fn now_unix_ms() -> u64 {

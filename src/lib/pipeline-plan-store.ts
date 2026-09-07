@@ -18,14 +18,19 @@
 import { derived, get, writable, type Readable } from "svelte/store";
 
 import {
+  cancelPipelinePlan,
   createPipelinePlan,
   pipelinePlanGet,
   pipelinePlanListForProject,
+  pipelinePlanListStageExecutions,
+  startPipelinePlan,
   type CreatePipelinePlanRequest,
   type PipelinePlanDto,
   type PipelinePlanMode,
   type PipelinePlanSummary,
   type PipelineStageDto,
+  type RunOutcome,
+  type StageExecutionSummary,
 } from "./astroforge-api";
 
 // ─── Stores ─────────────────────────────────────────────────────────────────
@@ -34,6 +39,17 @@ export const activePlan = writable<PipelinePlanDto | null>(null);
 export const planList = writable<PipelinePlanSummary[]>([]);
 export const planGenerationStatus = writable<"idle" | "generating" | "error">("idle");
 export const lastError = writable<string | null>(null);
+
+// ─── CR-05 P2 slice 1 — execution stores ─────────────────────────────────
+//
+// `runStatus` reflects the runner's lifecycle (idle | running | error).
+// `stageExecutions` is a per-plan map keyed by plan_id so multiple
+// plans can be observed concurrently. P2.5 adds `paused` to the
+// `runStatus` enum and per-plan pause handles.
+
+export const runStatus = writable<"idle" | "running" | "error">("idle");
+export const lastRunOutcome = writable<RunOutcome | null>(null);
+export const stageExecutions = writable<Record<string, StageExecutionSummary[]>>({});
 
 // Derived: a human-readable processing journey string per CR-05 §2.1
 // ("M31 — Deep Sky OSC / ✓ Calibrate / ✓ Debayer / …"). Components
@@ -140,6 +156,58 @@ export async function loadPlan(planId: string): Promise<PipelinePlanDto | null> 
   } catch (err) {
     lastError.set(toMessage(err));
     return null;
+  }
+}
+
+// ─── CR-05 P2 slice 1 — execution operations ──────────────────────────────
+//
+// `startPipelineRun` blocks until the runner returns. P5's
+// resource-aware execution will introduce async / backgrounded
+// execution; slice 1 keeps the synchronous, immediately-resolving
+// shape so the UI can mirror the wizard's button-press UX.
+
+export async function startPipelineRun(
+  planId: string,
+): Promise<RunOutcome | null> {
+  runStatus.set("running");
+  lastError.set(null);
+  lastRunOutcome.set(null);
+  try {
+    const outcome = await startPipelinePlan(planId);
+    lastRunOutcome.set(outcome);
+    // Refresh per-stage state so the UI reflects the persisted rows.
+    await refreshStageExecutions(planId);
+    return outcome;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    runStatus.set("error");
+    return null;
+  } finally {
+    if (get(runStatus) === "running") {
+      runStatus.set("idle");
+    }
+  }
+}
+
+export async function cancelPipelineRun(planId: string): Promise<boolean> {
+  try {
+    return await cancelPipelinePlan(planId);
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return false;
+  }
+}
+
+export async function refreshStageExecutions(
+  planId: string,
+): Promise<StageExecutionSummary[]> {
+  try {
+    const execs = await pipelinePlanListStageExecutions(planId);
+    stageExecutions.update((map) => ({ ...map, [planId]: execs }));
+    return execs;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return [];
   }
 }
 

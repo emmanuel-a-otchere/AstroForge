@@ -203,3 +203,41 @@ export const pipelinePlanListForProject = (
 
 export const pipelinePlanGet = (planId: string): Promise<PipelinePlanDto> =>
   invoke("pipeline_plan_get", { planId });
+
+// ─── CR-05 P2 slice 1 — execution commands (additive) ─────────────────────
+//
+// Slice 1 ships start + cancel only. Pause / resume land in P2.5. The
+// runner is synchronous: `startPipelinePlan` returns once the run has
+// finished (or been cancelled). The frontend reflects per-stage state
+// via `pipelinePlanListStageExecutions`.
+
+export type RunOutcome = "completed" | "cancelled" | "failed";
+
+export type StageExecutionStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped";
+
+export interface StageExecutionSummary {
+  stage_execution_id: string;
+  plan_id: string;
+  stage_id: string;
+  attempt: number;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error_json: string | null;
+}
+
+export const startPipelinePlan = (planId: string): Promise<RunOutcome> =>
+  invoke("start_pipeline_run", { planId });
+
+export const cancelPipelinePlan = (planId: string): Promise<boolean> =>
+  invoke("cancel_pipeline_run", { planId });
+
+export const pipelinePlanListStageExecutions = (
+  planId: string,
+): Promise<StageExecutionSummary[]> =>
+  invoke("pipeline_plan_list_stage_executions", { planId });

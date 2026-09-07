@@ -9,7 +9,7 @@
 //! runner that writes StageExecution rows.
 
 use crate::db;
-use crate::domain::{PipelinePlan, PipelineStage};
+use crate::domain::{PipelinePlan, PipelineStage, StageExecution};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -203,6 +203,95 @@ impl PipelinePlanStore {
             .collect::<Result<_, _>>()?;
         Ok(rows)
     }
+
+    // ─── Stage execution CRUD (CR-05 P2 slice 1) ───────────────────────
+    //
+    // P2 ships start + cancel only; pause / resume land in P2.5. The
+    // runner calls `insert_stage_execution` when each stage begins and
+    // `update_stage_execution` when it completes / fails / is cancelled.
+
+    pub fn insert_stage_execution(
+        &self,
+        exec: &StageExecution,
+    ) -> Result<(), PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        conn.execute(
+            "INSERT OR REPLACE INTO stage_executions
+             (stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                exec.stage_execution_id,
+                exec.plan_id,
+                exec.stage_id,
+                exec.attempt,
+                exec.status,
+                exec.input_version_id,
+                exec.output_artifact_id,
+                exec.parameters_json,
+                exec.parameters_hash,
+                exec.started_at,
+                exec.completed_at,
+                exec.resource_usage_json,
+                exec.error_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_stage_execution(
+        &self,
+        exec: &StageExecution,
+    ) -> Result<(), PipelinePlanStoreError> {
+        // Same SQL as insert (PK collision triggers OR REPLACE).
+        self.insert_stage_execution(exec)
+    }
+
+    pub fn list_stage_executions_for_plan(
+        &self,
+        plan_id: &str,
+    ) -> Result<Vec<StageExecution>, PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json
+             FROM stage_executions WHERE plan_id = ?1 ORDER BY started_at ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![plan_id], |row| {
+                Ok(StageExecution {
+                    stage_execution_id: row.get(0)?,
+                    plan_id: row.get(1)?,
+                    stage_id: row.get(2)?,
+                    attempt: row.get(3)?,
+                    status: row.get(4)?,
+                    input_version_id: row.get(5)?,
+                    output_artifact_id: row.get(6)?,
+                    parameters_json: row.get(7)?,
+                    parameters_hash: row.get(8)?,
+                    started_at: row.get(9)?,
+                    completed_at: row.get(10)?,
+                    resource_usage_json: row.get(11)?,
+                    error_json: row.get(12)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// CR-05 P2 slice 1 — update the plan's status (Draft / Ready /
+    /// Running / Paused / Completed / Failed / Cancelled). The P2.5
+    /// pause/resume path will use this too.
+    pub fn update_plan_status(
+        &self,
+        plan_id: &str,
+        status: crate::domain::PipelinePlanStatus,
+    ) -> Result<(), PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        conn.execute(
+            "UPDATE pipeline_plans SET status = ?1 WHERE plan_id = ?2",
+            params![format!("{:?}", status).to_lowercase(), plan_id],
+        )?;
+        Ok(())
+    }
 }
 
 struct PlanRow {
@@ -337,5 +426,114 @@ mod tests {
         let loaded = store.load_plan("plan_x").unwrap();
         assert_eq!(loaded.stages.len(), 1);
         assert_eq!(loaded.stages[0].label, "Calibrate");
+    }
+
+    // ─── Stage execution CRUD tests (CR-05 P2 slice 1) ────────────────
+
+    use crate::domain::StageExecution;
+
+    fn synthetic_entry(plan_id: &str, stage_id: &str, status: &str) -> StageExecution {
+        StageExecution {
+            stage_execution_id: format!("exec_{}_{}", plan_id, stage_id),
+            plan_id: plan_id.into(),
+            stage_id: stage_id.into(),
+            attempt: 1,
+            status: status.into(),
+            input_version_id: None,
+            output_artifact_id: None,
+            parameters_json: None,
+            parameters_hash: None,
+            started_at: Some("unix_ms:100".into()),
+            completed_at: None,
+            resource_usage_json: None,
+            error_json: None,
+        }
+    }
+
+    #[test]
+    fn stage_execution_round_trip() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let exec = synthetic_entry("plan_1", "stage_calibrate", "running");
+        store.insert_stage_execution(&exec).unwrap();
+
+        let listed = store.list_stage_executions_for_plan("plan_1").unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].stage_id, "stage_calibrate");
+        assert_eq!(listed[0].status, "running");
+    }
+
+    #[test]
+    fn stage_execution_update_via_insert_or_replace() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let mut exec = synthetic_entry("plan_1", "stage_calibrate", "running");
+        store.insert_stage_execution(&exec).unwrap();
+        exec.status = "completed".into();
+        exec.completed_at = Some("unix_ms:200".into());
+        store.update_stage_execution(&exec).unwrap();
+
+        let listed = store.list_stage_executions_for_plan("plan_1").unwrap();
+        assert_eq!(listed.len(), 1, "update should not duplicate the row");
+        assert_eq!(listed[0].status, "completed");
+        assert_eq!(listed[0].completed_at.as_deref(), Some("unix_ms:200"));
+    }
+
+    #[test]
+    fn stage_execution_list_returns_in_started_order() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let mut a = synthetic_entry("plan_1", "stage_a", "completed");
+        a.started_at = Some("unix_ms:100".into());
+        let mut b = synthetic_entry("plan_1", "stage_b", "completed");
+        b.started_at = Some("unix_ms:200".into());
+        let mut c = synthetic_entry("plan_1", "stage_c", "completed");
+        c.started_at = Some("unix_ms:300".into());
+        store.insert_stage_execution(&b).unwrap();
+        store.insert_stage_execution(&c).unwrap();
+        store.insert_stage_execution(&a).unwrap();
+
+        let listed = store.list_stage_executions_for_plan("plan_1").unwrap();
+        assert_eq!(listed.len(), 3);
+        // Started-time ASC ordering: a (100), b (200), c (300).
+        assert_eq!(listed[0].stage_id, "stage_a");
+        assert_eq!(listed[1].stage_id, "stage_b");
+        assert_eq!(listed[2].stage_id, "stage_c");
+    }
+
+    #[test]
+    fn stage_executions_isolated_per_plan() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        store
+            .insert_stage_execution(&synthetic_entry("plan_1", "stage_a", "completed"))
+            .unwrap();
+        store
+            .insert_stage_execution(&synthetic_entry("plan_2", "stage_b", "completed"))
+            .unwrap();
+
+        let plan_1 = store.list_stage_executions_for_plan("plan_1").unwrap();
+        let plan_2 = store.list_stage_executions_for_plan("plan_2").unwrap();
+        assert_eq!(plan_1.len(), 1);
+        assert_eq!(plan_2.len(), 1);
+        assert_eq!(plan_1[0].plan_id, "plan_1");
+        assert_eq!(plan_2[0].plan_id, "plan_2");
+    }
+
+    #[test]
+    fn update_plan_status_changes_visible_status() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let (stages, target) = deep_sky_osc_balanced();
+        let mut plan = generate_plan(&ctx(), &stages, target).unwrap();
+        plan.plan_id = "plan_status".into();
+        store.insert_plan(&plan).unwrap();
+
+        store
+            .update_plan_status("plan_status", PipelinePlanStatus::Running)
+            .unwrap();
+        let loaded = store.load_plan("plan_status").unwrap();
+        assert_eq!(loaded.status, PipelinePlanStatus::Running);
+
+        store
+            .update_plan_status("plan_status", PipelinePlanStatus::Cancelled)
+            .unwrap();
+        let loaded = store.load_plan("plan_status").unwrap();
+        assert_eq!(loaded.status, PipelinePlanStatus::Cancelled);
     }
 }

@@ -18,13 +18,17 @@
 import { derived, get, writable, type Readable } from "svelte/store";
 
 import {
+  applyRecommendation,
   cancelPipelinePlan,
   createPipelinePlan,
+  dismissRecommendation,
   pausePipelinePlan,
   pipelinePlanGet,
   pipelinePlanListForProject,
+  pipelinePlanListRecommendations,
   pipelinePlanListResumableForProject,
   pipelinePlanListStageExecutions,
+  resetRecommendation,
   resumePipelinePlan,
   startPipelinePlan,
   type CreatePipelinePlanRequest,
@@ -32,6 +36,8 @@ import {
   type PipelinePlanMode,
   type PipelinePlanSummary,
   type PipelineStageDto,
+  type RecommendationDto,
+  type RecommendationUpdateResult,
   type RunOutcome,
   type StageExecutionSummary,
 } from "./astroforge-api";
@@ -61,6 +67,19 @@ export const stageExecutions = writable<Record<string, StageExecutionSummary[]>>
 // and re-fetches both `activePlan` and `resumablePlans`.
 
 export const resumablePlans = writable<PipelinePlanSummary[]>([]);
+
+// ─── CR-05 P3 slice 2 + 2.5 — recommendation stores ────────────────────
+//
+// `recommendationsForPlan` is a per-plan map keyed by plan_id so
+// multiple plans can be observed concurrently (matches the
+// `stageExecutions` shape). Each `RecommendationDto` carries the
+// user-decision lifecycle (`pending` | `applied` | `dismissed`)
+// introduced in slice 2.5; the IntelligencePanel consumes it
+// directly via the operation wrappers below.
+
+export const recommendationsForPlan = writable<Record<string, RecommendationDto[]>>(
+  {},
+);
 
 // Derived: a human-readable processing journey string per CR-05 §2.1
 // ("M31 — Deep Sky OSC / ✓ Calibrate / ✓ Debayer / …"). Components
@@ -265,6 +284,82 @@ export async function refreshResumablePlans(
   } catch (err) {
     lastError.set(toMessage(err));
     return [];
+  }
+}
+
+// ─── CR-05 P3 slice 2 + 2.5 — recommendation operations ────────────────
+//
+// `refreshRecommendations(planId)` fetches every recommendation for
+// the plan and stores it keyed by plan_id. `applyRecommendationFor`
+// / `dismissRecommendationFor` / `resetRecommendationFor` invoke
+// the matching Tauri command, then patch the in-memory row in
+// place so the panel reflects the new state without a re-fetch.
+
+export async function refreshRecommendations(
+  planId: string,
+): Promise<RecommendationDto[]> {
+  try {
+    const recs = await pipelinePlanListRecommendations(planId);
+    recommendationsForPlan.update((map) => ({ ...map, [planId]: recs }));
+    return recs;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return [];
+  }
+}
+
+/// CR-05 P3 slice 2.5 — merge a single updated recommendation
+/// into the per-plan map. Keeps the rest of the list untouched.
+function mergeRecommendation(
+  planId: string,
+  updated: RecommendationDto,
+): void {
+  recommendationsForPlan.update((map) => {
+    const list = map[planId] ?? [];
+    const next = list.map((r) => (r.id === updated.id ? updated : r));
+    return { ...map, [planId]: next };
+  });
+}
+
+export async function applyRecommendationFor(
+  planId: string,
+  recommendationId: string,
+): Promise<RecommendationUpdateResult | null> {
+  try {
+    const result = await applyRecommendation(recommendationId);
+    mergeRecommendation(planId, result.recommendation);
+    return result;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return null;
+  }
+}
+
+export async function dismissRecommendationFor(
+  planId: string,
+  recommendationId: string,
+): Promise<RecommendationUpdateResult | null> {
+  try {
+    const result = await dismissRecommendation(recommendationId);
+    mergeRecommendation(planId, result.recommendation);
+    return result;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return null;
+  }
+}
+
+export async function resetRecommendationFor(
+  planId: string,
+  recommendationId: string,
+): Promise<RecommendationUpdateResult | null> {
+  try {
+    const result = await resetRecommendation(recommendationId);
+    mergeRecommendation(planId, result.recommendation);
+    return result;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return null;
   }
 }
 

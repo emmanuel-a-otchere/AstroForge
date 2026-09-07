@@ -83,26 +83,60 @@ impl PipelinePlanStore {
         })
     }
 
-    /// CR-05 P3 slice 1 — apply schema migrations. SQLite does not
-    /// support `ADD COLUMN IF NOT EXISTS`, so each migration is
-    /// gated by a `pragma_table_info` check that returns true once
-    /// the column exists. Idempotent across re-opens.
+    /// CR-05 P3 slice 1 + slice 2.5 — apply schema migrations.
+    /// SQLite does not support `ADD COLUMN IF NOT EXISTS`, so each
+    /// migration is gated by a `pragma_table_info` check that
+    /// returns true once the column exists. Idempotent across
+    /// re-opens.
     fn run_migrations(conn: &Connection) -> Result<(), PipelinePlanStoreError> {
         // v2: add metric_snapshot_json to stage_executions.
-        let mut has_metric_col = false;
-        let mut stmt = conn.prepare(
-            "SELECT 1 FROM pragma_table_info('stage_executions') WHERE name = 'metric_snapshot_json'",
+        Self::add_column_if_missing(
+            conn,
+            "stage_executions",
+            "metric_snapshot_json",
+            "ALTER TABLE stage_executions ADD COLUMN metric_snapshot_json TEXT",
         )?;
-        let mut rows = stmt.query([])?;
-        if rows.next()?.is_some() {
-            has_metric_col = true;
-        }
+        // v3: P3 slice 2.5 — user decision persistence on recommendations.
+        Self::add_column_if_missing(
+            conn,
+            "recommendations",
+            "user_decision",
+            "ALTER TABLE recommendations ADD COLUMN user_decision TEXT",
+        )?;
+        Self::add_column_if_missing(
+            conn,
+            "recommendations",
+            "user_decision_at",
+            "ALTER TABLE recommendations ADD COLUMN user_decision_at TEXT",
+        )?;
+        Self::add_column_if_missing(
+            conn,
+            "recommendations",
+            "applied_stage_id",
+            "ALTER TABLE recommendations ADD COLUMN applied_stage_id TEXT",
+        )?;
+        Ok(())
+    }
+
+    /// CR-05 P3 slice 2.5 — add a column if `pragma_table_info`
+    /// doesn't already list it. `pragma_table_info` is a virtual
+    /// table so the column-name lookup is a regular `SELECT`.
+    fn add_column_if_missing(
+        conn: &Connection,
+        table: &str,
+        column: &str,
+        alter_sql: &str,
+    ) -> Result<(), PipelinePlanStoreError> {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT 1 FROM pragma_table_info('{}') WHERE name = ?1",
+            table
+        ))?;
+        let mut rows = stmt.query([column])?;
+        let present = rows.next()?.is_some();
         drop(rows);
         drop(stmt);
-        if !has_metric_col {
-            conn.execute_batch(
-                "ALTER TABLE stage_executions ADD COLUMN metric_snapshot_json TEXT",
-            )?;
+        if !present {
+            conn.execute_batch(alter_sql)?;
         }
         Ok(())
     }
@@ -399,7 +433,8 @@ impl PipelinePlanStore {
         let conn = self.conn.lock().expect("poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, stage_execution_id, rule_id, decision_json,
-                    confidence, evidence_summary, created_at
+                    confidence, evidence_summary, created_at,
+                    user_decision, user_decision_at, applied_stage_id
              FROM recommendations
              WHERE stage_execution_id = ?1
              ORDER BY rule_id ASC",
@@ -412,6 +447,9 @@ impl PipelinePlanStore {
             let confidence: f64 = row.get(4)?;
             let evidence_summary: String = row.get(5)?;
             let created_at: String = row.get(6)?;
+            let user_decision: Option<String> = row.get(7)?;
+            let user_decision_at: Option<String> = row.get(8)?;
+            let applied_stage_id: Option<String> = row.get(9)?;
             let decision: crate::recommendation::ProcessingDecision =
                 serde_json::from_str(&decision_json).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
@@ -428,6 +466,9 @@ impl PipelinePlanStore {
                 confidence,
                 evidence_summary,
                 created_at,
+                user_decision,
+                user_decision_at,
+                applied_stage_id,
             })
         })?;
         let mut out = Vec::new();
@@ -448,7 +489,8 @@ impl PipelinePlanStore {
         let conn = self.conn.lock().expect("poisoned");
         let mut stmt = conn.prepare(
             "SELECT r.id, r.stage_execution_id, r.rule_id, r.decision_json,
-                    r.confidence, r.evidence_summary, r.created_at
+                    r.confidence, r.evidence_summary, r.created_at,
+                    r.user_decision, r.user_decision_at, r.applied_stage_id
              FROM recommendations r
              JOIN stage_executions s ON s.stage_execution_id = r.stage_execution_id
              WHERE s.plan_id = ?1
@@ -462,6 +504,9 @@ impl PipelinePlanStore {
             let confidence: f64 = row.get(4)?;
             let evidence_summary: String = row.get(5)?;
             let created_at: String = row.get(6)?;
+            let user_decision: Option<String> = row.get(7)?;
+            let user_decision_at: Option<String> = row.get(8)?;
+            let applied_stage_id: Option<String> = row.get(9)?;
             let decision: crate::recommendation::ProcessingDecision =
                 serde_json::from_str(&decision_json).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
@@ -478,6 +523,9 @@ impl PipelinePlanStore {
                 confidence,
                 evidence_summary,
                 created_at,
+                user_decision,
+                user_decision_at,
+                applied_stage_id,
             })
         })?;
         let mut out = Vec::new();
@@ -485,6 +533,230 @@ impl PipelinePlanStore {
             out.push(row?);
         }
         Ok(out)
+    }
+
+    // ─── CR-05 P3 slice 2.5 — recommendation user-decision persistence ────
+
+    /// CR-05 P3 slice 2.5 — resolve a recommendation's
+    /// `stage_execution_id` by its primary key. Used by the
+    /// apply / dismiss / reset Tauri commands to reload the row
+    /// after the mutation commit.
+    pub fn stage_execution_id_for_recommendation(
+        &self,
+        recommendation_id: &str,
+    ) -> Result<String, PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        let stage_execution_id: String = conn
+            .query_row(
+                "SELECT stage_execution_id FROM recommendations WHERE id = ?1",
+                [recommendation_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    PipelinePlanStoreError::NotFound(recommendation_id.to_string())
+                }
+                other => PipelinePlanStoreError::Sqlite(other),
+            })?;
+        Ok(stage_execution_id)
+    }
+
+    /// CR-05 P3 slice 2.5 — resolve a recommendation row by id
+    /// (without committing to a user_decision value yet). Used by
+    /// the apply / dismiss / reset commands so they share the
+    /// row-resolution path.
+    fn get_recommendation_by_id_locked(
+        conn: &rusqlite::Connection,
+        id: &str,
+    ) -> Result<crate::recommendation::Recommendation, PipelinePlanStoreError> {
+        let mut stmt = conn.prepare(
+            "SELECT id, stage_execution_id, rule_id, decision_json,
+                    confidence, evidence_summary, created_at,
+                    user_decision, user_decision_at, applied_stage_id
+             FROM recommendations WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query([id])?;
+        let row = rows
+            .next()?
+            .ok_or_else(|| PipelinePlanStoreError::NotFound(id.to_string()))?;
+        let id: String = row.get(0)?;
+        let stage_execution_id: String = row.get(1)?;
+        let rule_id: String = row.get(2)?;
+        let decision_json: String = row.get(3)?;
+        let confidence: f64 = row.get(4)?;
+        let evidence_summary: String = row.get(5)?;
+        let created_at: String = row.get(6)?;
+        let user_decision: Option<String> = row.get(7)?;
+        let user_decision_at: Option<String> = row.get(8)?;
+        let applied_stage_id: Option<String> = row.get(9)?;
+        let decision: crate::recommendation::ProcessingDecision =
+            serde_json::from_str(&decision_json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+        Ok(crate::recommendation::Recommendation {
+            id,
+            stage_execution_id,
+            rule_id,
+            decision,
+            confidence,
+            evidence_summary,
+            created_at,
+            user_decision,
+            user_decision_at,
+            applied_stage_id,
+        })
+    }
+
+    /// CR-05 P3 slice 2.5 — find the next pipeline_stages row
+    /// after the stage execution that emitted this recommendation
+    /// (same plan, sequence > current stage's sequence). Returns
+    /// `(stage_id, existing_parameters_json)`. Returns `None` when
+    /// the recommendation is for the final stage in the plan.
+    fn next_stage_after_locked(
+        conn: &rusqlite::Connection,
+        stage_execution_id: &str,
+    ) -> Result<Option<(String, Option<String>)>, PipelinePlanStoreError> {
+        let mut stmt = conn.prepare(
+            "SELECT ps.stage_id, ps.parameters_json, ps.sequence, pse.plan_id
+             FROM stage_executions pse
+             JOIN pipeline_stages ps ON ps.plan_id = pse.plan_id AND ps.stage_id = pse.stage_id
+             WHERE pse.stage_execution_id = ?1",
+        )?;
+        let mut rows = stmt.query([stage_execution_id])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let current_stage_id: String = row.get(0)?;
+        let _current_params: Option<String> = row.get(1)?;
+        let current_sequence: i64 = row.get(2)?;
+        let plan_id: String = row.get(3)?;
+        drop(rows);
+        drop(stmt);
+        let mut next_stmt = conn.prepare(
+            "SELECT stage_id, parameters_json FROM pipeline_stages
+             WHERE plan_id = ?1 AND sequence > ?2
+             ORDER BY sequence ASC LIMIT 1",
+        )?;
+        let mut next_rows = next_stmt.query(params![plan_id, current_sequence])?;
+        if let Some(next_row) = next_rows.next()? {
+            let next_stage_id: String = next_row.get(0)?;
+            let next_params: Option<String> = next_row.get(1)?;
+            // Skip if the next stage is the one that produced this
+            // recommendation (defensive — sequence > current_sequence
+            // already excludes it, but keeps this branch explicit).
+            if next_stage_id == current_stage_id {
+                return Ok(None);
+            }
+            return Ok(Some((next_stage_id, next_params)));
+        }
+        Ok(None)
+    }
+
+    /// CR-05 P3 slice 2.5 — apply a recommendation: merge its
+    /// recommended `parameters` into the next stage's
+    /// `parameters_json` (preserving existing keys) and mark the
+    /// recommendation as `applied`. Idempotent — a second call
+    /// keeps the merged parameters and updates the timestamp.
+    ///
+    /// Returns `(recommendation_id, applied_stage_id)` so the
+    /// frontend can confirm which stage consumed the override.
+    pub fn apply_recommendation(
+        &self,
+        recommendation_id: &str,
+        timestamp: &str,
+    ) -> Result<(String, Option<String>), PipelinePlanStoreError> {
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction()?;
+        let rec = Self::get_recommendation_by_id_locked(&tx, recommendation_id)?;
+        let next = Self::next_stage_after_locked(&tx, &rec.stage_execution_id)?;
+        let applied_stage_id: Option<String> = if let Some((next_stage_id, existing)) = next {
+            let mut merged: serde_json::Map<String, serde_json::Value> = match existing {
+                Some(p) => serde_json::from_str(&p).unwrap_or_default(),
+                None => serde_json::Map::new(),
+            };
+            for (k, v) in rec.decision.parameters.iter() {
+                merged.insert(k.clone(), v.clone());
+            }
+            let merged_json = serde_json::to_string(&serde_json::Value::Object(merged))?;
+            tx.execute(
+                "UPDATE pipeline_stages SET parameters_json = ?1 WHERE stage_id = ?2",
+                params![merged_json, next_stage_id],
+            )?;
+            Some(next_stage_id)
+        } else {
+            None
+        };
+        tx.execute(
+            "UPDATE recommendations
+             SET user_decision = ?1, user_decision_at = ?2, applied_stage_id = ?3
+             WHERE id = ?4",
+            params![
+                crate::recommendation::user_decision::APPLIED,
+                timestamp,
+                applied_stage_id,
+                recommendation_id,
+            ],
+        )?;
+        tx.commit()?;
+        Ok((rec.id, applied_stage_id))
+    }
+
+    /// CR-05 P3 slice 2.5 — mark a recommendation as `dismissed`.
+    /// Does NOT mutate the next stage's `parameters_json`. If the
+    /// recommendation was previously applied, the previously-merged
+    /// parameters are NOT rolled back here — that is left to a
+    /// separate "reset" action (per CR-05 §27 the dismiss is a
+    /// soft signal, not a rollback). Idempotent.
+    pub fn dismiss_recommendation(
+        &self,
+        recommendation_id: &str,
+        timestamp: &str,
+    ) -> Result<String, PipelinePlanStoreError> {
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction()?;
+        let rec = Self::get_recommendation_by_id_locked(&tx, recommendation_id)?;
+        tx.execute(
+            "UPDATE recommendations
+             SET user_decision = ?1, user_decision_at = ?2
+             WHERE id = ?3",
+            params![
+                crate::recommendation::user_decision::DISMISSED,
+                timestamp,
+                recommendation_id,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(rec.id)
+    }
+
+    /// CR-05 P3 slice 2.5 — reset a recommendation to `pending`.
+    /// If it was previously applied, the previously-merged
+    /// parameters are NOT un-merged from the next stage (the merge
+    /// is a forward-only convenience; rolling back would require
+    /// a snapshot of the prior `parameters_json`). The
+    /// recommendation simply becomes available for re-apply.
+    pub fn reset_recommendation(
+        &self,
+        recommendation_id: &str,
+    ) -> Result<String, PipelinePlanStoreError> {
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction()?;
+        let rec = Self::get_recommendation_by_id_locked(&tx, recommendation_id)?;
+        tx.execute(
+            "UPDATE recommendations
+             SET user_decision = ?1, user_decision_at = NULL, applied_stage_id = NULL
+             WHERE id = ?2",
+            params![
+                crate::recommendation::user_decision::PENDING,
+                recommendation_id
+            ],
+        )?;
+        tx.commit()?;
+        Ok(rec.id)
     }
 
     /// CR-05 P2.5 — list plans in `Paused` status (recovery candidates).
@@ -815,6 +1087,9 @@ mod tests {
             confidence: 0.75,
             evidence_summary: "mean=0.1 stddev=0.05".into(),
             created_at: "unix_ms:1".into(),
+            user_decision: None,
+            user_decision_at: None,
+            applied_stage_id: None,
         }
     }
 
@@ -850,6 +1125,354 @@ mod tests {
         let mut sorted = rule_ids.clone();
         sorted.sort();
         assert_eq!(rule_ids, sorted);
+    }
+
+    // ─── CR-05 P3 slice 2.5 — apply / dismiss / reset tests ─────────────
+
+    /// CR-05 P3 slice 2.5 — build a plan with two stages and a
+    /// stage execution for the first stage, so apply() can resolve
+    /// a "next stage" to merge parameters into.
+    fn plan_with_two_stages_and_execution(
+        plan_id: &str,
+        stage_a_id: &str,
+        stage_b_id: &str,
+        exec_a_id: &str,
+        existing_b_params: Option<&str>,
+    ) -> (PipelinePlan, StageExecution, StageExecution) {
+        let plan = PipelinePlan {
+            plan_id: plan_id.into(),
+            project_id: "proj_1".into(),
+            session_id: "sess_1".into(),
+            recipe_id: None,
+            mode: "guided".into(),
+            target_type: ObjectType::DeepSky,
+            status: PipelinePlanStatus::Running,
+            created_at: "unix_ms:1".into(),
+            schema_version: 1,
+            stages: vec![
+                PipelineStage {
+                    stage_id: stage_a_id.into(),
+                    plan_id: plan_id.into(),
+                    sequence: 1,
+                    label: "stretch".into(),
+                    stage_type: "stretch".into(),
+                    required: true,
+                    enabled: true,
+                    produces_image_version: true,
+                    undo_supported: true,
+                    parameters_json: None,
+                },
+                PipelineStage {
+                    stage_id: stage_b_id.into(),
+                    plan_id: plan_id.into(),
+                    sequence: 2,
+                    label: "denoise".into(),
+                    stage_type: "denoise".into(),
+                    required: true,
+                    enabled: true,
+                    produces_image_version: true,
+                    undo_supported: true,
+                    parameters_json: existing_b_params.map(|s| s.to_string()),
+                },
+            ],
+        };
+        let exec_a = StageExecution {
+            stage_execution_id: exec_a_id.into(),
+            plan_id: plan_id.into(),
+            stage_id: stage_a_id.into(),
+            attempt: 1,
+            status: "completed".into(),
+            input_version_id: None,
+            output_artifact_id: None,
+            parameters_json: None,
+            parameters_hash: None,
+            started_at: Some("unix_ms:1".into()),
+            completed_at: Some("unix_ms:2".into()),
+            resource_usage_json: None,
+            error_json: None,
+            metric_snapshot_json: None,
+        };
+        let exec_b = StageExecution {
+            stage_execution_id: "exec_b".into(),
+            plan_id: plan_id.into(),
+            stage_id: stage_b_id.into(),
+            attempt: 1,
+            status: "pending".into(),
+            input_version_id: None,
+            output_artifact_id: None,
+            parameters_json: existing_b_params.map(|s| s.to_string()),
+            parameters_hash: None,
+            started_at: None,
+            completed_at: None,
+            resource_usage_json: None,
+            error_json: None,
+            metric_snapshot_json: None,
+        };
+        (plan, exec_a, exec_b)
+    }
+
+    fn rec_with_params(
+        exec_id: &str,
+        rule_id: &str,
+        stage_type: &str,
+        params: Vec<(String, serde_json::Value)>,
+    ) -> crate::recommendation::Recommendation {
+        let mut parameters = std::collections::BTreeMap::new();
+        for (k, v) in params {
+            parameters.insert(k, v);
+        }
+        crate::recommendation::Recommendation {
+            id: format!("rec_{}_{}", rule_id, exec_id),
+            stage_execution_id: exec_id.into(),
+            rule_id: rule_id.into(),
+            decision: crate::recommendation::ProcessingDecision {
+                stage_type: stage_type.into(),
+                parameters,
+                rationale: "test rationale".into(),
+            },
+            confidence: 0.75,
+            evidence_summary: "mean=0.1".into(),
+            created_at: "unix_ms:1".into(),
+            user_decision: None,
+            user_decision_at: None,
+            applied_stage_id: None,
+        }
+    }
+
+    #[test]
+    fn p325_apply_merges_parameters_into_next_stage_and_marks_applied() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let plan_id = "plan_p325_apply";
+        let stage_a = "stage_a";
+        let stage_b = "stage_b";
+        let exec_a = "exec_a";
+        let (plan, exec_a_row, _exec_b_row) =
+            plan_with_two_stages_and_execution(plan_id, stage_a, stage_b, exec_a, None);
+        store.insert_plan(&plan).unwrap();
+        store.insert_stage_execution(&exec_a_row).unwrap();
+
+        let rec = rec_with_params(
+            exec_a,
+            "stretch_v1",
+            "stretch",
+            vec![
+                ("shadows".to_string(), serde_json::json!(0.1)),
+                ("highlights".to_string(), serde_json::json!(0.9)),
+            ],
+        );
+        store.insert_recommendation(&rec).unwrap();
+
+        let (returned_id, applied_to) = store.apply_recommendation(&rec.id, "unix_ms:100").unwrap();
+        assert_eq!(returned_id, rec.id);
+        assert_eq!(applied_to.as_deref(), Some(stage_b));
+
+        // Recommendation row reflects the apply.
+        let listed = store
+            .list_recommendations_for_stage_execution(exec_a)
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            listed[0].user_decision.as_deref(),
+            Some(crate::recommendation::user_decision::APPLIED)
+        );
+        assert_eq!(listed[0].user_decision_at.as_deref(), Some("unix_ms:100"));
+        assert_eq!(listed[0].applied_stage_id.as_deref(), Some(stage_b));
+
+        // Plan reload shows merged parameters on stage_b.
+        let reloaded = store.load_plan(plan_id).unwrap();
+        let stage_b_row = reloaded
+            .stages
+            .iter()
+            .find(|s| s.stage_id == stage_b)
+            .unwrap();
+        let merged: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(stage_b_row.parameters_json.as_deref().unwrap()).unwrap();
+        assert_eq!(merged.get("shadows"), Some(&serde_json::json!(0.1)));
+        assert_eq!(merged.get("highlights"), Some(&serde_json::json!(0.9)));
+    }
+
+    #[test]
+    fn p325_apply_preserves_existing_parameters_on_next_stage() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let plan_id = "plan_p325_merge";
+        let stage_a = "stage_a";
+        let stage_b = "stage_b";
+        let exec_a = "exec_a";
+        let existing = r#"{"dip_amount":0.6, "blend_ratio":0.5}"#;
+        let (plan, exec_a_row, _exec_b_row) =
+            plan_with_two_stages_and_execution(plan_id, stage_a, stage_b, exec_a, Some(existing));
+        store.insert_plan(&plan).unwrap();
+        store.insert_stage_execution(&exec_a_row).unwrap();
+
+        let rec = rec_with_params(
+            exec_a,
+            "denoise_v1",
+            "denoise",
+            vec![("dip_amount".to_string(), serde_json::json!(0.3))],
+        );
+        store.insert_recommendation(&rec).unwrap();
+
+        store.apply_recommendation(&rec.id, "unix_ms:1").unwrap();
+        let reloaded = store.load_plan(plan_id).unwrap();
+        let stage_b_row = reloaded
+            .stages
+            .iter()
+            .find(|s| s.stage_id == stage_b)
+            .unwrap();
+        let merged: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(stage_b_row.parameters_json.as_deref().unwrap()).unwrap();
+        // Override applied.
+        assert_eq!(merged.get("dip_amount"), Some(&serde_json::json!(0.3)));
+        // Existing keys preserved.
+        assert_eq!(merged.get("blend_ratio"), Some(&serde_json::json!(0.5)));
+    }
+
+    #[test]
+    fn p325_apply_is_idempotent_and_updates_timestamp() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let plan_id = "plan_p325_idempotent";
+        let stage_a = "stage_a";
+        let stage_b = "stage_b";
+        let exec_a = "exec_a";
+        let (plan, exec_a_row, _) =
+            plan_with_two_stages_and_execution(plan_id, stage_a, stage_b, exec_a, None);
+        store.insert_plan(&plan).unwrap();
+        store.insert_stage_execution(&exec_a_row).unwrap();
+
+        let rec = rec_with_params(
+            exec_a,
+            "stretch_v1",
+            "stretch",
+            vec![("shadows".to_string(), serde_json::json!(0.1))],
+        );
+        store.insert_recommendation(&rec).unwrap();
+
+        store.apply_recommendation(&rec.id, "unix_ms:1").unwrap();
+        store.apply_recommendation(&rec.id, "unix_ms:2").unwrap();
+
+        let listed = store
+            .list_recommendations_for_stage_execution(exec_a)
+            .unwrap();
+        assert_eq!(
+            listed[0].user_decision_at.as_deref(),
+            Some("unix_ms:2"),
+            "second apply updates timestamp"
+        );
+    }
+
+    #[test]
+    fn p325_dismiss_marks_dismissed_without_touching_stage_params() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let plan_id = "plan_p325_dismiss";
+        let stage_a = "stage_a";
+        let stage_b = "stage_b";
+        let exec_a = "exec_a";
+        let (plan, exec_a_row, _) =
+            plan_with_two_stages_and_execution(plan_id, stage_a, stage_b, exec_a, None);
+        store.insert_plan(&plan).unwrap();
+        store.insert_stage_execution(&exec_a_row).unwrap();
+
+        let rec = rec_with_params(
+            exec_a,
+            "stretch_v1",
+            "stretch",
+            vec![("shadows".to_string(), serde_json::json!(0.1))],
+        );
+        store.insert_recommendation(&rec).unwrap();
+
+        store.dismiss_recommendation(&rec.id, "unix_ms:5").unwrap();
+        let listed = store
+            .list_recommendations_for_stage_execution(exec_a)
+            .unwrap();
+        assert_eq!(
+            listed[0].user_decision.as_deref(),
+            Some(crate::recommendation::user_decision::DISMISSED)
+        );
+        assert_eq!(listed[0].user_decision_at.as_deref(), Some("unix_ms:5"));
+
+        // Stage B parameters were not touched.
+        let reloaded = store.load_plan(plan_id).unwrap();
+        let stage_b_row = reloaded
+            .stages
+            .iter()
+            .find(|s| s.stage_id == stage_b)
+            .unwrap();
+        assert!(stage_b_row.parameters_json.is_none());
+    }
+
+    #[test]
+    fn p325_reset_clears_decision_and_timestamp() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let plan_id = "plan_p325_reset";
+        let stage_a = "stage_a";
+        let stage_b = "stage_b";
+        let exec_a = "exec_a";
+        let (plan, exec_a_row, _) =
+            plan_with_two_stages_and_execution(plan_id, stage_a, stage_b, exec_a, None);
+        store.insert_plan(&plan).unwrap();
+        store.insert_stage_execution(&exec_a_row).unwrap();
+
+        let rec = rec_with_params(
+            exec_a,
+            "stretch_v1",
+            "stretch",
+            vec![("shadows".to_string(), serde_json::json!(0.1))],
+        );
+        store.insert_recommendation(&rec).unwrap();
+        store.apply_recommendation(&rec.id, "unix_ms:7").unwrap();
+        store.reset_recommendation(&rec.id).unwrap();
+
+        let listed = store
+            .list_recommendations_for_stage_execution(exec_a)
+            .unwrap();
+        assert_eq!(
+            listed[0].user_decision.as_deref(),
+            Some(crate::recommendation::user_decision::PENDING)
+        );
+        assert!(listed[0].user_decision_at.is_none());
+        assert!(listed[0].applied_stage_id.is_none());
+    }
+
+    #[test]
+    fn p325_apply_returns_not_found_for_unknown_id() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let err = store
+            .apply_recommendation("rec_does_not_exist", "unix_ms:1")
+            .expect_err("expected error");
+        match err {
+            PipelinePlanStoreError::NotFound(id) => assert_eq!(id, "rec_does_not_exist"),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn p325_migration_is_idempotent_across_reopen() {
+        let dir = std::env::temp_dir().join(format!(
+            "astroforge_p325_migration_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pipeline_plans.sqlite");
+        // First open runs the migration.
+        {
+            let store = PipelinePlanStore::new(path.clone()).unwrap();
+            drop(store);
+        }
+        // Second open must succeed and skip already-applied migrations.
+        let store = PipelinePlanStore::new(path.clone()).unwrap();
+        // Inserting a recommendation must still work — the new
+        // columns are present.
+        let rec = rec_with_params(
+            "exec_a",
+            "stretch_v1",
+            "stretch",
+            vec![("shadows".to_string(), serde_json::json!(0.1))],
+        );
+        store.insert_recommendation(&rec).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn synthetic_pipeline_plan(plan_id: &str) -> PipelinePlan {

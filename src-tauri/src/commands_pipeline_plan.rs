@@ -496,6 +496,18 @@ pub struct RecommendationDto {
     pub confidence: f64,
     pub evidence_summary: String,
     pub created_at: String,
+    /// CR-05 P3 slice 2.5 — user decision lifecycle. One of
+    /// "pending" (engine-only), "applied" (parameters merged into
+    /// the next stage's `parameters_json`), or "dismissed" (user
+    /// rejected). `None` rows round-trip as `null` on the
+    /// frontend; the UI treats that as "pending".
+    pub user_decision: Option<String>,
+    /// CR-05 P3 slice 2.5 — `unix_ms:<ms>` timestamp of the user
+    /// decision, if any.
+    pub user_decision_at: Option<String>,
+    /// CR-05 P3 slice 2.5 — when applied, the `pipeline_stages.stage_id`
+    /// whose `parameters_json` was rewritten by the apply.
+    pub applied_stage_id: Option<String>,
 }
 
 impl From<&astroforge_core::recommendation::Recommendation> for RecommendationDto {
@@ -514,6 +526,9 @@ impl From<&astroforge_core::recommendation::Recommendation> for RecommendationDt
             confidence: r.confidence,
             evidence_summary: r.evidence_summary.clone(),
             created_at: r.created_at.clone(),
+            user_decision: r.user_decision.clone(),
+            user_decision_at: r.user_decision_at.clone(),
+            applied_stage_id: r.applied_stage_id.clone(),
         }
     }
 }
@@ -548,4 +563,137 @@ pub fn get_recommendations_for_plan(
         .list_recommendations_for_plan(&plan_id)
         .map_err(store_err_to_string)?;
     Ok(recs.iter().map(RecommendationDto::from).collect())
+}
+
+// ─── CR-05 P3 slice 2.5 — user-decision Tauri commands ───────────────────
+//
+// `apply_recommendation` merges the recommended `parameters` into
+// the next pipeline stage's `parameters_json` and marks the
+// recommendation as `applied`. `dismiss_recommendation` flips
+// the recommendation to `dismissed` without touching stage
+// parameters. `reset_recommendation` returns the row to
+// `pending` (lets the user re-apply).
+//
+// All three return the updated `RecommendationDto` so the
+// frontend can refresh the panel in one round-trip without a
+// second `get_recommendations_for_plan` call.
+
+/// CR-05 P3 slice 2.5 — response shape returned by apply /
+/// dismiss / reset. Same as the list endpoint, but a single
+/// object so the UI can update the row in place.
+#[derive(Debug, Serialize)]
+pub struct RecommendationUpdateResult {
+    pub recommendation: RecommendationDto,
+    pub applied_stage_id: Option<String>,
+}
+
+/// CR-05 P3 slice 2.5 — generate an `unix_ms:<ms>` timestamp in
+/// the same shape the rest of the pipeline uses.
+fn now_unix_ms_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("unix_ms:{}", ms)
+}
+
+#[tauri::command]
+pub fn apply_recommendation(
+    state: State<'_, PipelinePlanState>,
+    recommendation_id: String,
+) -> Result<RecommendationUpdateResult, String> {
+    let timestamp = now_unix_ms_string();
+    // Two passes: first mutate (commit), then re-read inside the
+    // same store so the returned row reflects the post-update
+    // state. The lock is released between passes so the
+    // re-read path stays simple.
+    let applied_stage_id = {
+        let store = state.store.lock().map_err(lock_err)?;
+        let (_id, applied_stage_id) = store
+            .apply_recommendation(&recommendation_id, &timestamp)
+            .map_err(store_err_to_string)?;
+        applied_stage_id
+    };
+    let store = state.store.lock().map_err(lock_err)?;
+    let stage_execution_id = stage_execution_id_for_recommendation(&store, &recommendation_id)
+        .map_err(store_err_to_string)?;
+    let recs = store
+        .list_recommendations_for_stage_execution(&stage_execution_id)
+        .map_err(store_err_to_string)?;
+    let rec = recs
+        .into_iter()
+        .find(|r| r.id == recommendation_id)
+        .ok_or_else(|| format!("recommendation vanished after apply: {recommendation_id}"))?;
+    Ok(RecommendationUpdateResult {
+        recommendation: RecommendationDto::from(&rec),
+        applied_stage_id,
+    })
+}
+
+/// CR-05 P3 slice 2.5 — resolve a recommendation id back to its
+/// `stage_execution_id` so the row can be reloaded after the
+/// apply / dismiss / reset pass. Done via a dedicated store
+/// method that takes a `&Connection` (it runs inside an
+/// already-locked connection).
+fn stage_execution_id_for_recommendation(
+    store: &astroforge_core::pipeline_plans_store::PipelinePlanStore,
+    recommendation_id: &str,
+) -> Result<String, astroforge_core::pipeline_plans_store::PipelinePlanStoreError> {
+    store.stage_execution_id_for_recommendation(recommendation_id)
+}
+
+#[tauri::command]
+pub fn dismiss_recommendation(
+    state: State<'_, PipelinePlanState>,
+    recommendation_id: String,
+) -> Result<RecommendationUpdateResult, String> {
+    let timestamp = now_unix_ms_string();
+    {
+        let store = state.store.lock().map_err(lock_err)?;
+        store
+            .dismiss_recommendation(&recommendation_id, &timestamp)
+            .map_err(store_err_to_string)?;
+    }
+    let store = state.store.lock().map_err(lock_err)?;
+    let stage_execution_id = stage_execution_id_for_recommendation(&store, &recommendation_id)
+        .map_err(store_err_to_string)?;
+    let recs = store
+        .list_recommendations_for_stage_execution(&stage_execution_id)
+        .map_err(store_err_to_string)?;
+    let rec = recs
+        .into_iter()
+        .find(|r| r.id == recommendation_id)
+        .ok_or_else(|| format!("recommendation vanished after dismiss: {recommendation_id}"))?;
+    Ok(RecommendationUpdateResult {
+        recommendation: RecommendationDto::from(&rec),
+        applied_stage_id: rec.applied_stage_id.clone(),
+    })
+}
+
+#[tauri::command]
+pub fn reset_recommendation(
+    state: State<'_, PipelinePlanState>,
+    recommendation_id: String,
+) -> Result<RecommendationUpdateResult, String> {
+    {
+        let store = state.store.lock().map_err(lock_err)?;
+        store
+            .reset_recommendation(&recommendation_id)
+            .map_err(store_err_to_string)?;
+    }
+    let store = state.store.lock().map_err(lock_err)?;
+    let stage_execution_id = stage_execution_id_for_recommendation(&store, &recommendation_id)
+        .map_err(store_err_to_string)?;
+    let recs = store
+        .list_recommendations_for_stage_execution(&stage_execution_id)
+        .map_err(store_err_to_string)?;
+    let rec = recs
+        .into_iter()
+        .find(|r| r.id == recommendation_id)
+        .ok_or_else(|| format!("recommendation vanished after reset: {recommendation_id}"))?;
+    Ok(RecommendationUpdateResult {
+        recommendation: RecommendationDto::from(&rec),
+        applied_stage_id: None,
+    })
 }

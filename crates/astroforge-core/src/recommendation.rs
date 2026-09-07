@@ -50,6 +50,16 @@ pub struct ProcessingDecision {
     pub rationale: String,
 }
 
+/// CR-05 P3 slice 2.5 — values for `Recommendation.user_decision`.
+/// Stored verbatim so the schema stays open to per-rule decisions
+/// (e.g. "applied_with_edit") later. The frontend displays the
+/// decision as a status pill on the recommendation card.
+pub mod user_decision {
+    pub const PENDING: &str = "pending";
+    pub const APPLIED: &str = "applied";
+    pub const DISMISSED: &str = "dismissed";
+}
+
 /// CR-05 P3 slice 2 — a recommendation persisted against a stage
 /// execution. One row per rule that fires for a given snapshot.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,6 +80,23 @@ pub struct Recommendation {
     pub evidence_summary: String,
     /// `unix_ms:<ms>` per CR-05 §15 (no calendar dates in Rust).
     pub created_at: String,
+    /// CR-05 P3 slice 2.5 — what the user did with this
+    /// recommendation. `"pending"` (default, engine-generated),
+    /// `"applied"` (parameters written to next stage), or
+    /// `"dismissed"` (user rejected). `None` rows are treated as
+    /// pending by the UI for backward compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_decision: Option<String>,
+    /// CR-05 P3 slice 2.5 — `unix_ms:<ms>` timestamp of the user
+    /// decision, when one exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_decision_at: Option<String>,
+    /// CR-05 P3 slice 2.5 — when the user applied this
+    /// recommendation, the `pipeline_stages.stage_id` whose
+    /// `parameters_json` was rewritten. Lets the runner / preview
+    /// (P4) trace which stage consumed the override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_stage_id: Option<String>,
 }
 
 // ─── Rule trait ──────────────────────────────────────────────────────────
@@ -302,6 +329,11 @@ impl RecommendationEngine {
                     confidence: 0.75,
                     evidence_summary: evidence_summary(snapshot),
                     created_at: format!("unix_ms:{}", crate::pipeline_plan::plan::now_unix_ms()),
+                    // CR-05 P3 slice 2.5 — engine output is always
+                    // pending until the user acts on it.
+                    user_decision: None,
+                    user_decision_at: None,
+                    applied_stage_id: None,
                 })
             })
             .collect();

@@ -260,3 +260,71 @@ export const pipelinePlanListResumableForProject = (
   projectId: string,
 ): Promise<PipelinePlanSummary[]> =>
   invoke("pipeline_plan_list_resumable_for_project", { projectId });
+
+// ─── CR-05 P3 slice 2 — recommendation engine API (additive) ────────────
+//
+// Mirrors the slice 2 / 2.5 Rust commands. `IntelligencePanel.svelte`
+// reads `pipelinePlanListRecommendations(planId)` on mount and on
+// every `refreshStageExecutions` tick. The mutation endpoints return
+// a `RecommendationUpdateResult` that the panel uses to update the
+// row in place.
+
+export type RecommendationUserDecision = "pending" | "applied" | "dismissed";
+
+export interface RecommendationDto {
+  id: string;
+  stage_execution_id: string;
+  rule_id: string;
+  stage_type: string;
+  decision_json: ProcessingDecisionJson;
+  confidence: number;
+  evidence_summary: string;
+  created_at: string;
+  // CR-05 P3 slice 2.5 — user-decision lifecycle. Null is treated
+  // as "pending" by the UI for backward compatibility.
+  user_decision: RecommendationUserDecision | null;
+  user_decision_at: string | null;
+  applied_stage_id: string | null;
+}
+
+export interface ProcessingDecisionJson {
+  stage_type: string;
+  parameters: Record<string, unknown>;
+  rationale: string;
+}
+
+export interface RecommendationUpdateResult {
+  recommendation: RecommendationDto;
+  applied_stage_id: string | null;
+}
+
+export const pipelinePlanListRecommendations = (
+  planId: string,
+): Promise<RecommendationDto[]> =>
+  invoke("get_recommendations_for_plan", { planId });
+
+export const pipelinePlanListRecommendationsForStageExecution = (
+  stageExecutionId: string,
+): Promise<RecommendationDto[]> =>
+  invoke("get_recommendations_for_stage_execution", {
+    stageExecutionId,
+  });
+
+// CR-05 P3 slice 2.5 — user-decision mutation commands. All three
+// return the updated `RecommendationUpdateResult` so the panel can
+// update the row in place.
+
+export const applyRecommendation = (
+  recommendationId: string,
+): Promise<RecommendationUpdateResult> =>
+  invoke("apply_recommendation", { recommendationId });
+
+export const dismissRecommendation = (
+  recommendationId: string,
+): Promise<RecommendationUpdateResult> =>
+  invoke("dismiss_recommendation", { recommendationId });
+
+export const resetRecommendation = (
+  recommendationId: string,
+): Promise<RecommendationUpdateResult> =>
+  invoke("reset_recommendation", { recommendationId });

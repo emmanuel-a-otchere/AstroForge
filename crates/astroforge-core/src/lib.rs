@@ -39,6 +39,7 @@ pub mod project;
 pub mod quality;
 pub mod recipe;
 pub mod recipe_store;
+pub mod recommendation;
 pub mod registration;
 pub mod seed;
 pub mod session;

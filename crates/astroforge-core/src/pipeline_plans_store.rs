@@ -51,6 +51,10 @@ pub enum PipelinePlanStoreError {
     Sqlite(#[from] rusqlite::Error),
     #[error("plan not found: {0}")]
     NotFound(String),
+    /// CR-05 P3 slice 2 — JSON serialisation failure inside the
+    /// store (e.g. `decision_json` for a Recommendation row).
+    #[error("json serialisation error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub struct PipelinePlanStore {
@@ -319,6 +323,168 @@ impl PipelinePlanStore {
             params![format!("{:?}", status).to_lowercase(), plan_id],
         )?;
         Ok(())
+    }
+
+    // ─── CR-05 P3 slice 2 — recommendation persistence ──────────────
+
+    /// CR-05 P3 slice 2 — insert or replace a `Recommendation` row.
+    /// The full `ProcessingDecision` is serialised into
+    /// `decision_json` so future rule additions don't require
+    /// schema changes.
+    pub fn insert_recommendation(
+        &self,
+        rec: &crate::recommendation::Recommendation,
+    ) -> Result<(), PipelinePlanStoreError> {
+        let decision_json = serde_json::to_string(&rec.decision)?;
+        let conn = self.conn.lock().expect("poisoned");
+        conn.execute(
+            "INSERT OR REPLACE INTO recommendations
+                (id, stage_execution_id, rule_id, stage_type,
+                 decision_json, confidence, evidence_summary, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                rec.id,
+                rec.stage_execution_id,
+                rec.rule_id,
+                rec.decision.stage_type,
+                decision_json,
+                rec.confidence,
+                rec.evidence_summary,
+                rec.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// CR-05 P3 slice 2 — bulk insert / replace recommendations.
+    /// Wraps `insert_recommendation` in a single SQLite transaction
+    /// so the engine's per-stage-evaluation output is atomic.
+    pub fn insert_recommendations(
+        &self,
+        recs: &[crate::recommendation::Recommendation],
+    ) -> Result<(), PipelinePlanStoreError> {
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR REPLACE INTO recommendations
+                    (id, stage_execution_id, rule_id, stage_type,
+                     decision_json, confidence, evidence_summary, created_at)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )?;
+            for rec in recs {
+                let decision_json = serde_json::to_string(&rec.decision)?;
+                stmt.execute(rusqlite::params![
+                    rec.id,
+                    rec.stage_execution_id,
+                    rec.rule_id,
+                    rec.decision.stage_type,
+                    decision_json,
+                    rec.confidence,
+                    rec.evidence_summary,
+                    rec.created_at,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// CR-05 P3 slice 2 — list recommendations emitted for a given
+    /// `stage_execution_id`. Returns rows in stable `rule_id` order.
+    pub fn list_recommendations_for_stage_execution(
+        &self,
+        stage_execution_id: &str,
+    ) -> Result<Vec<crate::recommendation::Recommendation>, PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, stage_execution_id, rule_id, decision_json,
+                    confidence, evidence_summary, created_at
+             FROM recommendations
+             WHERE stage_execution_id = ?1
+             ORDER BY rule_id ASC",
+        )?;
+        let rows = stmt.query_map([stage_execution_id], |row| {
+            let id: String = row.get(0)?;
+            let stage_execution_id: String = row.get(1)?;
+            let rule_id: String = row.get(2)?;
+            let decision_json: String = row.get(3)?;
+            let confidence: f64 = row.get(4)?;
+            let evidence_summary: String = row.get(5)?;
+            let created_at: String = row.get(6)?;
+            let decision: crate::recommendation::ProcessingDecision =
+                serde_json::from_str(&decision_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?;
+            Ok(crate::recommendation::Recommendation {
+                id,
+                stage_execution_id,
+                rule_id,
+                decision,
+                confidence,
+                evidence_summary,
+                created_at,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// CR-05 P3 slice 2 — list recommendations for every stage
+    /// execution that belongs to the given plan. Used by
+    /// `get_recommendation(plan_id)` (Tauri command) so the
+    /// IntelligencePanel can show all current picks at once.
+    pub fn list_recommendations_for_plan(
+        &self,
+        plan_id: &str,
+    ) -> Result<Vec<crate::recommendation::Recommendation>, PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT r.id, r.stage_execution_id, r.rule_id, r.decision_json,
+                    r.confidence, r.evidence_summary, r.created_at
+             FROM recommendations r
+             JOIN stage_executions s ON s.stage_execution_id = r.stage_execution_id
+             WHERE s.plan_id = ?1
+             ORDER BY r.rule_id ASC",
+        )?;
+        let rows = stmt.query_map([plan_id], |row| {
+            let id: String = row.get(0)?;
+            let stage_execution_id: String = row.get(1)?;
+            let rule_id: String = row.get(2)?;
+            let decision_json: String = row.get(3)?;
+            let confidence: f64 = row.get(4)?;
+            let evidence_summary: String = row.get(5)?;
+            let created_at: String = row.get(6)?;
+            let decision: crate::recommendation::ProcessingDecision =
+                serde_json::from_str(&decision_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?;
+            Ok(crate::recommendation::Recommendation {
+                id,
+                stage_execution_id,
+                rule_id,
+                decision,
+                confidence,
+                evidence_summary,
+                created_at,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     /// CR-05 P2.5 — list plans in `Paused` status (recovery candidates).
@@ -626,5 +792,142 @@ mod tests {
         assert_eq!(resumable.len(), 1);
         assert_eq!(resumable[0].plan_id, "plan_paused");
         assert_eq!(resumable[0].status, "paused");
+    }
+
+    // ─── CR-05 P3 slice 2 — recommendation persistence tests ─────────
+
+    fn synthetic_recommendation(
+        stage_execution_id: &str,
+        rule_id: &str,
+        stage_type: &str,
+    ) -> crate::recommendation::Recommendation {
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("k".into(), serde_json::json!(1));
+        crate::recommendation::Recommendation {
+            id: format!("rec_{}_{}", stage_execution_id, rule_id),
+            stage_execution_id: stage_execution_id.into(),
+            rule_id: rule_id.into(),
+            decision: crate::recommendation::ProcessingDecision {
+                stage_type: stage_type.into(),
+                parameters: params,
+                rationale: "test rationale".into(),
+            },
+            confidence: 0.75,
+            evidence_summary: "mean=0.1 stddev=0.05".into(),
+            created_at: "unix_ms:1".into(),
+        }
+    }
+
+    #[test]
+    fn recommendation_round_trip() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let rec = synthetic_recommendation("exec_1", "stretch_v1", "stretch");
+        store.insert_recommendation(&rec).unwrap();
+
+        let loaded = store
+            .list_recommendations_for_stage_execution("exec_1")
+            .unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0], rec);
+    }
+
+    #[test]
+    fn bulk_recommendation_insert_is_atomic() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let recs = vec![
+            synthetic_recommendation("exec_2", "stretch_v1", "stretch"),
+            synthetic_recommendation("exec_2", "denoise_v1", "denoise"),
+            synthetic_recommendation("exec_2", "background_v1", "background"),
+        ];
+        store.insert_recommendations(&recs).unwrap();
+
+        let loaded = store
+            .list_recommendations_for_stage_execution("exec_2")
+            .unwrap();
+        assert_eq!(loaded.len(), 3);
+        // Sort by rule_id (already done by store).
+        let rule_ids: Vec<&str> = loaded.iter().map(|r| r.rule_id.as_str()).collect();
+        let mut sorted = rule_ids.clone();
+        sorted.sort();
+        assert_eq!(rule_ids, sorted);
+    }
+
+    fn synthetic_pipeline_plan(plan_id: &str) -> PipelinePlan {
+        PipelinePlan {
+            plan_id: plan_id.into(),
+            project_id: "proj_1".into(),
+            session_id: "sess_1".into(),
+            recipe_id: None,
+            mode: "guided".into(),
+            target_type: crate::domain::ObjectType::DeepSky,
+            status: crate::domain::PipelinePlanStatus::Running,
+            created_at: "unix_ms:1".into(),
+            schema_version: 1,
+            stages: vec![PipelineStage {
+                stage_id: "stage_1".into(),
+                plan_id: plan_id.into(),
+                sequence: 1,
+                label: "stretch".into(),
+                stage_type: "stretch".into(),
+                required: true,
+                enabled: true,
+                produces_image_version: true,
+                undo_supported: true,
+                parameters_json: None,
+            }],
+        }
+    }
+
+    fn synthetic_stage_execution(plan_id: &str, stage_execution_id: &str) -> StageExecution {
+        StageExecution {
+            stage_execution_id: stage_execution_id.into(),
+            plan_id: plan_id.into(),
+            stage_id: stage_execution_id.into(),
+            attempt: 1,
+            status: "completed".into(),
+            input_version_id: None,
+            output_artifact_id: None,
+            parameters_json: None,
+            parameters_hash: None,
+            started_at: Some("unix_ms:1".into()),
+            completed_at: Some("unix_ms:2".into()),
+            resource_usage_json: None,
+            error_json: None,
+            metric_snapshot_json: None,
+        }
+    }
+
+    #[test]
+    fn list_recommendations_for_plan_filters_by_plan() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        store
+            .insert_plan(&synthetic_pipeline_plan("plan_x"))
+            .unwrap();
+        store
+            .insert_plan(&synthetic_pipeline_plan("plan_y"))
+            .unwrap();
+        store
+            .insert_stage_execution(&synthetic_stage_execution("plan_x", "exec_a"))
+            .unwrap();
+        store
+            .insert_stage_execution(&synthetic_stage_execution("plan_x", "exec_b"))
+            .unwrap();
+        store
+            .insert_stage_execution(&synthetic_stage_execution("plan_y", "exec_c"))
+            .unwrap();
+        store
+            .insert_recommendation(&synthetic_recommendation("exec_a", "stretch_v1", "stretch"))
+            .unwrap();
+        store
+            .insert_recommendation(&synthetic_recommendation("exec_b", "denoise_v1", "denoise"))
+            .unwrap();
+        store
+            .insert_recommendation(&synthetic_recommendation("exec_c", "stretch_v1", "stretch"))
+            .unwrap();
+
+        let plan_x_recs = store.list_recommendations_for_plan("plan_x").unwrap();
+        assert_eq!(plan_x_recs.len(), 2);
+        let plan_y_recs = store.list_recommendations_for_plan("plan_y").unwrap();
+        assert_eq!(plan_y_recs.len(), 1);
     }
 }

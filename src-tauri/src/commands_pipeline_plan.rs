@@ -15,7 +15,10 @@ use std::sync::{Arc, Mutex};
 use astroforge_core::domain::{ObjectType, PipelinePlan, PipelinePlanStatus};
 use astroforge_core::pipeline_plan::{
     builtin::deep_sky_osc_balanced,
-    dispatch::{CalibrateHandler, DenoiseHandler, HandlerRegistry, StackHandler, StretchHandler},
+    dispatch::{
+        BackgroundHandler, CalibrateHandler, DebayerHandler, DenoiseHandler, ExportHandler,
+        HandlerRegistry, RegisterHandler, StackHandler, StretchHandler,
+    },
     plan::{generate_plan as generate_plan_inner, GenerationContext, SessionUnderstanding},
     runner::{CancelHandle, PauseHandle, PipelineRunner, RunOutcome},
     AcquisitionMode, CalibrationAvailability,

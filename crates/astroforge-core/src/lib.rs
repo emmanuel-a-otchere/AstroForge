@@ -26,6 +26,8 @@ pub mod mvp_pipeline;
 pub mod narrowband;
 pub mod orchestrator;
 pub mod pipeline;
+pub mod pipeline_plan;
+pub mod pipeline_plans_store;
 pub mod pipeline_run;
 pub mod planetary_drizzle;
 pub mod planetary_features;

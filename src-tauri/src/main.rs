@@ -15,6 +15,7 @@ use astroforge_core::session::SessionStore;
 use serde::Serialize;
 use tauri::{Manager, State};
 
+mod commands_pipeline_plan;
 mod commands_project;
 
 /// Tauri-managed state: holds the GalleryStore (rusqlite) behind a
@@ -391,6 +392,16 @@ fn recipe_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("recipes.sqlite"))
 }
 
+/// CR-05 P1 (Decision D-CR05-2) — separate sqlite for PipelinePlan rows.
+/// Same per-store pattern as gallery / session / recipe.
+fn pipeline_plans_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("failed to resolve app data dir: {e}"))?;
+    Ok(dir.join("pipeline_plans.sqlite"))
+}
+
 /// CR-02.6 — durable project root. Each child of this directory is one
 /// AstroForge Project (§18 self-contained layout).
 fn projects_root_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -503,6 +514,14 @@ fn main() {
                 projects_root,
             });
 
+            // CR-05 P1 — PipelinePlan store (additive; P1 only).
+            let pipeline_plans_db = pipeline_plans_db_path(&app.handle())?;
+            let pipeline_plans_store = astroforge_core::pipeline_plans_store::PipelinePlanStore::new(&pipeline_plans_db)
+                .map_err(|e| format!("failed to open pipeline plans store: {e}"))?;
+            app.manage(commands_pipeline_plan::PipelinePlanState {
+                store: Mutex::new(pipeline_plans_store),
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -538,6 +557,10 @@ fn main() {
             commands_project::pipeline_run_get,
             commands_project::pipeline_run_list_stages,
             commands_project::pipeline_run_find_interrupted,
+            // CR-05 P1 — pipeline plan commands (additive).
+            commands_pipeline_plan::create_pipeline_plan,
+            commands_pipeline_plan::pipeline_plan_list_for_project,
+            commands_pipeline_plan::pipeline_plan_get,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

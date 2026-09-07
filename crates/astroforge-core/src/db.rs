@@ -102,6 +102,67 @@ CREATE INDEX IF NOT EXISTS idx_recipes_name_target
     ON recipes(name, target_type);
 "#;
 
+/// CR-05 P1 (Decision D-CR05-2) — PipelinePlan / PipelineStage /
+/// StageExecution tables. Migration is run when `PipelinePlanStore::new`
+/// opens the DB. Sits in its own store so the existing session / gallery /
+/// recipe stores evolve independently. Foreign-key to `sessions(id)` is
+/// implicit (no schema-level FK) to match the project's existing pattern
+/// of using logical IDs rather than enforcing FKs across stores.
+pub const PIPELINE_PLANS_SCHEMA_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS pipeline_plans (
+    plan_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    recipe_id TEXT,
+    mode TEXT NOT NULL DEFAULT 'auto',
+    target_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    schema_version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_stages (
+    stage_id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    stage_type TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    required INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    parameters_json TEXT,
+    produces_image_version INTEGER NOT NULL DEFAULT 1,
+    undo_supported INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(plan_id, sequence)
+);
+
+CREATE TABLE IF NOT EXISTS stage_executions (
+    stage_execution_id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    stage_id TEXT NOT NULL,
+    attempt INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'pending',
+    input_version_id TEXT,
+    output_artifact_id TEXT,
+    parameters_json TEXT,
+    parameters_hash TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    resource_usage_json TEXT,
+    error_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_plans_project
+    ON pipeline_plans(project_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_plans_session
+    ON pipeline_plans(session_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_stages_plan
+    ON pipeline_stages(plan_id);
+CREATE INDEX IF NOT EXISTS idx_stage_executions_plan
+    ON stage_executions(plan_id);
+CREATE INDEX IF NOT EXISTS idx_stage_executions_stage
+    ON stage_executions(stage_id);
+"#;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,

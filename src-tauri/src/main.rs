@@ -518,12 +518,33 @@ fn main() {
             let pipeline_plans_db = pipeline_plans_db_path(&app.handle())?;
             let pipeline_plans_store = astroforge_core::pipeline_plans_store::PipelinePlanStore::new(&pipeline_plans_db)
                 .map_err(|e| format!("failed to open pipeline plans store: {e}"))?;
+
+            // CR-05 P2.6 — the Stack handler needs the DomainStore so
+            // it can list source assets for the session. We open a
+            // second connection to the same projects.db file. SQLite
+            // serializes writes via file locking; the project
+            // commands are short-lived so contention is minimal.
+            let project_db_for_handler = projects_root.join("projects.db");
+            let domain_store = DomainStore::new(&project_db_for_handler)
+                .map_err(|e| format!("failed to open domain store for handler: {e}"))?;
+
             app.manage(commands_pipeline_plan::PipelinePlanState {
                 store: std::sync::Arc::new(Mutex::new(pipeline_plans_store)),
                 cancel_handles: Mutex::new(std::collections::HashMap::new()),
                 // CR-05 P2.5 — per-plan pause handles (independent of
                 // cancel handles; cancel wins if both flip).
                 pause_handles: Mutex::new(std::collections::HashMap::new()),
+                // CR-05 P2.6 — handler registry with the Stack handler
+                // + the shared DomainStore. P2.7+ add more handlers.
+                handler_registry: std::sync::Arc::new({
+                    let mut reg = astroforge_core::pipeline_plan::dispatch::HandlerRegistry::new();
+                    reg.insert(
+                        "stack",
+                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::StackHandler),
+                    );
+                    reg
+                }),
+                domain_store: Some(std::sync::Arc::new(domain_store)),
             });
 
             Ok(())

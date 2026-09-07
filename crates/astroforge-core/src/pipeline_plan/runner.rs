@@ -259,16 +259,47 @@ impl PipelineRunner {
                 completed_at: None,
                 resource_usage_json: None,
                 error_json: None,
+                // P3 slice 1 — populated by the runner after a
+                // successful stage dispatch (see below).
+                metric_snapshot_json: None,
             };
 
-            // Dispatch via the handler registry (P2.6); fall back to
-            // the no-op dispatcher for stages that don't have a
-            // registered handler.
+            // Dispatch via the handler registry (P2.6); fall back to the
+            // no-op dispatcher for stages that don't have a registered
+            // handler.
             let dispatch_result = dispatch_stage_via_registry(self, stage, &exec);
             match dispatch_result {
-                Ok(_output) => {
+                Ok(output) => {
                     exec.status = "completed".into();
                     exec.completed_at = Some(format!("unix_ms:{}", now_unix_ms()));
+                    // CR-05 P3 slice 1 — compute deterministic
+                    // quality metrics on the produced image and
+                    // persist them in metric_snapshot_json. Skipped
+                    // when the handler returned no image (no-op
+                    // stages, exporters, etc.) — those rows stay
+                    // metric-less so the recommendation engine (P3
+                    // slice 2) can distinguish "produced an image"
+                    // from "produced metadata only".
+                    if let Some(image) = output.image.as_ref() {
+                        let snapshot = crate::quality::compute_metrics(image);
+                        match snapshot.to_json() {
+                            Ok(json) => {
+                                exec.metric_snapshot_json = Some(json);
+                            }
+                            Err(e) => {
+                                // Metric persistence failure must
+                                // not fail the stage; log via the
+                                // error_json field instead. The
+                                // recommendation engine treats a
+                                // missing snapshot the same as a
+                                // failed snapshot.
+                                exec.error_json = Some(format!(
+                                    r#"{{"what_happened":"metric snapshot serialisation failed: {}"}}"#,
+                                    e
+                                ));
+                            }
+                        }
+                    }
                 }
                 Err(msg) => {
                     exec.status = "failed".into();
@@ -660,6 +691,7 @@ mod tests {
                 completed_at: Some("unix_ms:2".into()),
                 resource_usage_json: None,
                 error_json: None,
+                metric_snapshot_json: None,
             };
             store.insert_stage_execution(&exec).unwrap();
         }
@@ -692,6 +724,94 @@ mod tests {
         let runner = PipelineRunner::new(store);
         let err = runner.resume("nope").unwrap_err();
         assert!(matches!(err, RunnerError::PlanNotFound(_)));
+    }
+
+    // ─── CR-05 P3 slice 1 — metric snapshot persistence ────────────────
+
+    #[test]
+    fn metric_snapshot_column_persists_in_stage_executions() {
+        // Direct schema-level verification: insert a row with a
+        // populated metric_snapshot_json, read it back, and check
+        // the JSON parses to a sensible QualityMetricSnapshot.
+        use crate::domain::StageExecution;
+        use crate::image::F32Image;
+        use crate::quality::compute_metrics;
+
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let plan_id = plan_in_store(&store);
+
+        // Compute a real snapshot on a synthetic 4x4 image.
+        let img = F32Image::new(4, 4, 3);
+        let snap = compute_metrics(&img);
+        let json = snap.to_json().unwrap();
+
+        let exec = StageExecution {
+            stage_execution_id: "exec_metric_test".into(),
+            plan_id: plan_id.clone(),
+            stage_id: "synthetic".into(),
+            attempt: 1,
+            status: "completed".into(),
+            input_version_id: None,
+            output_artifact_id: None,
+            parameters_json: None,
+            parameters_hash: None,
+            started_at: Some("unix_ms:1".into()),
+            completed_at: Some("unix_ms:2".into()),
+            resource_usage_json: None,
+            error_json: None,
+            metric_snapshot_json: Some(json.clone()),
+        };
+        store.insert_stage_execution(&exec).unwrap();
+
+        let loaded = store
+            .list_stage_executions_for_plan(&plan_id)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.stage_execution_id == "exec_metric_test")
+            .expect("metric_test row must be present");
+        assert!(loaded.metric_snapshot_json.is_some());
+        let parsed = crate::quality::QualityMetricSnapshot::from_json(
+            loaded.metric_snapshot_json.as_ref().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(parsed, snap, "round-tripped snapshot must equal input");
+    }
+
+    #[test]
+    fn metric_snapshot_column_optional_for_old_rows() {
+        // A row with metric_snapshot_json = None must round-trip
+        // cleanly (the column is nullable so legacy v1 rows stay
+        // valid after the v2 migration).
+        use crate::domain::StageExecution;
+
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let plan_id = plan_in_store(&store);
+
+        let exec = StageExecution {
+            stage_execution_id: "exec_legacy".into(),
+            plan_id: plan_id.clone(),
+            stage_id: "synthetic".into(),
+            attempt: 1,
+            status: "completed".into(),
+            input_version_id: None,
+            output_artifact_id: None,
+            parameters_json: None,
+            parameters_hash: None,
+            started_at: Some("unix_ms:1".into()),
+            completed_at: Some("unix_ms:2".into()),
+            resource_usage_json: None,
+            error_json: None,
+            metric_snapshot_json: None,
+        };
+        store.insert_stage_execution(&exec).unwrap();
+
+        let loaded = store
+            .list_stage_executions_for_plan(&plan_id)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.stage_execution_id == "exec_legacy")
+            .unwrap();
+        assert!(loaded.metric_snapshot_json.is_none());
     }
 
     // ─── CR-05 P2.6 — Stack handler end-to-end integration test ────────

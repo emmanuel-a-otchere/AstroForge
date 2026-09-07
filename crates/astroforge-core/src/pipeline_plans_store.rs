@@ -58,11 +58,12 @@ pub struct PipelinePlanStore {
 }
 
 impl PipelinePlanStore {
-    /// Open or create a store at the given file. Runs the v1 schema
-    /// migration on first open.
+    /// Open or create a store at the given file. Runs the schema
+    /// migrations on first open.
     pub fn new(path: PathBuf) -> Result<Self, PipelinePlanStoreError> {
         let conn = Connection::open(path)?;
         conn.execute_batch(db::PIPELINE_PLANS_SCHEMA_SQL)?;
+        Self::run_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -72,9 +73,34 @@ impl PipelinePlanStore {
     pub fn in_memory() -> Result<Self, PipelinePlanStoreError> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(db::PIPELINE_PLANS_SCHEMA_SQL)?;
+        Self::run_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// CR-05 P3 slice 1 — apply schema migrations. SQLite does not
+    /// support `ADD COLUMN IF NOT EXISTS`, so each migration is
+    /// gated by a `pragma_table_info` check that returns true once
+    /// the column exists. Idempotent across re-opens.
+    fn run_migrations(conn: &Connection) -> Result<(), PipelinePlanStoreError> {
+        // v2: add metric_snapshot_json to stage_executions.
+        let mut has_metric_col = false;
+        let mut stmt = conn.prepare(
+            "SELECT 1 FROM pragma_table_info('stage_executions') WHERE name = 'metric_snapshot_json'",
+        )?;
+        let mut rows = stmt.query([])?;
+        if rows.next()?.is_some() {
+            has_metric_col = true;
+        }
+        drop(rows);
+        drop(stmt);
+        if !has_metric_col {
+            conn.execute_batch(
+                "ALTER TABLE stage_executions ADD COLUMN metric_snapshot_json TEXT",
+            )?;
+        }
+        Ok(())
     }
 
     pub fn insert_plan(&self, plan: &PipelinePlan) -> Result<(), PipelinePlanStoreError> {
@@ -217,8 +243,8 @@ impl PipelinePlanStore {
         let conn = self.conn.lock().expect("poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO stage_executions
-             (stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             (stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json, metric_snapshot_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 exec.stage_execution_id,
                 exec.plan_id,
@@ -233,6 +259,7 @@ impl PipelinePlanStore {
                 exec.completed_at,
                 exec.resource_usage_json,
                 exec.error_json,
+                exec.metric_snapshot_json,
             ],
         )?;
         Ok(())
@@ -252,7 +279,7 @@ impl PipelinePlanStore {
     ) -> Result<Vec<StageExecution>, PipelinePlanStoreError> {
         let conn = self.conn.lock().expect("poisoned");
         let mut stmt = conn.prepare(
-            "SELECT stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json
+            "SELECT stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json, metric_snapshot_json
              FROM stage_executions WHERE plan_id = ?1 ORDER BY started_at ASC",
         )?;
         let rows = stmt
@@ -271,6 +298,7 @@ impl PipelinePlanStore {
                     completed_at: row.get(10)?,
                     resource_usage_json: row.get(11)?,
                     error_json: row.get(12)?,
+                    metric_snapshot_json: row.get(13)?,
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -477,6 +505,7 @@ mod tests {
             completed_at: None,
             resource_usage_json: None,
             error_json: None,
+            metric_snapshot_json: None,
         }
     }
 

@@ -422,6 +422,11 @@ pub struct StageExecution {
     pub completed_at: Option<String>,
     pub resource_usage_json: Option<String>,
     pub error_json: Option<String>,
+    /// CR-05 P3 slice 1 — deterministic quality metrics captured at
+    /// stage completion (SNR / FWHM / star_count / background
+    /// gradient / mean / stddev). JSON for forward compatibility —
+    /// the recommendation engine (P3 slice 2) reads this column.
+    pub metric_snapshot_json: Option<String>,
 }
 
 /// CR-05 §26 — status of a PipelinePlan. Mirrors the §8 state vocabulary

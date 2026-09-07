@@ -546,6 +546,14 @@ fn main() {
                         "stack",
                         std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::StackHandler),
                     );
+                    reg.insert(
+                        "stretch",
+                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::StretchHandler),
+                    );
+                    reg.insert(
+                        "denoise",
+                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::DenoiseHandler),
+                    );
                     reg
                 }),
                 domain_store: Some(std::sync::Arc::new(domain_store)),

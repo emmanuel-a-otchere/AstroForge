@@ -543,8 +543,20 @@ fn main() {
                         std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::CalibrateHandler),
                     );
                     reg.insert(
+                        "debayer",
+                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::DebayerHandler),
+                    );
+                    reg.insert(
+                        "register",
+                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::RegisterHandler),
+                    );
+                    reg.insert(
                         "stack",
                         std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::StackHandler),
+                    );
+                    reg.insert(
+                        "background",
+                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::BackgroundHandler),
                     );
                     reg.insert(
                         "stretch",
@@ -553,6 +565,10 @@ fn main() {
                     reg.insert(
                         "denoise",
                         std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::DenoiseHandler),
+                    );
+                    reg.insert(
+                        "export",
+                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::ExportHandler),
                     );
                     reg
                 }),

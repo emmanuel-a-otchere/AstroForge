@@ -211,7 +211,7 @@ export const pipelinePlanGet = (planId: string): Promise<PipelinePlanDto> =>
 // finished (or been cancelled). The frontend reflects per-stage state
 // via `pipelinePlanListStageExecutions`.
 
-export type RunOutcome = "completed" | "cancelled" | "failed";
+export type RunOutcome = "completed" | "cancelled" | "failed" | "paused";
 
 export type StageExecutionStatus =
   | "pending"
@@ -241,3 +241,22 @@ export const pipelinePlanListStageExecutions = (
   planId: string,
 ): Promise<StageExecutionSummary[]> =>
   invoke("pipeline_plan_list_stage_executions", { planId });
+
+// ─── CR-05 P2.5 — pause + resume + recovery commands (additive) ───────────
+//
+// `pausePipelinePlan` flips the runner's pause flag (no-op if no run
+// is in flight). `resumePipelinePlan` re-loads the plan, refuses if
+// not in Paused, and continues from the first stage with no
+// completed StageExecution row. `pipelinePlanListResumableForProject`
+// feeds RecoveryBanner.svelte on project open.
+
+export const pausePipelinePlan = (planId: string): Promise<boolean> =>
+  invoke("pause_pipeline_run", { planId });
+
+export const resumePipelinePlan = (planId: string): Promise<RunOutcome> =>
+  invoke("resume_pipeline_run", { planId });
+
+export const pipelinePlanListResumableForProject = (
+  projectId: string,
+): Promise<PipelinePlanSummary[]> =>
+  invoke("pipeline_plan_list_resumable_for_project", { projectId });

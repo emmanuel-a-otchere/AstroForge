@@ -292,6 +292,36 @@ impl PipelinePlanStore {
         )?;
         Ok(())
     }
+
+    /// CR-05 P2.5 — list plans in `Paused` status (recovery candidates).
+    /// Used by `find_resumable_runs_for_project` (Tauri command) to
+    /// populate the `RecoveryBanner.svelte` UI on project open.
+    pub fn list_resumable_plans_for_project(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<PipelinePlanSummary>, PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT plan_id, project_id, session_id, recipe_id, mode, target_type, status, created_at, schema_version
+             FROM pipeline_plans WHERE project_id = ?1 AND status = 'paused' ORDER BY created_at DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![project_id], |row| {
+                Ok(PipelinePlanSummary {
+                    plan_id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    session_id: row.get(2)?,
+                    recipe_id: row.get(3)?,
+                    mode: row.get(4)?,
+                    target_type: row.get(5)?,
+                    status: row.get(6)?,
+                    created_at: row.get(7)?,
+                    schema_version: row.get(8)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
 }
 
 struct PlanRow {
@@ -535,5 +565,37 @@ mod tests {
             .unwrap();
         let loaded = store.load_plan("plan_status").unwrap();
         assert_eq!(loaded.status, PipelinePlanStatus::Cancelled);
+    }
+
+    // ─── CR-05 P2.5 — recovery query test ──────────────────────────────
+
+    #[test]
+    fn list_resumable_plans_filters_to_paused_only() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let (stages, target) = deep_sky_osc_balanced();
+        let mut p_paused = generate_plan(&ctx(), &stages, target).unwrap();
+        p_paused.plan_id = "plan_paused".into();
+        let mut p_running = generate_plan(&ctx(), &stages, target).unwrap();
+        p_running.plan_id = "plan_running".into();
+        let mut p_completed = generate_plan(&ctx(), &stages, target).unwrap();
+        p_completed.plan_id = "plan_completed".into();
+        store.insert_plan(&p_paused).unwrap();
+        store.insert_plan(&p_running).unwrap();
+        store.insert_plan(&p_completed).unwrap();
+
+        store
+            .update_plan_status("plan_paused", PipelinePlanStatus::Paused)
+            .unwrap();
+        store
+            .update_plan_status("plan_running", PipelinePlanStatus::Running)
+            .unwrap();
+        store
+            .update_plan_status("plan_completed", PipelinePlanStatus::Completed)
+            .unwrap();
+
+        let resumable = store.list_resumable_plans_for_project("proj_1").unwrap();
+        assert_eq!(resumable.len(), 1);
+        assert_eq!(resumable[0].plan_id, "plan_paused");
+        assert_eq!(resumable[0].status, "paused");
     }
 }

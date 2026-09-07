@@ -521,6 +521,9 @@ fn main() {
             app.manage(commands_pipeline_plan::PipelinePlanState {
                 store: std::sync::Arc::new(Mutex::new(pipeline_plans_store)),
                 cancel_handles: Mutex::new(std::collections::HashMap::new()),
+                // CR-05 P2.5 — per-plan pause handles (independent of
+                // cancel handles; cancel wins if both flip).
+                pause_handles: Mutex::new(std::collections::HashMap::new()),
             });
 
             Ok(())
@@ -566,6 +569,10 @@ fn main() {
             commands_pipeline_plan::start_pipeline_run,
             commands_pipeline_plan::cancel_pipeline_run,
             commands_pipeline_plan::pipeline_plan_list_stage_executions,
+            // CR-05 P2.5 — pause + resume + recovery commands (additive).
+            commands_pipeline_plan::pause_pipeline_run,
+            commands_pipeline_plan::resume_pipeline_run,
+            commands_pipeline_plan::pipeline_plan_list_resumable_for_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

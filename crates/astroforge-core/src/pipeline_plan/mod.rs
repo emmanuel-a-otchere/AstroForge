@@ -27,5 +27,5 @@ pub use plan::{
     generate_plan, now_unix_ms, AcquisitionMode, CalibrationAvailability, GenerationContext,
     PlanError, PlanGenerator, SessionUnderstanding,
 };
-pub use runner::{CancelHandle, PipelineRunner, RunOutcome, RunnerError};
+pub use runner::{CancelHandle, PauseHandle, PipelineRunner, RunOutcome, RunnerError};
 pub use stage::{StageSpec, StageType};

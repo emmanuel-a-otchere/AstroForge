@@ -19,6 +19,7 @@
 //! any stages.
 
 pub mod builtin;
+pub mod dispatch;
 pub mod plan;
 pub mod runner;
 pub mod stage;

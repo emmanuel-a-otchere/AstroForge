@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use astroforge_core::domain::{ObjectType, PipelinePlan, PipelinePlanStatus};
 use astroforge_core::pipeline_plan::{
     builtin::deep_sky_osc_balanced,
+    dispatch::{HandlerRegistry, StackHandler},
     plan::{generate_plan as generate_plan_inner, GenerationContext, SessionUnderstanding},
     runner::{CancelHandle, PauseHandle, PipelineRunner, RunOutcome},
     AcquisitionMode, CalibrationAvailability,
@@ -32,6 +33,13 @@ pub struct PipelinePlanState {
     /// P2.5 — per-plan pause handles. Independent of cancel handles
     /// (per Decision D-CR05-6).
     pub pause_handles: Mutex<std::collections::HashMap<String, PauseHandle>>,
+    /// CR-05 P2.6 — handler registry. Each Tauri command constructs
+    /// a fresh runner and clones this Arc.
+    pub handler_registry: Arc<astroforge_core::pipeline_plan::dispatch::HandlerRegistry>,
+    /// CR-05 P2.6 — DomainStore handle for handlers that need to
+    /// load source assets / write artifacts. None is allowed for
+    /// tests; production sets this in `main.rs` setup.
+    pub domain_store: Option<Arc<astroforge_core::domain_store::DomainStore>>,
 }
 
 /// CR-05 P1 — input to `create_pipeline_plan`. Mirrors the `astroforge-api.ts`
@@ -244,6 +252,9 @@ pub fn pipeline_plan_get(
 ///
 /// P2.5 — also registers the pause handle so the UI can pause during
 /// execution.
+///
+/// P2.6 — uses the handler registry + shared DomainStore so real
+/// stages (Stack) execute instead of no-op.
 #[tauri::command]
 pub fn start_pipeline_run(
     state: State<'_, PipelinePlanState>,
@@ -251,7 +262,11 @@ pub fn start_pipeline_run(
 ) -> Result<RunOutcomeResponse, String> {
     let runner = {
         let store = state.store.clone();
-        PipelineRunner::new(store)
+        PipelineRunner::with_handlers(
+            store,
+            state.handler_registry.clone(),
+            state.domain_store.clone(),
+        )
     };
     let cancel_handle = runner.cancel_handle();
     let pause_handle = runner.pause_handle();
@@ -311,7 +326,11 @@ pub fn resume_pipeline_run(
 ) -> Result<RunOutcomeResponse, String> {
     let runner = {
         let store = state.store.clone();
-        PipelineRunner::new(store)
+        PipelineRunner::with_handlers(
+            store,
+            state.handler_registry.clone(),
+            state.domain_store.clone(),
+        )
     };
     // Pause handle is re-registered so the UI can pause mid-resume.
     let pause_handle = runner.pause_handle();

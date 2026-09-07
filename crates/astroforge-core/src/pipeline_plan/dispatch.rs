@@ -359,6 +359,334 @@ pub struct SourceAssetPreview {
     pub preview: F32Image,
 }
 
+/// CR-05 P2.8 — Stretch handler. Takes the upstream image (Stack
+/// output, Calibrated single-frame, etc.) and applies
+/// `histogram_stretch` with parameters from
+/// `stage.parameters_json`.
+///
+/// ## Stage parameters
+///
+/// - `shadows` (default 0.05) — lower bound of the histogram.
+/// - `highlights` (default 0.99) — upper bound (also the output
+///   ceiling per the GLSL MTF shader).
+/// - `midtones` (default 0.5) — Lupton midtone transfer parameter.
+///
+/// Like P2.6 / P2.7, the handler relies on `preloaded_frames` for
+/// slice 1 input. Production paths that load from disk land in P3
+/// alongside `image_io.rs`.
+pub struct StretchHandler;
+
+impl StageHandler for StretchHandler {
+    fn handle(&self, ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
+        let params = parse_stretch_params(ctx.stage.parameters_json.as_deref());
+
+        let frames = ctx.preloaded_frames.clone().unwrap_or_default();
+        if frames.is_empty() {
+            return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
+        }
+
+        // Slice 1 — stretch the first frame. Multi-frame stretching
+        // (per-channel stats) is P3 work once image_io lands.
+        let stretched = crate::stretching::histogram_stretch(
+            &frames[0],
+            params.shadows,
+            params.highlights,
+            params.midtones,
+        );
+
+        let metadata = format!(
+            r#"{{"shadows":{},"highlights":{},"midtones":{},"input_shape":[{},{},{}]}}"#,
+            params.shadows,
+            params.highlights,
+            params.midtones,
+            frames[0].width(),
+            frames[0].height(),
+            frames[0].channels(),
+        );
+
+        Ok(StageOutput {
+            image: Some(stretched),
+            parameters_json: ctx.stage.parameters_json.clone(),
+            metadata_json: Some(metadata),
+            artifact_id: None,
+        })
+    }
+}
+
+/// CR-05 P2.8 — Denoise handler. Takes the upstream image and runs
+/// `dip_denoise` against a configurable `DipConfig`.
+///
+/// ## Stage parameters
+///
+/// - `max_iterations` (default 500)
+/// - `learning_rate` (default 0.01)
+/// - `early_stop_patience` (default 50)
+/// - `early_stop_threshold` (default 1e-4)
+/// - `noise_reg` (default 0.1)
+/// - `blend_ratio` (default 0.55) — how much of the denoised image
+///   to mix into the output (1.0 = full replacement, 0.0 = passthrough).
+pub struct DenoiseHandler;
+
+impl StageHandler for DenoiseHandler {
+    fn handle(&self, ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
+        let params = parse_denoise_params(ctx.stage.parameters_json.as_deref());
+
+        let frames = ctx.preloaded_frames.clone().unwrap_or_default();
+        if frames.is_empty() {
+            return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
+        }
+
+        let config = crate::dip::DipConfig {
+            max_iterations: params.max_iterations,
+            learning_rate: params.learning_rate,
+            early_stop_patience: params.early_stop_patience,
+            early_stop_threshold: params.early_stop_threshold,
+            noise_reg: params.noise_reg,
+        };
+
+        let denoised = crate::dip::dip_denoise(&frames[0], &config, params.blend_ratio);
+
+        let metadata = format!(
+            r#"{{"max_iterations":{},"learning_rate":{},"blend_ratio":{},"input_shape":[{},{},{}]}}"#,
+            params.max_iterations,
+            params.learning_rate,
+            params.blend_ratio,
+            frames[0].width(),
+            frames[0].height(),
+            frames[0].channels(),
+        );
+
+        Ok(StageOutput {
+            image: Some(denoised),
+            parameters_json: ctx.stage.parameters_json.clone(),
+            metadata_json: Some(metadata),
+            artifact_id: None,
+        })
+    }
+}
+
+/// CR-05 P2.8 — Stretch stage parameters.
+#[derive(Debug, Clone)]
+struct StretchParams {
+    shadows: f64,
+    highlights: f64,
+    midtones: f64,
+}
+
+impl Default for StretchParams {
+    fn default() -> Self {
+        Self {
+            shadows: 0.05,
+            highlights: 0.99,
+            midtones: 0.5,
+        }
+    }
+}
+
+/// CR-05 P2.8 — parse stretch parameters with safe defaults.
+fn parse_stretch_params(parameters_json: Option<&str>) -> StretchParams {
+    let Some(raw) = parameters_json else {
+        return StretchParams::default();
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return StretchParams::default(),
+    };
+    StretchParams {
+        shadows: parsed
+            .get("shadows")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.05),
+        highlights: parsed
+            .get("highlights")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.99),
+        midtones: parsed
+            .get("midtones")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5),
+    }
+}
+
+/// CR-05 P2.8 — Denoise stage parameters.
+#[derive(Debug, Clone)]
+struct DenoiseParams {
+    max_iterations: u32,
+    learning_rate: f64,
+    early_stop_patience: u32,
+    early_stop_threshold: f64,
+    noise_reg: f64,
+    blend_ratio: f32,
+}
+
+impl Default for DenoiseParams {
+    fn default() -> Self {
+        Self {
+            max_iterations: 500,
+            learning_rate: 0.01,
+            early_stop_patience: 50,
+            early_stop_threshold: 1e-4,
+            noise_reg: 0.1,
+            blend_ratio: 0.55,
+        }
+    }
+}
+
+/// CR-05 P2.8 — parse denoise parameters with safe defaults.
+fn parse_denoise_params(parameters_json: Option<&str>) -> DenoiseParams {
+    let Some(raw) = parameters_json else {
+        return DenoiseParams::default();
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return DenoiseParams::default(),
+    };
+    DenoiseParams {
+        max_iterations: parsed
+            .get("max_iterations")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(500) as u32,
+        learning_rate: parsed
+            .get("learning_rate")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.01),
+        early_stop_patience: parsed
+            .get("early_stop_patience")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as u32,
+        early_stop_threshold: parsed
+            .get("early_stop_threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1e-4),
+        noise_reg: parsed
+            .get("noise_reg")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.1),
+        blend_ratio: parsed
+            .get("blend_ratio")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.55) as f32,
+    }
+}
+
+#[cfg(test)]
+mod p28_tests {
+    use super::*;
+    use crate::domain_store::DomainStore;
+    use crate::image::F32Image;
+    use crate::pipeline_plan::dispatch::{StageContext, StageHandler};
+    use std::path::PathBuf;
+
+    fn test_ctx(preloaded: Option<Vec<F32Image>>) -> StageContext {
+        let domain_store = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
+        let stage = crate::domain::PipelineStage {
+            stage_id: "p28_1".into(),
+            plan_id: "plan_1".into(),
+            stage_type: "stretch".into(),
+            sequence: 0,
+            label: "Stretch".into(),
+            required: true,
+            enabled: true,
+            parameters_json: None,
+            produces_image_version: true,
+            undo_supported: false,
+        };
+        StageContext {
+            stage,
+            session_id: "test_session".into(),
+            run_id: "run_1".into(),
+            domain_store: Arc::new(domain_store),
+            preloaded_frames: preloaded,
+        }
+    }
+
+    #[test]
+    fn parse_stretch_params_defaults_when_missing_or_invalid() {
+        let p = parse_stretch_params(None);
+        assert!((p.shadows - 0.05).abs() < 1e-9);
+        assert!((p.highlights - 0.99).abs() < 1e-9);
+        assert!((p.midtones - 0.5).abs() < 1e-9);
+        let p = parse_stretch_params(Some("not json"));
+        assert!((p.shadows - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_stretch_params_reads_overrides() {
+        let json = r#"{"shadows": 0.1, "highlights": 0.95, "midtones": 0.6}"#;
+        let p = parse_stretch_params(Some(json));
+        assert!((p.shadows - 0.1).abs() < 1e-9);
+        assert!((p.highlights - 0.95).abs() < 1e-9);
+        assert!((p.midtones - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_denoise_params_defaults_when_missing_or_invalid() {
+        let p = parse_denoise_params(None);
+        assert_eq!(p.max_iterations, 500);
+        assert!((p.learning_rate - 0.01).abs() < 1e-9);
+        assert_eq!(p.early_stop_patience, 50);
+        assert!((p.early_stop_threshold - 1e-4).abs() < 1e-12);
+        assert!((p.noise_reg - 0.1).abs() < 1e-9);
+        assert!((p.blend_ratio - 0.55).abs() < 1e-6);
+        let p = parse_denoise_params(Some("garbage"));
+        assert_eq!(p.max_iterations, 500);
+    }
+
+    #[test]
+    fn parse_denoise_params_reads_overrides() {
+        let json = r#"{"max_iterations": 100, "learning_rate": 0.05, "blend_ratio": 0.7}"#;
+        let p = parse_denoise_params(Some(json));
+        assert_eq!(p.max_iterations, 100);
+        assert!((p.learning_rate - 0.05).abs() < 1e-9);
+        assert!((p.blend_ratio - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stretch_handler_with_preloaded_produces_stretched_image() {
+        // 4x4x3 frame with values 0..255 (approx F32 range).
+        let mut frame = F32Image::new(4, 4, 3);
+        for y in 0..4 {
+            for x in 0..4 {
+                for c in 0..3 {
+                    frame[(c, y, x)] = (y * 16 + x * 4) as f32;
+                }
+            }
+        }
+        let ctx = test_ctx(Some(vec![frame]));
+        let output = StretchHandler.handle(&ctx).unwrap();
+        let metadata = output.metadata_json.unwrap();
+        assert!(metadata.contains("\"shadows\":0.05"));
+        assert!(metadata.contains("\"highlights\":0.99"));
+        assert!(metadata.contains("\"input_shape\":[4,4,3]"));
+        assert!(output.image.is_some());
+    }
+
+    #[test]
+    fn stretch_handler_without_inputs_fails_with_no_source_frames() {
+        let ctx = test_ctx(None);
+        let err = StretchHandler.handle(&ctx).unwrap_err();
+        assert!(matches!(err, StageHandlerError::NoSourceFrames(_)));
+    }
+
+    #[test]
+    fn denoise_handler_with_preloaded_produces_denoised_image() {
+        let frame = F32Image::new(4, 4, 3);
+        let ctx = test_ctx(Some(vec![frame]));
+        let output = DenoiseHandler.handle(&ctx).unwrap();
+        let metadata = output.metadata_json.unwrap();
+        assert!(metadata.contains("\"max_iterations\":500"));
+        assert!(metadata.contains("\"blend_ratio\":0.55"));
+        assert!(output.image.is_some());
+    }
+
+    #[test]
+    fn denoise_handler_without_inputs_fails_with_no_source_frames() {
+        let ctx = test_ctx(None);
+        let err = DenoiseHandler.handle(&ctx).unwrap_err();
+        assert!(matches!(err, StageHandlerError::NoSourceFrames(_)));
+    }
+}
+
 /// CR-05 P2.7 — load source assets + their previews for the session.
 /// Returns an empty Vec when the disk loader is unavailable; the
 /// handler then returns `NoSourceFrames` so the stage is marked

@@ -539,6 +539,10 @@ fn main() {
                 handler_registry: std::sync::Arc::new({
                     let mut reg = astroforge_core::pipeline_plan::dispatch::HandlerRegistry::new();
                     reg.insert(
+                        "calibrate",
+                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::CalibrateHandler),
+                    );
+                    reg.insert(
                         "stack",
                         std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::StackHandler),
                     );

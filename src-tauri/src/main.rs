@@ -633,6 +633,11 @@ fn main() {
             // (additive; IntelligencePanel will consume them).
             commands_pipeline_plan::get_recommendations_for_stage_execution,
             commands_pipeline_plan::get_recommendations_for_plan,
+            // CR-05 P3 slice 2.5 — user-decision lifecycle on
+            // recommendations (apply / dismiss / reset).
+            commands_pipeline_plan::apply_recommendation,
+            commands_pipeline_plan::dismiss_recommendation,
+            commands_pipeline_plan::reset_recommendation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

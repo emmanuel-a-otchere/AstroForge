@@ -148,7 +148,13 @@ CREATE TABLE IF NOT EXISTS stage_executions (
     started_at TEXT,
     completed_at TEXT,
     resource_usage_json TEXT,
-    error_json TEXT
+    error_json TEXT,
+    -- CR-05 P3 slice 1 — deterministic quality metrics computed at
+    -- stage completion (SNR / FWHM / star_count / background
+    -- gradient / mean / stddev). Stored as JSON for forward
+    -- compatibility — the recommendation engine (P3 slice 2) reads
+    -- this column to derive stage parameters.
+    metric_snapshot_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_plans_project
@@ -162,6 +168,12 @@ CREATE INDEX IF NOT EXISTS idx_stage_executions_plan
 CREATE INDEX IF NOT EXISTS idx_stage_executions_stage
     ON stage_executions(stage_id);
 "#;
+
+// CR-05 P3 slice 1 — schema migrations live in
+// `pipeline_plans_store::run_migrations` (they need conditional
+// `ALTER TABLE` logic that SQLite's SQL dialect can't express).
+// Keeping them in Rust means the migration gating uses the same
+// Optional<row> pattern the rest of the store uses.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {

@@ -43,16 +43,17 @@ While this started as a solo hobby project, building a robust astrophotography e
 
 ## Documentation
 
-AstroForge's architecture is established by three sequential Change Requests. Each one answers a distinct question.
+AstroForge's architecture is established by a sequence of Change Requests. Each one answers a distinct question.
 
 * **[CR-01 — Product & UX Foundation](docs/specs/):** How should AstroForge work? The product journey, the three user modes (Auto / Guided / Expert), and the principle that the image is the primary object.
 * **[CR-02 — Project, Session & Artifact Architecture](docs/CR-02-PROJECT-SESSION-ARTIFACT-ARCHITECTURE.md):** What does AstroForge own and remember? The durable Project / Session / Pipeline Run / Artifact / Image Version / Export hierarchy. SQLite for lineage, content-addressed filesystem for artifacts.
 * **[CR-03 — Application Shell & Studio Workspace](docs/CR-03-APPLICATION-SHELL-STUDIO.md):** How does the user interact with the persistent model? The two navigation contexts (Application and Studio), the three-zone workspace, AI as intelligence throughout the workflow.
 * **[CR-04 — Intelligent Import, Session Understanding & Target Detection](docs/CR-04-INTELLIGENT-IMPORT.md):** How does AstroForge understand what the user has given it? Drop-folder scan, metadata extraction, frame classification, target/session grouping, deep-sky vs planetary routing, narrowband detection, and a recommendation engine with explicit confidence + evidence + user override.
+* **[CR-05 — Intelligent Processing Workspace & Adaptive Pipeline Execution](docs/CR-05-INTELLIGENT-PROCESSING.md):** How does AstroForge turn a Session Understanding into a real, observable processing experience? Human-readable pipelines, Auto / Guided / Expert modes, preview-before-commit, checkpoints with visible recovery, quality feedback loop, branching, resource-aware execution, and explainable AI boundaries.
 
 New visitors: start with **[docs/ORIENTATION.md](docs/ORIENTATION.md)** for a plain-language summary of how these CRs fit together.
 
-For the durable data model, the application shell, and the intelligent import implementation plans: `docs/plans/`.
+For the durable data model, the application shell, the intelligent import, and the intelligent processing implementation plans: `docs/plans/`.
 
 For small clean-up work that should land as standalone PRs (wizard dead code, ingest/import-scan consolidation): `docs/HOUSEKEEPING.md`.
 

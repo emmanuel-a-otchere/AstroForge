@@ -67,7 +67,17 @@ The intelligence hierarchy is: deterministic metadata first, deterministic image
 
 Cross-reference: `docs/CR-04-INTELLIGENT-IMPORT.md` for the full specification; `docs/plans/2026-09-06-cr04-intelligent-import/PLAN.md` for the phased implementation plan (P0–P10).
 
-## The architectural direction (CR-01 + CR-02 + CR-03 + CR-04 together)
+### CR-05 — Intelligent Processing Workspace & Adaptive Pipeline Execution
+
+**Question:** *How does AstroForge turn a Session Understanding into a real, observable processing experience?*
+
+CR-05 is the processing core. It takes the Session Understanding + recipe recommendation produced by CR-04 and turns it into the user-facing processing workspace: a human-readable pipeline (Calibrate → Stack → Color → Stretch → Enhance), three processing modes (Auto / Guided / Expert) with progressive disclosure of the same engine, a three-zone studio (Versions / Image Canvas / Intelligence & Controls), per-stage recommendations with explicit evidence and confidence, previews before expensive commits, full start / pause / resume / cancel / retry / skip / re-run execution semantics, checkpoints with visible recovery, a quality feedback loop that adapts subsequent recommendations, pipeline branching for AI experimentation, recipe-versus-pipeline separation, resource-aware execution that respects 4–8 GB RAM targets, and explainable AI boundaries (deterministic versus perceptual operations are explicitly labelled).
+
+CR-05 extends CR-02 with six new persistent entities (`pipeline_plan`, `pipeline_stage`, `stage_execution`, `quality_metric`, `processing_decision`, `preview_run`) and introduces seven ADRs (ADR-05.1 through ADR-05.7). The most important architectural rule is explicit in the spec: the workspace must never become a visual mirror of the internal DAG; the user cares about their image being aligned, stacked, cleaned and improved, not about which stage numbers ran.
+
+Cross-reference: `docs/CR-05-INTELLIGENT-PROCESSING.md` for the full specification; `docs/plans/2026-09-07-cr05-intelligent-processing/PLAN.md` for the phased implementation plan (P0–P7).
+
+## The architectural direction (CR-01 + CR-02 + CR-03 + CR-04 + CR-05 together)
 
 ```
 SQLite (durable state)
@@ -105,7 +115,8 @@ The UI is a *projection* of persistent state, not the canonical source. This pre
 - For the durable data model: `docs/CR-02-PROJECT-SESSION-ARTIFACT-ARCHITECTURE.md`
 - For the application shell + studio: `docs/CR-03-APPLICATION-SHELL-STUDIO.md`
 - For intelligent import + session understanding: `docs/CR-04-INTELLIGENT-IMPORT.md`
-- For implementation history and decisions: `docs/plans/` (CR-02, CR-03, and CR-04 plans live here)
+- For intelligent processing & adaptive pipeline execution: `docs/CR-05-INTELLIGENT-PROCESSING.md`
+- For implementation history and decisions: `docs/plans/` (CR-02, CR-03, CR-04, and CR-05 plans live here)
 - For audit history: `docs/M*_AUDIT.md` (the milestone audits that established each tranche)
 - For closed phase work: `docs/PHASE_8_CLOSE.md`, `docs/PHASE_9_CLOSE.md`
 - For housekeeping follow-ups: `docs/HOUSEKEEPING.md` (wizard dead-code cleanup, ingest/import-scan consolidation; created in CR-04 P0)

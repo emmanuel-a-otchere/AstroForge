@@ -10,6 +10,7 @@ pub mod crop;
 pub mod curves;
 pub mod db;
 pub mod debayer;
+pub mod decoders;
 pub mod detail_enhancement;
 pub mod dialog_modes;
 pub mod dip;

@@ -1511,21 +1511,77 @@ mod calibrate_tests {
 /// alongside CR-04's Session Understanding ingestion). Slice 1's
 /// integration test feeds `preloaded_frames` directly so the Stack
 /// path is exercised without depending on disk IO.
-fn load_frames_from_assets(_ctx: &StageContext) -> Result<Vec<F32Image>, StageHandlerError> {
-    Ok(Vec::new())
+fn load_frames_from_assets(ctx: &StageContext) -> Result<Vec<F32Image>, StageHandlerError> {
+    Ok(load_frames_for_session(&ctx.domain_store, &ctx.session_id))
 }
 
-/// CR-05 P4 slice 5 — public frame-loading helper shared by the
-/// preview driver and (once asset decoding lands) the handlers
-/// themselves.
+/// CR-05 P4 slice 5.1 — real frame-loading: reads `SourceAsset`
+/// rows for the session, then decodes each file into an [`F32Image`]
+/// via the TIFF/FITS decoders. Files that fail to decode are logged
+/// and skipped so one corrupt asset doesn't kill the whole run.
 ///
-/// **Stubbed.** There is no TIFF/FITS pixel decoder in the crate yet
-/// (D-CR05-12 references `F32Image::from_tiff_bytes`, which is
-/// aspirational as of slice 5). Returns an empty vec; callers must
-/// treat empty as "no source frames" and surface a real error rather
-/// than synthesizing substitute data.
-pub fn load_frames_for_session(_domain_store: &DomainStore, _session_id: &str) -> Vec<F32Image> {
-    Vec::new()
+/// Supported formats (by file extension, case-insensitive):
+///   - `.tif` / `.tiff` → TIFF decoder (8/16/32-bit int, f32/f64)
+///   - `.fits` / `.fit` → FITS decoder (BITPIX 8/16/-32/-64)
+///
+/// Returns an empty vec if the session has no registered source
+/// assets. Callers must treat empty as "no source frames" and
+/// surface a real error rather than synthesizing substitute data.
+pub fn load_frames_for_session(domain_store: &DomainStore, session_id: &str) -> Vec<F32Image> {
+    let assets = match domain_store.list_source_assets(session_id) {
+        Ok(a) => a,
+        Err(e) => {
+            log::warn!("load_frames_for_session: list_source_assets failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    let mut frames = Vec::new();
+    for asset in assets {
+        let path = std::path::Path::new(&asset.original_path);
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!(
+                    "load_frames_for_session: read '{}' failed: {e}",
+                    asset.original_path
+                );
+                continue;
+            }
+        };
+
+        let result = match ext.as_str() {
+            "tif" | "tiff" => F32Image::from_tiff_bytes(&bytes),
+            "fits" | "fit" => F32Image::from_fits_bytes(&bytes),
+            other => {
+                log::warn!(
+                    "load_frames_for_session: unsupported format '{}' for '{}'",
+                    other,
+                    asset.original_path
+                );
+                continue;
+            }
+        };
+
+        match result {
+            Ok(img) => frames.push(img),
+            Err(e) => {
+                log::warn!(
+                    "load_frames_for_session: decode '{}' failed: {e}",
+                    asset.original_path
+                );
+                continue;
+            }
+        }
+    }
+
+    frames
 }
 
 /// Parse kappa / max_iterations from the stage's parameters_json.

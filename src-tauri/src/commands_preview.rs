@@ -10,13 +10,14 @@
 //!
 //! ## Failure honesty
 //!
-//! The frame-loading helper ([`dispatch::load_frames_for_session`])
-//! is still stubbed (no TIFF/FITS pixel decoder exists in the crate),
-//! so production previews currently fail with
-//! `PreviewError::NoSourceFrames`. The command marks the preview row
-//! `failed` with the real error message rather than synthesizing
-//! substitute output — the UI shows the error banner so the gap is
-//! visible instead of silent.
+//! The frame-loading helper (`dispatch::load_frames_for_session`)
+//! is now real (slice 5.1): it decodes TIFF/FITS source assets
+//! from the session's `original_path` and returns them in order.
+//! Files that fail to decode are logged and skipped, so one corrupt
+//! asset doesn't kill the whole run. If the session has no source
+//! assets at all, the preview still fails with
+//! `PreviewError::NoSourceFrames` — the UI shows the error banner
+//! rather than a silent failure.
 //!
 //! **Additive only.** Existing widgets continue to read from their
 //! current stores.

@@ -10,12 +10,23 @@
   can act on engine picks from the same screen that runs the
   pipeline. The panel is reactive to `activePlan`: switching
   plan (or generating a new one) re-fetches its recommendations.
+
+  CR-05 P3 slice 2.7 — mounts the two pre-existing plan-context
+  companions that were built but never wired:
+    - `RecoveryBanner` (always mounted; renders only when
+      `$resumablePlans.length > 0`)
+    - `AutoPlanPanel` (rendered only when `!$activePlan`, since
+      the plan summary it shows is redundant with the
+      IntelligencePanel's plan-scoped view)
 -->
 <script lang="ts">
   import { onDestroy } from "svelte";
 
   import WorkspaceScreen from "./WorkspaceScreen.svelte";
   import IntelligencePanel from "./IntelligencePanel.svelte";
+  import RecoveryBanner from "./RecoveryBanner.svelte";
+  import AutoPlanPanel from "./AutoPlanPanel.svelte";
+  import { activeProject } from "../state/project-context";
   import {
     activePlan,
     refreshRecommendations,
@@ -38,6 +49,15 @@
     }
   });
   onDestroy(unsubscribe);
+
+  // CR-05 P3 slice 2.7 — derive mount-time props for the recovery
+  // banner (projectId) and the auto-plan generator
+  // (projectId + sessionId). The latter is null when the project
+  // has no active session yet; we suppress the panel in that
+  // case so the user does not see a broken Generate button.
+  $: project = $activeProject;
+  $: sessionId = project?.active_session_id ?? null;
+  $: canGenerateAutoPlan = Boolean(project && sessionId);
 
   function formatTime(iso: string | null): string {
     if (!iso) return "—";
@@ -66,6 +86,31 @@
       <p class="font-body">Failed to load runs: {$workspaceState.error}</p>
     </div>
   {:else}
+    <!--
+      CR-05 P3 slice 2.7 — RecoveryBanner is mounted first;
+      it self-hides when there are no paused plans, so it is
+      always safe to include here.
+    -->
+    {#if project}
+      <section class="recovery-zone" aria-label="Recovery banner zone">
+        <RecoveryBanner projectId={project.project_id} />
+      </section>
+    {/if}
+
+    <!--
+      CR-05 P3 slice 2.7 — AutoPlanPanel only renders when
+      there is no active plan (otherwise the plan summary it
+      shows duplicates the IntelligencePanel's plan-scoped
+      view). Suppressed when the project has no active
+      session — the Generate button would otherwise call the
+      backend with a null session id.
+    -->
+    {#if !$activePlan && canGenerateAutoPlan && project && sessionId}
+      <section class="auto-plan-zone" aria-label="Auto-plan generator zone">
+        <AutoPlanPanel projectId={project.project_id} {sessionId} />
+      </section>
+    {/if}
+
     <!--
       CR-05 P3 slice 2.6 — IntelligencePanel mounted above the
       run list when an active plan exists. Independent of
@@ -131,6 +176,19 @@
      list with a deliberate vertical gap so the two zones read as
      distinct surfaces. */
   .intelligence-zone {
+    margin-bottom: var(--sp-lg);
+  }
+
+  /* CR-05 P3 slice 2.7 — recovery banner sits at the top with
+     the same vertical rhythm so it does not crowd the
+     auto-plan / intelligence surfaces below. */
+  .recovery-zone {
+    margin-bottom: var(--sp-lg);
+  }
+
+  /* CR-05 P3 slice 2.7 — auto-plan generator sits below the
+     recovery banner and above the intelligence zone. */
+  .auto-plan-zone {
     margin-bottom: var(--sp-lg);
   }
 

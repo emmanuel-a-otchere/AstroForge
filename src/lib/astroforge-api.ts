@@ -285,6 +285,10 @@ export interface RecommendationDto {
   user_decision: RecommendationUserDecision | null;
   user_decision_at: string | null;
   applied_stage_id: string | null;
+  /** CR-05 P4 slice 6 — id of the `preview_run` that satisfied
+   * the §11 gate when this recommendation was applied. Null
+   * for not-yet-applied or legacy rows. */
+  applied_with_preview_id: string | null;
 }
 
 export interface ProcessingDecisionJson {
@@ -296,6 +300,8 @@ export interface ProcessingDecisionJson {
 export interface RecommendationUpdateResult {
   recommendation: RecommendationDto;
   applied_stage_id: string | null;
+  /** CR-05 P4 slice 6 — preview id provenance for the apply. */
+  applied_with_preview_id?: string | null;
 }
 
 export const pipelinePlanListRecommendations = (

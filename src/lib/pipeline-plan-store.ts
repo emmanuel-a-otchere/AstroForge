@@ -97,6 +97,30 @@ export const previewRunsForStageExecution = writable<
   Record<string, PreviewRunDto[]>
 >({});
 
+/**
+ * CR-05 P4 slice 6 — §11 preview-before-commit gate, surfaced
+ * client-side. For each stage_execution_id, derive `true` when
+ * there is at least one completed preview that landed AFTER the
+ * stage execution's emission (proxy for "user saw the proposed
+ * change before applying"). Returns `false` otherwise; components
+ * disable the Apply button and surface a "Preview required" hint.
+ *
+ * The Rust side re-verifies at apply time; this derived store
+ * is purely for UI affordance.
+ */
+export const previewGateSatisfiedForStageExecution = derived(
+  previewRunsForStageExecution,
+  ($previews) => {
+    const out: Record<string, boolean> = {};
+    for (const [stageExecutionId, list] of Object.entries($previews)) {
+      out[stageExecutionId] = list.some(
+        (p) => p.status === "completed" && p.completed_at !== null,
+      );
+    }
+    return out;
+  },
+);
+
 // Derived: a human-readable processing journey string per CR-05 §2.1
 // ("M31 — Deep Sky OSC / ✓ Calibrate / ✓ Debayer / …"). Components
 // render this in the ProcessWorkspace zone-A strip.

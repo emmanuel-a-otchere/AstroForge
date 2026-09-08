@@ -12,6 +12,11 @@
 // CR-05 actually runs. Until an active plan exists the legacy
 // path is preserved (keeps CR-03 P4 behaviour intact for projects
 // that have wizard runs but no CR-05 plan).
+//
+// CR-05 P4 slice 2 — `load(project)` also refreshes the most
+// recent CR-05 plan's `StageExecutionSummary` rows so the
+// `stageExecutions` store is warm the moment a project opens,
+// without waiting for the user to navigate to Process.
 
 import { derived, writable } from "svelte/store";
 import type { PipelineRunSummary, ProjectSummary } from "../lib/astroforge-api";
@@ -54,11 +59,40 @@ export const workspaceState = {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+    // CR-05 P4 slice 2 — best-effort refresh of the project's
+    // most recent CR-05 plan's stage executions. Failures are
+    // swallowed (legacy `runs` already loaded; nothing else
+    // breaks if this fails). Fire-and-forget so `load` does
+    // not block the store transition.
+    void refreshMostRecentPlanStageExecutions(project.project_id);
   },
   reset() {
     internal.set(initial);
   },
 };
+
+/// CR-05 P4 slice 2 — list the project's CR-05 plans, pick the
+/// most recent (whatever the backend returns first; the list
+/// endpoint sorts by `created_at desc` already in CR-05 P1),
+/// and refresh its `StageExecutionSummary` rows into the
+/// store so downstream consumers (slice 1's `stageStatuses`
+/// derivation, the per-stage lists in `ProcessingControls`)
+/// see the latest run state without requiring the user to
+/// navigate to Process first.
+async function refreshMostRecentPlanStageExecutions(
+  projectId: string,
+): Promise<void> {
+  try {
+    const plans = await api.pipelinePlanListForProject(projectId);
+    const mostRecent = plans[0];
+    if (!mostRecent) return;
+    const execs = await api.pipelinePlanListStageExecutions(mostRecent.plan_id);
+    stageExecutions.update((map) => ({ ...map, [mostRecent.plan_id]: execs }));
+  } catch {
+    // Best-effort. The store simply stays empty until a
+    // navigation or runner callback populates it.
+  }
+}
 
 /** Status for each stage of the §8 checklist. P4 derives the
  *  'process' stage from the most recent pipeline run. Import /

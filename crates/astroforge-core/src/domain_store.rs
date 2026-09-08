@@ -11,7 +11,7 @@
 //! other stores.
 
 use crate::domain::{
-    Artifact, ArtifactCategory, PipelineRun, PipelineRunStatus, Project, ProjectEvent,
+    Artifact, ArtifactCategory, PipelineRun, PipelineRunStatus, PreviewRun, Project, ProjectEvent,
     ProjectEventKind, ProjectStatus, Session, SourceAsset, StageRunRecord, Target,
     DOMAIN_SCHEMA_VERSION,
 };
@@ -183,6 +183,40 @@ CREATE TABLE stage_run_records (
 
 CREATE INDEX idx_stage_run_records_run ON stage_run_records(run_id);
 CREATE INDEX idx_stage_run_records_stage ON stage_run_records(stage_id);
+"#,
+    ),
+    (
+        4,
+        r#"
+-- CR-05 P4 slice 3 — preview-before-commit rows (CR-05 §11 + §26).
+-- Persists the result of running a stage handler on a representative
+-- region of the input image. stage_execution_id and
+-- source_version_id are logical FKs (string ids) — the related rows
+-- live in other SQLite databases (PipelinePlanStore, etc.) so we
+-- do not enforce a SQLite-level FK constraint. Tauri commands
+-- verify existence at the application boundary.
+CREATE TABLE preview_runs (
+    id TEXT PRIMARY KEY,
+    stage_execution_id TEXT NOT NULL,
+    source_version_id TEXT NOT NULL,
+    preview_artifact_id TEXT,
+    parameters_json TEXT NOT NULL,
+    parameters_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    scale REAL NOT NULL DEFAULT 0.25,
+    label TEXT NOT NULL DEFAULT 'Preview',
+    error_json TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_preview_runs_stage_execution
+    ON preview_runs(stage_execution_id);
+CREATE INDEX idx_preview_runs_status
+    ON preview_runs(status);
+CREATE INDEX idx_preview_runs_parameters_hash
+    ON preview_runs(parameters_hash);
 "#,
     ),
 ];
@@ -836,6 +870,181 @@ impl DomainStore {
         }
         Ok(out)
     }
+
+    // ─── CR-05 P4 slice 3 — PreviewRun CRUD (preview-before-commit) ────────
+    //
+    // Persists the result of running a stage handler on a
+    // representative region of the input image. The companion
+    // Tauri command layer (slice 4+) drives a stage handler at a
+    // downscale and writes the resulting `PreviewRun` row + a
+    // companion `Artifact` row (`preview_artifact_id`).
+
+    /// Insert a new preview row. The caller supplies the
+    /// `preview_id` (or empty string to auto-generate one with the
+    /// `prev_` prefix), `parameters_hash`, and the initial status.
+    /// Returns the stored preview id.
+    pub fn create_preview_run(&self, preview: &PreviewRun) -> Result<String> {
+        let id = if preview.preview_id.is_empty() {
+            new_id("prev")
+        } else {
+            preview.preview_id.clone()
+        };
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO preview_runs (
+                id, stage_execution_id, source_version_id, preview_artifact_id,
+                parameters_json, parameters_hash, status, scale, label,
+                error_json, started_at, completed_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+             )",
+            params![
+                id,
+                preview.stage_execution_id,
+                preview.source_version_id,
+                preview.preview_artifact_id,
+                preview.parameters_json,
+                preview.parameters_hash,
+                preview.status,
+                preview.scale,
+                preview.label,
+                preview.error_json,
+                preview.started_at,
+                preview.completed_at,
+            ],
+        )?;
+        Ok(id)
+    }
+
+    /// Fetch a single preview by id. Returns `NotFound` when no
+    /// row matches.
+    pub fn get_preview_run(&self, preview_id: &str) -> Result<PreviewRun> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, stage_execution_id, source_version_id, preview_artifact_id,
+                    parameters_json, parameters_hash, status, scale, label,
+                    error_json, started_at, completed_at, created_at
+             FROM preview_runs WHERE id = ?1",
+        )?;
+        let row = stmt
+            .query_row(params![preview_id], preview_run_row)
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    DomainStoreError::NotFound(preview_id.to_string())
+                }
+                other => DomainStoreError::Sqlite(other),
+            })?;
+        preview_run_from_row(row)
+    }
+
+    /// List every preview recorded against a given stage execution,
+    /// in creation order. Used by the §11 preview UI to show
+    /// "this stage's recent previews".
+    pub fn list_preview_runs_for_stage_execution(
+        &self,
+        stage_execution_id: &str,
+    ) -> Result<Vec<PreviewRun>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, stage_execution_id, source_version_id, preview_artifact_id,
+                    parameters_json, parameters_hash, status, scale, label,
+                    error_json, started_at, completed_at, created_at
+             FROM preview_runs WHERE stage_execution_id = ?1
+             ORDER BY COALESCE(started_at, '') ASC, created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![stage_execution_id], preview_run_row)?;
+        let mut collected = Vec::new();
+        for r in rows {
+            collected.push(preview_run_from_row(r?)?);
+        }
+        Ok(collected)
+    }
+
+    /// Transition a preview to `running`. Sets `started_at`. Returns
+    /// `NotFound` when the preview does not exist.
+    pub fn mark_preview_running(&self, preview_id: &str, started_at: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE preview_runs
+             SET status = ?1, started_at = ?2
+             WHERE id = ?3",
+            params![
+                crate::domain::preview_status::RUNNING,
+                started_at,
+                preview_id
+            ],
+        )?;
+        if n == 0 {
+            return Err(DomainStoreError::NotFound(preview_id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Mark a preview complete and attach its resulting artifact.
+    /// `preview_artifact_id` is set, `completed_at` recorded.
+    pub fn mark_preview_completed(
+        &self,
+        preview_id: &str,
+        preview_artifact_id: &str,
+        completed_at: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE preview_runs
+             SET status = ?1, preview_artifact_id = ?2, completed_at = ?3
+             WHERE id = ?4",
+            params![
+                crate::domain::preview_status::COMPLETED,
+                preview_artifact_id,
+                completed_at,
+                preview_id,
+            ],
+        )?;
+        if n == 0 {
+            return Err(DomainStoreError::NotFound(preview_id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Mark a preview failed and record the error JSON.
+    pub fn mark_preview_failed(
+        &self,
+        preview_id: &str,
+        error_json: &str,
+        completed_at: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE preview_runs
+             SET status = ?1, error_json = ?2, completed_at = ?3
+             WHERE id = ?4",
+            params![
+                crate::domain::preview_status::FAILED,
+                error_json,
+                completed_at,
+                preview_id,
+            ],
+        )?;
+        if n == 0 {
+            return Err(DomainStoreError::NotFound(preview_id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Delete a preview row. Used by the §11 preview UI's
+    /// "discard" affordance and by tests. Returns `NotFound`
+    /// when no row matched.
+    pub fn delete_preview_run(&self, preview_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "DELETE FROM preview_runs WHERE id = ?1",
+            params![preview_id],
+        )?;
+        if n == 0 {
+            return Err(DomainStoreError::NotFound(preview_id.to_string()));
+        }
+        Ok(())
+    }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1029,6 +1238,59 @@ fn stage_run_from_row(r: StageRunRow) -> Result<StageRunRecord> {
     })
 }
 
+/// CR-05 P4 slice 3 — column order for `preview_runs` queries.
+type PreviewRunRow = (
+    String,         // id
+    String,         // stage_execution_id
+    String,         // source_version_id
+    Option<String>, // preview_artifact_id
+    String,         // parameters_json
+    String,         // parameters_hash
+    String,         // status
+    f64,            // scale
+    String,         // label
+    Option<String>, // error_json
+    Option<String>, // started_at
+    Option<String>, // completed_at
+    String,         // created_at
+);
+
+fn preview_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PreviewRunRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+        row.get(12)?,
+    ))
+}
+
+fn preview_run_from_row(r: PreviewRunRow) -> Result<PreviewRun> {
+    Ok(PreviewRun {
+        preview_id: r.0,
+        stage_execution_id: r.1,
+        source_version_id: r.2,
+        preview_artifact_id: r.3,
+        parameters_json: r.4,
+        parameters_hash: r.5,
+        status: r.6,
+        scale: r.7,
+        label: r.8,
+        error_json: r.9,
+        started_at: r.10,
+        completed_at: r.11,
+        created_at: r.12,
+    })
+}
+
 /// Column order shared by the artifacts queries.
 #[allow(clippy::type_complexity)]
 type ArtifactRow = (
@@ -1124,7 +1386,7 @@ fn new_id(prefix: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::ObjectType;
+    use crate::domain::{ObjectType, PreviewRun};
     use std::path::PathBuf;
 
     fn store() -> DomainStore {
@@ -1161,10 +1423,14 @@ mod tests {
     #[test]
     fn migrations_apply_once_and_are_idempotent() {
         let s = store();
-        assert_eq!(s.schema_version(), 3);
+        // CR-05 P4 slice 3 — migration v4 added the `preview_runs`
+        // table. Bump the expected version; the assertion still
+        // proves the runner applies migrations exactly once and
+        // re-running it on a fresh store does not double-apply.
+        assert_eq!(s.schema_version(), 4);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 3);
+        assert_eq!(s2.schema_version(), 4);
     }
 
     #[test]
@@ -1420,5 +1686,200 @@ mod tests {
         assert!(ids.contains(&running));
         assert!(ids.contains(&queued));
         assert!(!ids.contains(&done));
+    }
+
+    // ─── CR-05 P4 slice 3 — PreviewRun CRUD tests ─ ────────────────────────
+
+    fn blank_preview(stage_execution_id: &str, source_version_id: &str) -> PreviewRun {
+        PreviewRun {
+            preview_id: String::new(),
+            stage_execution_id: stage_execution_id.into(),
+            source_version_id: source_version_id.into(),
+            preview_artifact_id: None,
+            parameters_json: r#"{"sigma":1.5,"gain":1.0}"#.into(),
+            parameters_hash: "sha256:abc123".into(),
+            status: crate::domain::preview_status::PENDING.into(),
+            scale: 0.25,
+            label: "Preview — Calibrate @ 0.25".into(),
+            error_json: None,
+            started_at: None,
+            completed_at: None,
+            created_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn preview_run_migration_is_applied_on_open() {
+        let s = store();
+        // Schema migrations must reach version 4 after open.
+        assert!(s.schema_version() >= 4);
+    }
+
+    #[test]
+    fn preview_run_round_trip_persists_all_fields() {
+        let s = store();
+        let preview = blank_preview("ste_1", "ver_1");
+        let id = s.create_preview_run(&preview).unwrap();
+        assert!(id.starts_with("prev_"));
+        let row = s.get_preview_run(&id).unwrap();
+        assert_eq!(row.preview_id, id);
+        assert_eq!(row.stage_execution_id, "ste_1");
+        assert_eq!(row.source_version_id, "ver_1");
+        assert_eq!(row.parameters_hash, "sha256:abc123");
+        assert_eq!(row.status, crate::domain::preview_status::PENDING);
+        assert!((row.scale - 0.25).abs() < f64::EPSILON);
+        assert_eq!(row.label, "Preview — Calibrate @ 0.25");
+        assert!(row.preview_artifact_id.is_none());
+        assert!(row.started_at.is_none());
+        assert!(row.completed_at.is_none());
+        assert!(row.error_json.is_none());
+        // created_at is filled in by SQL DEFAULT.
+        assert!(!row.created_at.is_empty());
+    }
+
+    #[test]
+    fn preview_run_supplied_id_is_honoured() {
+        let s = store();
+        let mut preview = blank_preview("ste_2", "ver_2");
+        preview.preview_id = "prev_custom".into();
+        let id = s.create_preview_run(&preview).unwrap();
+        assert_eq!(id, "prev_custom");
+    }
+
+    #[test]
+    fn preview_run_get_unknown_id_returns_not_found() {
+        let s = store();
+        let err = s.get_preview_run("prev_does_not_exist").unwrap_err();
+        match err {
+            DomainStoreError::NotFound(id) => assert_eq!(id, "prev_does_not_exist"),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preview_run_list_filters_by_stage_execution_id() {
+        let s = store();
+        s.create_preview_run(&blank_preview("ste_a", "ver_1"))
+            .unwrap();
+        s.create_preview_run(&blank_preview("ste_a", "ver_2"))
+            .unwrap();
+        s.create_preview_run(&blank_preview("ste_b", "ver_1"))
+            .unwrap();
+
+        let ste_a = s.list_preview_runs_for_stage_execution("ste_a").unwrap();
+        assert_eq!(ste_a.len(), 2);
+        for p in &ste_a {
+            assert_eq!(p.stage_execution_id, "ste_a");
+        }
+
+        let ste_b = s.list_preview_runs_for_stage_execution("ste_b").unwrap();
+        assert_eq!(ste_b.len(), 1);
+        assert_eq!(ste_b[0].stage_execution_id, "ste_b");
+
+        let empty = s
+            .list_preview_runs_for_stage_execution("ste_missing")
+            .unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn preview_run_mark_running_sets_status_and_timestamp() {
+        let s = store();
+        let id = s
+            .create_preview_run(&blank_preview("ste_r", "ver_1"))
+            .unwrap();
+        s.mark_preview_running(&id, "unix_ms:1000").unwrap();
+        let row = s.get_preview_run(&id).unwrap();
+        assert_eq!(row.status, crate::domain::preview_status::RUNNING);
+        assert_eq!(row.started_at.as_deref(), Some("unix_ms:1000"));
+    }
+
+    #[test]
+    fn preview_run_mark_running_unknown_returns_not_found() {
+        let s = store();
+        let err = s.mark_preview_running("prev_x", "unix_ms:1").unwrap_err();
+        match err {
+            DomainStoreError::NotFound(id) => assert_eq!(id, "prev_x"),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preview_run_mark_completed_attaches_artifact() {
+        let s = store();
+        let id = s
+            .create_preview_run(&blank_preview("ste_c", "ver_1"))
+            .unwrap();
+        s.mark_preview_running(&id, "unix_ms:100").unwrap();
+        s.mark_preview_completed(&id, "art_preview_42", "unix_ms:200")
+            .unwrap();
+        let row = s.get_preview_run(&id).unwrap();
+        assert_eq!(row.status, crate::domain::preview_status::COMPLETED);
+        assert_eq!(row.preview_artifact_id.as_deref(), Some("art_preview_42"));
+        assert_eq!(row.completed_at.as_deref(), Some("unix_ms:200"));
+    }
+
+    #[test]
+    fn preview_run_mark_failed_records_error() {
+        let s = store();
+        let id = s
+            .create_preview_run(&blank_preview("ste_f", "ver_1"))
+            .unwrap();
+        s.mark_preview_running(&id, "unix_ms:10").unwrap();
+        s.mark_preview_failed(&id, r#"{"error":"oom"}"#, "unix_ms:20")
+            .unwrap();
+        let row = s.get_preview_run(&id).unwrap();
+        assert_eq!(row.status, crate::domain::preview_status::FAILED);
+        assert_eq!(row.error_json.as_deref(), Some(r#"{"error":"oom"}"#));
+        assert_eq!(row.completed_at.as_deref(), Some("unix_ms:20"));
+    }
+
+    #[test]
+    fn preview_run_delete_removes_row() {
+        let s = store();
+        let id = s
+            .create_preview_run(&blank_preview("ste_d", "ver_1"))
+            .unwrap();
+        s.delete_preview_run(&id).unwrap();
+        let err = s.get_preview_run(&id).unwrap_err();
+        match err {
+            DomainStoreError::NotFound(found) => assert_eq!(found, id),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preview_run_delete_unknown_returns_not_found() {
+        let s = store();
+        let err = s.delete_preview_run("prev_nope").unwrap_err();
+        match err {
+            DomainStoreError::NotFound(id) => assert_eq!(id, "prev_nope"),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preview_run_migration_is_idempotent_across_reopen() {
+        // Open twice with the same path and confirm migration
+        // does not double-apply. Uses a temp file (`:memory:` would
+        // lose state between opens).
+        let path = std::env::temp_dir().join("astroforge_preview_migration.sqlite");
+        if path.exists() {
+            std::fs::remove_file(&path).unwrap();
+        }
+        {
+            let s = DomainStore::new(&path).unwrap();
+            assert!(s.schema_version() >= 4);
+        }
+        {
+            let s = DomainStore::new(&path).unwrap();
+            assert!(s.schema_version() >= 4);
+            // Smoke: CRUD still works.
+            let id = s
+                .create_preview_run(&blank_preview("ste_i", "ver_1"))
+                .unwrap();
+            assert!(id.starts_with("prev_"));
+        }
+        let _ = std::fs::remove_file(&path);
     }
 }

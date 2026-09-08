@@ -429,6 +429,59 @@ pub struct StageExecution {
     pub metric_snapshot_json: Option<String>,
 }
 
+/// CR-05 P4 slice 3 — preview-before-commit row (CR-05 §11 + §26).
+///
+/// Persists the result of running a stage handler on a representative
+/// region of the input image, so the user can evaluate a processing
+/// choice before committing full-resolution compute. Pairs with
+/// `StageExecution.parameters_hash` (Decision D-CR05-5): a full-
+/// resolution run may not proceed unless its `parameters_hash`
+/// matches the preview that the user approved.
+///
+/// `stage_execution_id` and `source_version_id` are **logical** foreign
+/// keys (string ids) — `PreviewRun` rows live in the project
+/// (DomainStore) SQLite while the related `stage_executions` row
+/// lives in the plan (PipelinePlanStore) SQLite. We do not enforce a
+/// SQLite-level FK across the two databases; integrity is verified
+/// at the application boundary (Tauri command handlers reject
+/// references to non-existent rows).
+///
+/// `preview_artifact_id` references a row in the same project
+/// (DomainStore) `artifacts` table. Null while the preview is
+/// pending or running; populated on completion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviewRun {
+    pub preview_id: String,
+    pub stage_execution_id: String,
+    pub source_version_id: String,
+    pub preview_artifact_id: Option<String>,
+    pub parameters_json: String,
+    pub parameters_hash: String,
+    pub status: String,
+    /// Downscale factor applied to the input (e.g. 0.25 for a
+    /// quarter-size preview). Matches the spec §11 "Preview —
+    /// reduced resolution" convention.
+    pub scale: f64,
+    /// User-facing label, e.g. "Preview — Calibrate @ 0.25".
+    pub label: String,
+    pub error_json: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub created_at: String,
+}
+
+/// CR-05 P4 slice 3 — canonical status values for `PreviewRun.status`.
+/// Mirrors the StageExecutionStatus vocabulary used in CR-05 P2
+/// (slice 1 + 2.5) but is exposed as constants here so the
+/// DomainStore CRUD layer can validate incoming values without
+/// depending on the pipeline_plan module.
+pub mod preview_status {
+    pub const PENDING: &str = "pending";
+    pub const RUNNING: &str = "running";
+    pub const COMPLETED: &str = "completed";
+    pub const FAILED: &str = "failed";
+}
+
 /// CR-05 §26 — status of a PipelinePlan. Mirrors the §8 state vocabulary
 /// (Not started / Ready / Running / Completed / Paused / Needs attention /
 /// Failed / Recovering) but as a persisted, queryable enum.

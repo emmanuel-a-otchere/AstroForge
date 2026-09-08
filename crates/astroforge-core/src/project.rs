@@ -346,7 +346,10 @@ mod tests {
 
         let reopened = mgr.open_project("m31").unwrap();
         assert_eq!(reopened.manifest.project_id, pid);
-        assert_eq!(reopened.store.schema_version(), 3);
+        // CR-05 P4 slice 3 — migration v4 (preview_runs) bumped the
+        // schema version; the assertion still proves the version is
+        // recorded correctly across project reopen.
+        assert_eq!(reopened.store.schema_version(), 4);
 
         // Tampered manifest is rejected.
         let mut bad = reopened.manifest.clone();

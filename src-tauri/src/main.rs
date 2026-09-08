@@ -16,6 +16,7 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 mod commands_pipeline_plan;
+mod commands_preview;
 mod commands_project;
 
 /// Tauri-managed state: holds the GalleryStore (rusqlite) behind a
@@ -638,6 +639,12 @@ fn main() {
             commands_pipeline_plan::apply_recommendation,
             commands_pipeline_plan::dismiss_recommendation,
             commands_pipeline_plan::reset_recommendation,
+            // CR-05 P4 slice 4 — preview-before-commit IPC.
+            commands_preview::create_preview_run,
+            commands_preview::list_preview_runs_for_stage_execution,
+            commands_preview::get_preview_run,
+            commands_preview::mark_preview_failed,
+            commands_preview::delete_preview_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

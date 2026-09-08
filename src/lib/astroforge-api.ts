@@ -328,3 +328,60 @@ export const resetRecommendation = (
   recommendationId: string,
 ): Promise<RecommendationUpdateResult> =>
   invoke("reset_recommendation", { recommendationId });
+
+// ─── CR-05 P4 slice 4 — preview-before-commit API (additive) ─────────────
+//
+// Mirrors the slice 4 Rust commands. Slice 4 ships lifecycle
+// wiring only — the actual stage-handler integration (running a
+// handler at scale and writing a real preview image) lands in
+// slice 5. For now `createPreviewRun` immediately returns a
+// PreviewRun with status `completed` + a synthesized placeholder
+// artifact so the UI can exercise the read-back path.
+
+export interface PreviewRunDto {
+  preview_id: string;
+  stage_execution_id: string;
+  source_version_id: string;
+  preview_artifact_id: string | null;
+  parameters_json: string;
+  parameters_hash: string;
+  status: "pending" | "running" | "completed" | "failed";
+  scale: number;
+  label: string;
+  error_json: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface CreatePreviewRunRequest {
+  stage_execution_id: string;
+  source_version_id: string;
+  parameters_json: string;
+  scale?: number | null;
+  label?: string | null;
+}
+
+export const createPreviewRun = (
+  request: CreatePreviewRunRequest,
+): Promise<PreviewRunDto> =>
+  invoke("create_preview_run", { request });
+
+export const listPreviewRunsForStageExecution = (
+  stageExecutionId: string,
+): Promise<PreviewRunDto[]> =>
+  invoke("list_preview_runs_for_stage_execution", { stageExecutionId });
+
+export const getPreviewRun = (
+  previewId: string,
+): Promise<PreviewRunDto> => invoke("get_preview_run", { previewId });
+
+export const markPreviewFailed = (
+  previewId: string,
+  errorJson: string,
+): Promise<void> =>
+  invoke("mark_preview_failed", { previewId, errorJson });
+
+export const deletePreviewRun = (
+  previewId: string,
+): Promise<void> => invoke("delete_preview_run", { previewId });

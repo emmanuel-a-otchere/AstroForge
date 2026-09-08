@@ -21,7 +21,10 @@ import {
   applyRecommendation,
   cancelPipelinePlan,
   createPipelinePlan,
+  createPreviewRun,
+  deletePreviewRun,
   dismissRecommendation,
+  listPreviewRunsForStageExecution,
   pausePipelinePlan,
   pipelinePlanGet,
   pipelinePlanListForProject,
@@ -32,10 +35,12 @@ import {
   resumePipelinePlan,
   startPipelinePlan,
   type CreatePipelinePlanRequest,
+  type CreatePreviewRunRequest,
   type PipelinePlanDto,
   type PipelinePlanMode,
   type PipelinePlanSummary,
   type PipelineStageDto,
+  type PreviewRunDto,
   type RecommendationDto,
   type RecommendationUpdateResult,
   type RunOutcome,
@@ -80,6 +85,17 @@ export const resumablePlans = writable<PipelinePlanSummary[]>([]);
 export const recommendationsForPlan = writable<Record<string, RecommendationDto[]>>(
   {},
 );
+
+// ─── CR-05 P4 slice 4 — preview runs store ─ ─────────────────────── ─ ─
+//
+// `previewRunsForStageExecution` is keyed by stage_execution_id so
+// multiple stages can be observed concurrently (matches the
+// `stageExecutions` shape). The slice 4 IPC returns a
+// placeholder-completed PreviewRun; slice 5 will move the synthesis
+// into a background worker and add intermediate "running" frames.
+export const previewRunsForStageExecution = writable<
+  Record<string, PreviewRunDto[]>
+>({});
 
 // Derived: a human-readable processing journey string per CR-05 §2.1
 // ("M31 — Deep Sky OSC / ✓ Calibrate / ✓ Debayer / …"). Components
@@ -371,6 +387,72 @@ export function requiredStages(plan: PipelinePlanDto): PipelineStageDto[] {
 
 export function optionalStages(plan: PipelinePlanDto): PipelineStageDto[] {
   return plan.stages.filter((s) => !s.required);
+}
+
+// ─── CR-05 P4 slice 4 — preview operations ─────────────────────────────
+//
+// `refreshPreviewRuns(stage_execution_id)` re-reads every preview
+// for the stage; `createPreviewRunFor` invokes the IPC, patches the
+// new row in, and returns the DTO so the caller can show
+// confirmation; `deletePreviewRunFor` removes the row and refreshes
+// the cache.
+
+export async function refreshPreviewRuns(
+  stageExecutionId: string,
+): Promise<PreviewRunDto[]> {
+  try {
+    const rows = await listPreviewRunsForStageExecution(stageExecutionId);
+    previewRunsForStageExecution.update((map) => ({
+      ...map,
+      [stageExecutionId]: rows,
+    }));
+    return rows;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return [];
+  }
+}
+
+/// CR-05 P4 slice 4 — merge a freshly-created preview row into the
+/// per-stage-execution cache so the UI updates without a
+/// re-fetch.
+function mergePreviewRun(
+  stageExecutionId: string,
+  created: PreviewRunDto,
+): void {
+  previewRunsForStageExecution.update((map) => {
+    const list = map[stageExecutionId] ?? [];
+    const next = [created, ...list.filter((p) => p.preview_id !== created.preview_id)];
+    return { ...map, [stageExecutionId]: next };
+  });
+}
+
+export async function createPreviewRunFor(
+  request: CreatePreviewRunRequest,
+): Promise<PreviewRunDto | null> {
+  try {
+    const created = await createPreviewRun(request);
+    mergePreviewRun(request.stage_execution_id, created);
+    return created;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return null;
+  }
+}
+
+export async function deletePreviewRunFor(
+  stageExecutionId: string,
+  previewId: string,
+): Promise<void> {
+  try {
+    await deletePreviewRun(previewId);
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return;
+  }
+  // Refresh from the backend so the row disappears from the
+  // per-stage-execution cache.
+  await refreshPreviewRuns(stageExecutionId);
 }
 
 export function progressFraction(plan: PipelinePlanDto): number {

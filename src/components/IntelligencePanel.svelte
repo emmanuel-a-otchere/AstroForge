@@ -31,6 +31,7 @@
     applyRecommendationFor,
     dismissRecommendationFor,
     lastError,
+    previewGateSatisfiedForStageExecution,
     recommendationsForPlan,
     refreshRecommendations,
     resetRecommendationFor,
@@ -49,6 +50,13 @@
   });
 
   $: recs = $recommendationsForPlan[planId] ?? [];
+
+  // CR-05 P4 slice 6 — gate helper: is the §11 preview satisfied
+  // for this recommendation's stage execution? Falls back to
+  // false when no preview has been observed yet.
+  function isGateSatisfied(r: RecommendationDto): boolean {
+    return $previewGateSatisfiedForStageExecution[r.stage_execution_id] === true;
+  }
 
   function confidencePercent(r: RecommendationDto): string {
     // CR-05 P3 slice 2 — confidence is a 0.0..1.0 heuristic.
@@ -80,6 +88,10 @@
   }
 
   async function onApply(r: RecommendationDto) {
+    // CR-05 P4 slice 6 — the Rust side enforces this gate at apply
+    // time and returns a "preview required" error. Surface that
+    // error verbatim in the global `lastError` so the user sees
+    // the hint in the existing error banner (no new component).
     pendingAction = { ...pendingAction, [r.id]: "apply" };
     try {
       await applyRecommendationFor(planId, r.id);
@@ -132,6 +144,7 @@
         {@const applied = isApplied(r)}
         {@const dismissed = isDismissed(r)}
         {@const pending = isPending(r)}
+        {@const gateSatisfied = isGateSatisfied(r)}
         {@const busy = pendingAction[r.id] !== undefined}
         <li class="rec-card" class:applied class:dismissed data-status={r.user_decision ?? "pending"}>
           <header class="rec-header">
@@ -173,11 +186,19 @@
                   type="button"
                   class="btn apply"
                   on:click={() => onApply(r)}
-                  disabled={busy}
+                  disabled={busy || !gateSatisfied}
+                  title={gateSatisfied
+                    ? `Apply recommendation ${r.rule_id}`
+                    : "Preview required: run a preview of this stage before applying"}
                   aria-label={`Apply recommendation ${r.rule_id}`}
                 >
                   {busy && pendingAction[r.id] === "apply" ? "Applying…" : "Apply"}
                 </button>
+                {#if !gateSatisfied}
+                  <span class="gate-hint font-body" role="status">
+                    Preview required — generate a preview above before applying.
+                  </span>
+                {/if}
               {/if}
               {#if pending || applied}
                 <button
@@ -336,6 +357,16 @@
   .actions {
     display: flex;
     gap: var(--sp-xs);
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  /* CR-05 P4 slice 6 — the "Preview required" hint that lives next
+     to the disabled Apply button. Inline so the disabled button
+     and its reason are visually paired. */
+  .gate-hint {
+    color: var(--on-surface-variant);
+    font-size: 0.75rem;
+    font-style: italic;
   }
   .btn {
     border: 1px solid var(--outline);

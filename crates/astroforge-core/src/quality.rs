@@ -256,7 +256,7 @@ fn estimate_fwhm(image: &F32Image, mean: f64, stddev: f64) -> f64 {
         None => return 0.0,
     };
 
-    let c = 0usize.min(image.channels().saturating_sub(1));
+    let c = 0usize;
     let half_max = max_val * 0.5;
     let w = image.width();
     let mut left = px as f64;

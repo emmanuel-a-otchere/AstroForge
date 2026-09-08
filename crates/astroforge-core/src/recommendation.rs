@@ -97,6 +97,12 @@ pub struct Recommendation {
     /// (P4) trace which stage consumed the override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_stage_id: Option<String>,
+    /// CR-05 P4 slice 6 — id of the `preview_run` that satisfied
+    /// the §11 gate when this recommendation was applied.
+    /// `None` for un-applied or legacy rows. Provenance only; the
+    /// gate logic lives in the Tauri command layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_with_preview_id: Option<String>,
 }
 
 // ─── Rule trait ──────────────────────────────────────────────────────────
@@ -334,6 +340,8 @@ impl RecommendationEngine {
                     user_decision: None,
                     user_decision_at: None,
                     applied_stage_id: None,
+                    // P4 slice 6 — populated on apply, not engine.
+                    applied_with_preview_id: None,
                 })
             })
             .collect();

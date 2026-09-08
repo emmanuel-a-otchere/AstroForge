@@ -512,6 +512,10 @@ pub struct RecommendationDto {
     /// CR-05 P3 slice 2.5 — when applied, the `pipeline_stages.stage_id`
     /// whose `parameters_json` was rewritten by the apply.
     pub applied_stage_id: Option<String>,
+    /// CR-05 P4 slice 6 — id of the `preview_run` that satisfied
+    /// the §11 preview-before-commit gate when this recommendation
+    /// was applied. `None` for not-yet-applied or legacy rows.
+    pub applied_with_preview_id: Option<String>,
 }
 
 impl From<&astroforge_core::recommendation::Recommendation> for RecommendationDto {
@@ -533,6 +537,7 @@ impl From<&astroforge_core::recommendation::Recommendation> for RecommendationDt
             user_decision: r.user_decision.clone(),
             user_decision_at: r.user_decision_at.clone(),
             applied_stage_id: r.applied_stage_id.clone(),
+            applied_with_preview_id: r.applied_with_preview_id.clone(),
         }
     }
 }
@@ -602,12 +607,69 @@ fn now_unix_ms_string() -> String {
     format!("unix_ms:{}", ms)
 }
 
+/// CR-05 P4 slice 6 — inverse of `now_unix_ms_string`. Extracts
+/// the integer millisecond value from a `unix_ms:<n>` string.
+/// Returns `None` for any other shape (defensive — we don't want
+/// the gate to silently bypass on bad input).
+fn parse_unix_ms(s: &str) -> Option<i64> {
+    s.strip_prefix("unix_ms:").and_then(|tail| tail.parse().ok())
+}
+
 #[tauri::command]
 pub fn apply_recommendation(
     state: State<'_, PipelinePlanState>,
     recommendation_id: String,
 ) -> Result<RecommendationUpdateResult, String> {
     let timestamp = now_unix_ms_string();
+    // CR-05 P4 slice 6 — preview-before-commit gate (§11).
+    //
+    // Resolve the recommendation's stage_execution_id first so we
+    // can look up a qualifying preview in the domain store. The
+    // preview must:
+    //   - belong to the same stage_execution_id
+    //   - have status = completed
+    //   - have completed_at > recommendation.created_at
+    // (the last condition ensures the user previewed after the
+    // recommendation was emitted — i.e. they actually saw what
+    // the recommendation is changing).
+    //
+    // If no qualifying preview exists, return a typed error so
+    // the UI can surface "preview required" instead of allowing
+    // a blind apply.
+    let stage_execution_id = {
+        let store = state.store.lock().map_err(lock_err)?;
+        store
+            .stage_execution_id_for_recommendation(&recommendation_id)
+            .map_err(store_err_to_string)?
+    };
+
+    let preview = {
+        let domain_store = state
+            .domain_store
+            .clone()
+            .ok_or_else(|| "domain store is unavailable".to_string())?;
+        let store = state.store.lock().map_err(lock_err)?;
+        let rec = store
+            .get_recommendation_by_id(&recommendation_id)
+            .map_err(store_err_to_string)?;
+        drop(store);
+        // The recommendation.created_at is `unix_ms:<ms>`; extract
+        // the integer part for the cutoff comparison.
+        let cutoff_ms = parse_unix_ms(&rec.created_at)
+            .ok_or_else(|| format!("recommendation has malformed created_at: {}", rec.created_at))?;
+        domain_store
+            .latest_completed_preview_for_stage_execution(&stage_execution_id, cutoff_ms)
+            .map_err(|e| format!("preview gate lookup failed: {e}"))?
+    };
+    let preview_id = match preview {
+        Some(p) => p.preview_id,
+        None => {
+            return Err(format!(
+                "preview required: no completed preview found for stage_execution '{stage_execution_id}' after the recommendation was emitted"
+            ));
+        }
+    };
+
     // Two passes: first mutate (commit), then re-read inside the
     // same store so the returned row reflects the post-update
     // state. The lock is released between passes so the
@@ -615,13 +677,11 @@ pub fn apply_recommendation(
     let applied_stage_id = {
         let store = state.store.lock().map_err(lock_err)?;
         let (_id, applied_stage_id) = store
-            .apply_recommendation(&recommendation_id, &timestamp)
+            .apply_recommendation(&recommendation_id, &timestamp, &preview_id)
             .map_err(store_err_to_string)?;
         applied_stage_id
     };
     let store = state.store.lock().map_err(lock_err)?;
-    let stage_execution_id = stage_execution_id_for_recommendation(&store, &recommendation_id)
-        .map_err(store_err_to_string)?;
     let recs = store
         .list_recommendations_for_stage_execution(&stage_execution_id)
         .map_err(store_err_to_string)?;
@@ -672,6 +732,13 @@ pub fn dismiss_recommendation(
     Ok(RecommendationUpdateResult {
         recommendation: RecommendationDto::from(&rec),
         applied_stage_id: rec.applied_stage_id.clone(),
+        // The DTO `From<&Recommendation>` constructor populates
+        // `applied_with_preview_id`, so a manual `rec.clone()` or
+        // `RecommendationDto::from(&rec)` would be safer here. The
+        // direct field-by-field copy below predates slice 6; the
+        // missing field is filled in to keep the DTO consistent
+        // with `RecommendationDto::from`.
+        applied_with_preview_id: rec.applied_with_preview_id.clone(),
     })
 }
 

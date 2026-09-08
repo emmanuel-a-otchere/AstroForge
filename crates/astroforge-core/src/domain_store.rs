@@ -15,7 +15,7 @@ use crate::domain::{
     ProjectEventKind, ProjectStatus, Session, SourceAsset, StageRunRecord, Target,
     DOMAIN_SCHEMA_VERSION,
 };
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -1050,6 +1050,45 @@ impl DomainStore {
         }
         Ok(())
     }
+
+    /// CR-05 P4 slice 6 — gate lookup for `apply_recommendation`.
+    /// Returns the most-recent completed preview for the given
+    /// stage execution whose `completed_at` is **after** the
+    /// supplied `created_after_unix_ms` timestamp (the
+    /// recommendation's creation time). `None` means the gate
+    /// should block the apply: the user has either not previewed
+    /// at all, or last previewed before this recommendation was
+    /// emitted (and so hasn't seen the new proposed change).
+    pub fn latest_completed_preview_for_stage_execution(
+        &self,
+        stage_execution_id: &str,
+        created_after_unix_ms: i64,
+    ) -> Result<Option<PreviewRun>> {
+        let conn = self.conn.lock().unwrap();
+        // Cast the iso8601-like `completed_at` (we use unix_ms:<n>
+        // format) to an integer comparison; the `> ?2` keeps the
+        // previews that landed after the recommendation.
+        let row: Option<PreviewRunRow> = conn
+            .query_row(
+                "SELECT id, stage_execution_id, source_version_id, preview_artifact_id,
+                        parameters_json, parameters_hash, status, scale, label,
+                        error_json, started_at, completed_at, created_at
+                 FROM preview_runs
+                 WHERE stage_execution_id = ?1
+                   AND status = ?2
+                   AND CAST(REPLACE(completed_at, 'unix_ms:', '') AS INTEGER) > ?3
+                 ORDER BY CAST(REPLACE(completed_at, 'unix_ms:', '') AS INTEGER) DESC
+                 LIMIT 1",
+                params![
+                    stage_execution_id,
+                    crate::domain::preview_status::COMPLETED,
+                    created_after_unix_ms
+                ],
+                preview_run_row,
+            )
+            .optional()?;
+        row.map(preview_run_from_row).transpose()
+    }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1592,7 +1631,13 @@ mod tests {
         let pid = s.create_project("M42", None, "0.1.0").unwrap();
         let sid = s.create_session(&pid, "night 1").unwrap();
         let run = s
-            .create_pipeline_run(&pid, &[sid.clone()], None, "0.1.0", "engine-1.0")
+            .create_pipeline_run(
+                &pid,
+                std::slice::from_ref(&sid),
+                None,
+                "0.1.0",
+                "engine-1.0",
+            )
             .unwrap();
         assert!(run.starts_with("run_"));
 
@@ -1837,6 +1882,63 @@ mod tests {
         assert_eq!(row.status, crate::domain::preview_status::FAILED);
         assert_eq!(row.error_json.as_deref(), Some(r#"{"error":"oom"}"#));
         assert_eq!(row.completed_at.as_deref(), Some("unix_ms:20"));
+    }
+
+    /// CR-05 P4 slice 6 — gate helper: returns the most recent
+    /// completed preview after the supplied timestamp. Three cases:
+    ///   - no completed preview after cutoff → None
+    ///   - completed preview before cutoff → None
+    ///   - completed preview after cutoff → Some with the latest
+    #[test]
+    fn latest_completed_preview_for_stage_execution_gate_semantics() {
+        let s = store();
+
+        // Old completed preview (completed before cutoff).
+        let old_id = s
+            .create_preview_run(&blank_preview("ste_gate", "ver_1"))
+            .unwrap();
+        s.mark_preview_running(&old_id, "unix_ms:50").unwrap();
+        s.mark_preview_completed(&old_id, "art_old", "unix_ms:100")
+            .unwrap();
+
+        // Failed preview after cutoff — should be ignored.
+        let fail_id = s
+            .create_preview_run(&blank_preview("ste_gate", "ver_1"))
+            .unwrap();
+        s.mark_preview_running(&fail_id, "unix_ms:300").unwrap();
+        s.mark_preview_failed(&fail_id, "{\"err\":1}", "unix_ms:400")
+            .unwrap();
+
+        // Recent completed preview after cutoff — the gate should
+        // surface this one.
+        let new_id = s
+            .create_preview_run(&blank_preview("ste_gate", "ver_1"))
+            .unwrap();
+        s.mark_preview_running(&new_id, "unix_ms:500").unwrap();
+        s.mark_preview_completed(&new_id, "art_new", "unix_ms:600")
+            .unwrap();
+
+        // Cutoff at 200: old is excluded (100 < 200), new is
+        // included (600 > 200), fail is excluded (status !=
+        // completed).
+        let pick = s
+            .latest_completed_preview_for_stage_execution("ste_gate", 200)
+            .unwrap();
+        let pick = pick.expect("expected a recent completed preview");
+        assert_eq!(pick.preview_id, new_id);
+        assert_eq!(pick.preview_artifact_id.as_deref(), Some("art_new"));
+
+        // Cutoff at 1000: no completed preview is newer → None.
+        let none = s
+            .latest_completed_preview_for_stage_execution("ste_gate", 1000)
+            .unwrap();
+        assert!(none.is_none());
+
+        // No matching stage_execution_id at all → None.
+        let no_match = s
+            .latest_completed_preview_for_stage_execution("ste_other", 0)
+            .unwrap();
+        assert!(no_match.is_none());
     }
 
     #[test]

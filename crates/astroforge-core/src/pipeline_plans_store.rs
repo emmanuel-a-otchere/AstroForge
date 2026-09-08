@@ -10,6 +10,7 @@
 
 use crate::db;
 use crate::domain::{PipelinePlan, PipelineStage, StageExecution};
+use crate::recommendation::Recommendation;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -114,6 +115,15 @@ impl PipelinePlanStore {
             "recommendations",
             "applied_stage_id",
             "ALTER TABLE recommendations ADD COLUMN applied_stage_id TEXT",
+        )?;
+        // v4: P4 slice 6 — preview-before-apply provenance.
+        // Records the preview_run.id that satisfied the §11 gate
+        // when the recommendation was applied.
+        Self::add_column_if_missing(
+            conn,
+            "recommendations",
+            "applied_with_preview_id",
+            "ALTER TABLE recommendations ADD COLUMN applied_with_preview_id TEXT",
         )?;
         Ok(())
     }
@@ -434,7 +444,8 @@ impl PipelinePlanStore {
         let mut stmt = conn.prepare(
             "SELECT id, stage_execution_id, rule_id, decision_json,
                     confidence, evidence_summary, created_at,
-                    user_decision, user_decision_at, applied_stage_id
+                    user_decision, user_decision_at, applied_stage_id,
+                    applied_with_preview_id
              FROM recommendations
              WHERE stage_execution_id = ?1
              ORDER BY rule_id ASC",
@@ -450,6 +461,7 @@ impl PipelinePlanStore {
             let user_decision: Option<String> = row.get(7)?;
             let user_decision_at: Option<String> = row.get(8)?;
             let applied_stage_id: Option<String> = row.get(9)?;
+            let applied_with_preview_id: Option<String> = row.get(10)?;
             let decision: crate::recommendation::ProcessingDecision =
                 serde_json::from_str(&decision_json).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
@@ -469,6 +481,7 @@ impl PipelinePlanStore {
                 user_decision,
                 user_decision_at,
                 applied_stage_id,
+                applied_with_preview_id,
             })
         })?;
         let mut out = Vec::new();
@@ -526,6 +539,11 @@ impl PipelinePlanStore {
                 user_decision,
                 user_decision_at,
                 applied_stage_id,
+                // P4 slice 6 — list_recommendations_for_plan
+                // doesn't carry the preview id column (it's only
+                // populated when the user actually applies). The
+                // SQL SELECT also omits it for the same reason.
+                applied_with_preview_id: None,
             })
         })?;
         let mut out = Vec::new();
@@ -601,6 +619,18 @@ impl PipelinePlanStore {
         })
     }
 
+    /// CR-05 P4 slice 6 — fetch a single recommendation by id.
+    /// Public wrapper around `get_recommendation_by_id_locked`
+    /// so Tauri commands (which hold their own `&self` borrow)
+    /// can resolve the row without juggling transactions.
+    pub fn get_recommendation_by_id(
+        &self,
+        recommendation_id: &str,
+    ) -> Result<Recommendation, PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        Self::get_recommendation_by_id_locked(&conn, recommendation_id)
+    }
+
     /// CR-05 P3 slice 2.5 — resolve a recommendation row by id
     /// (without committing to a user_decision value yet). Used by
     /// the apply / dismiss / reset commands so they share the
@@ -612,7 +642,8 @@ impl PipelinePlanStore {
         let mut stmt = conn.prepare(
             "SELECT id, stage_execution_id, rule_id, decision_json,
                     confidence, evidence_summary, created_at,
-                    user_decision, user_decision_at, applied_stage_id
+                    user_decision, user_decision_at, applied_stage_id,
+                    applied_with_preview_id
              FROM recommendations WHERE id = ?1",
         )?;
         let mut rows = stmt.query([id])?;
@@ -629,6 +660,7 @@ impl PipelinePlanStore {
         let user_decision: Option<String> = row.get(7)?;
         let user_decision_at: Option<String> = row.get(8)?;
         let applied_stage_id: Option<String> = row.get(9)?;
+        let applied_with_preview_id: Option<String> = row.get(10)?;
         let decision: crate::recommendation::ProcessingDecision =
             serde_json::from_str(&decision_json).map_err(|e| {
                 rusqlite::Error::FromSqlConversionFailure(
@@ -648,6 +680,7 @@ impl PipelinePlanStore {
             user_decision,
             user_decision_at,
             applied_stage_id,
+            applied_with_preview_id,
         })
     }
 
@@ -704,10 +737,20 @@ impl PipelinePlanStore {
     ///
     /// Returns `(recommendation_id, applied_stage_id)` so the
     /// frontend can confirm which stage consumed the override.
+    ///
+    /// **CR-05 P4 slice 6 — preview gate.** `applied_with_preview_id`
+    /// must reference a real `preview_run.id` (typically the one
+    /// the Tauri command just verified via
+    /// `DomainStore::latest_completed_preview_for_stage_execution`).
+    /// The store does not re-check the preview; the Tauri layer is
+    /// the gate. Passing an empty string is allowed and means
+    /// "no preview provenance recorded" — useful for tests and
+    /// for migrations where no preview row exists yet.
     pub fn apply_recommendation(
         &self,
         recommendation_id: &str,
         timestamp: &str,
+        applied_with_preview_id: &str,
     ) -> Result<(String, Option<String>), PipelinePlanStoreError> {
         let mut conn = self.conn.lock().expect("poisoned");
         let tx = conn.transaction()?;
@@ -730,14 +773,24 @@ impl PipelinePlanStore {
         } else {
             None
         };
+        // Persist `applied_with_preview_id` alongside the other
+        // apply metadata. NULL when the caller passed an empty
+        // string (legacy / test path).
+        let preview_id_persisted: Option<&str> = if applied_with_preview_id.is_empty() {
+            None
+        } else {
+            Some(applied_with_preview_id)
+        };
         tx.execute(
             "UPDATE recommendations
-             SET user_decision = ?1, user_decision_at = ?2, applied_stage_id = ?3
-             WHERE id = ?4",
+             SET user_decision = ?1, user_decision_at = ?2, applied_stage_id = ?3,
+                 applied_with_preview_id = ?4
+             WHERE id = ?5",
             params![
                 crate::recommendation::user_decision::APPLIED,
                 timestamp,
                 applied_stage_id,
+                preview_id_persisted,
                 recommendation_id,
             ],
         )?;
@@ -1152,6 +1205,7 @@ mod tests {
             user_decision: None,
             user_decision_at: None,
             applied_stage_id: None,
+            applied_with_preview_id: None,
         }
     }
 
@@ -1298,6 +1352,7 @@ mod tests {
             user_decision: None,
             user_decision_at: None,
             applied_stage_id: None,
+            applied_with_preview_id: None,
         }
     }
 
@@ -1324,7 +1379,9 @@ mod tests {
         );
         store.insert_recommendation(&rec).unwrap();
 
-        let (returned_id, applied_to) = store.apply_recommendation(&rec.id, "unix_ms:100").unwrap();
+        let (returned_id, applied_to) = store
+            .apply_recommendation(&rec.id, "unix_ms:100", "")
+            .unwrap();
         assert_eq!(returned_id, rec.id);
         assert_eq!(applied_to.as_deref(), Some(stage_b));
 
@@ -1374,7 +1431,9 @@ mod tests {
         );
         store.insert_recommendation(&rec).unwrap();
 
-        store.apply_recommendation(&rec.id, "unix_ms:1").unwrap();
+        store
+            .apply_recommendation(&rec.id, "unix_ms:1", "")
+            .unwrap();
         let reloaded = store.load_plan(plan_id).unwrap();
         let stage_b_row = reloaded
             .stages
@@ -1387,6 +1446,65 @@ mod tests {
         assert_eq!(merged.get("dip_amount"), Some(&serde_json::json!(0.3)));
         // Existing keys preserved.
         assert_eq!(merged.get("blend_ratio"), Some(&serde_json::json!(0.5)));
+    }
+
+    /// CR-05 P4 slice 6 — `apply_recommendation` persists the
+    /// `applied_with_preview_id` provenance column when a non-
+    /// empty preview id is passed.
+    #[test]
+    fn p46_apply_records_preview_id_provenance() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let plan_id = "plan_p46_preview_id";
+        let stage_a = "stage_a";
+        let stage_b = "stage_b";
+        let exec_a = "exec_a";
+        let (plan, exec_a_row, _exec_b) =
+            plan_with_two_stages_and_execution(plan_id, stage_a, stage_b, exec_a, None);
+        store.insert_plan(&plan).unwrap();
+        store.insert_stage_execution(&exec_a_row).unwrap();
+        let rec = rec_with_params(exec_a, "stretch_v1", "stretch", vec![]);
+        store.insert_recommendation(&rec).unwrap();
+
+        let (_id, _stage) = store
+            .apply_recommendation(&rec.id, "unix_ms:42", "prev_abc123")
+            .unwrap();
+
+        let recs = store
+            .list_recommendations_for_stage_execution(exec_a)
+            .unwrap();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(
+            recs[0].applied_with_preview_id.as_deref(),
+            Some("prev_abc123")
+        );
+    }
+
+    /// CR-05 P4 slice 6 — `apply_recommendation` with an empty
+    /// preview id stores NULL in `applied_with_preview_id`
+    /// (legacy / test path). The apply still mutates the stage.
+    #[test]
+    fn p46_apply_with_empty_preview_id_persists_null() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let plan_id = "plan_p46_empty";
+        let stage_a = "stage_a";
+        let stage_b = "stage_b";
+        let exec_a = "exec_a";
+        let (plan, exec_a_row, _exec_b) =
+            plan_with_two_stages_and_execution(plan_id, stage_a, stage_b, exec_a, None);
+        store.insert_plan(&plan).unwrap();
+        store.insert_stage_execution(&exec_a_row).unwrap();
+        let rec = rec_with_params(exec_a, "stretch_v1", "stretch", vec![]);
+        store.insert_recommendation(&rec).unwrap();
+
+        let (_id, _) = store
+            .apply_recommendation(&rec.id, "unix_ms:42", "")
+            .unwrap();
+
+        let recs = store
+            .list_recommendations_for_stage_execution(exec_a)
+            .unwrap();
+        assert_eq!(recs.len(), 1);
+        assert!(recs[0].applied_with_preview_id.is_none());
     }
 
     #[test]
@@ -1409,8 +1527,12 @@ mod tests {
         );
         store.insert_recommendation(&rec).unwrap();
 
-        store.apply_recommendation(&rec.id, "unix_ms:1").unwrap();
-        store.apply_recommendation(&rec.id, "unix_ms:2").unwrap();
+        store
+            .apply_recommendation(&rec.id, "unix_ms:1", "")
+            .unwrap();
+        store
+            .apply_recommendation(&rec.id, "unix_ms:2", "")
+            .unwrap();
 
         let listed = store
             .list_recommendations_for_stage_execution(exec_a)
@@ -1481,7 +1603,9 @@ mod tests {
             vec![("shadows".to_string(), serde_json::json!(0.1))],
         );
         store.insert_recommendation(&rec).unwrap();
-        store.apply_recommendation(&rec.id, "unix_ms:7").unwrap();
+        store
+            .apply_recommendation(&rec.id, "unix_ms:7", "")
+            .unwrap();
         store.reset_recommendation(&rec.id).unwrap();
 
         let listed = store
@@ -1499,7 +1623,7 @@ mod tests {
     fn p325_apply_returns_not_found_for_unknown_id() {
         let store = PipelinePlanStore::in_memory().unwrap();
         let err = store
-            .apply_recommendation("rec_does_not_exist", "unix_ms:1")
+            .apply_recommendation("rec_does_not_exist", "unix_ms:1", "")
             .expect_err("expected error");
         match err {
             PipelinePlanStoreError::NotFound(id) => assert_eq!(id, "rec_does_not_exist"),

@@ -393,3 +393,46 @@ export const readPreviewArtifact = (previewId: string): Promise<string> =>
 export const deletePreviewRun = (
   previewId: string,
 ): Promise<void> => invoke("delete_preview_run", { previewId });
+// ─── CR-05 P4 slice 7 — §21 Resource-Aware Execution ─────────────────────
+// Mirrors `crates/astroforge-core/src/resource.rs` (serde snake_case).
+
+export type ExecutionBackend =
+  | "cpu"
+  | "cuda"
+  | "direct_ml"
+  | "core_ml"
+  | "open_vino";
+
+export type Precision = "f16" | "f32";
+
+export interface GpuInfo {
+  name: string;
+  backend: ExecutionBackend;
+  vram_bytes: number | null;
+}
+
+export interface RecommendedExecution {
+  backend: ExecutionBackend;
+  tile_size: number;
+  thread_count: number;
+  precision: Precision;
+  memory_budget_bytes: number;
+}
+
+export interface ResourceSnapshot {
+  cpu_model: string;
+  logical_cores: number;
+  physical_cores: number | null;
+  total_memory_bytes: number;
+  available_memory_bytes: number;
+  gpus: GpuInfo[];
+  recommended: RecommendedExecution;
+}
+
+/**
+ * Detect the device and return the snapshot + derived execution
+ * recommendation. Recomputed on demand so it reflects current memory
+ * pressure; infallible by design (probes degrade gracefully).
+ */
+export const getResourceSnapshot = (): Promise<ResourceSnapshot> =>
+  invoke("get_resource_snapshot");

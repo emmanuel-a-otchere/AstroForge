@@ -26,7 +26,13 @@
     stageExecutions,
     startPipelineRun,
   } from "../lib/pipeline-plan-store";
-  import { readPreviewArtifact } from "../lib/astroforge-api";
+  import {
+    getResourceSnapshot,
+    readPreviewArtifact,
+    type ExecutionBackend,
+    type Precision,
+    type ResourceSnapshot,
+  } from "../lib/astroforge-api";
 
   export let planId: string;
 
@@ -42,6 +48,42 @@
   // CR-05 P4 slice 5 — base64 PNG payloads keyed by preview_id,
   // loaded lazily for completed previews that have an artifact.
   let previewImages: Record<string, string> = {};
+
+  // CR-05 P4 slice 7 (§21) — resource snapshot for the advanced
+  // "Execution resources" inspect block. Loaded lazily on first expand
+  // and refreshed on every subsequent expand so memory pressure is current.
+  let resourceSnapshot: ResourceSnapshot | null = null;
+  let resourceError: string | null = null;
+  let resourceLoading = false;
+
+  async function loadResourceSnapshot() {
+    if (resourceLoading) return;
+    resourceLoading = true;
+    resourceError = null;
+    try {
+      resourceSnapshot = await getResourceSnapshot();
+    } catch (err) {
+      resourceError = err instanceof Error ? err.message : String(err);
+    } finally {
+      resourceLoading = false;
+    }
+  }
+
+  const BACKEND_LABELS: Record<ExecutionBackend, string> = {
+    cpu: "CPU",
+    cuda: "CUDA",
+    direct_ml: "DirectML",
+    core_ml: "CoreML",
+    open_vino: "OpenVINO",
+  };
+  const PRECISION_LABELS: Record<Precision, string> = {
+    f16: "float16",
+    f32: "float32",
+  };
+
+  function formatGiB(bytes: number): string {
+    return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+  }
 
   $: plan = $activePlan?.plan_id === planId ? $activePlan : null;
   $: executions = $stageExecutions[planId] ?? [];
@@ -318,6 +360,81 @@
       No stage executions yet. Click <em>Start</em> to run the plan.
     </p>
   {/if}
+
+  <!-- CR-05 P4 slice 7 (§21) — advanced users can inspect what the
+       engine picked on their behalf. The default posture stays
+       "AstroForge optimized processing for this device". -->
+  <details
+    class="resource-inspect"
+    on:toggle={(e) => {
+      if ((e.currentTarget as HTMLDetailsElement).open) void loadResourceSnapshot();
+    }}
+  >
+    <summary class="font-label" data-testid="resource-inspect-toggle">
+      Execution resources
+    </summary>
+    {#if resourceLoading}
+      <p class="font-body resource-note">Detecting device…</p>
+    {:else if resourceError}
+      <p class="error font-body" role="alert">{resourceError}</p>
+    {:else if resourceSnapshot}
+      <p class="font-body resource-note">
+        AstroForge optimized processing for this device.
+      </p>
+      <dl class="resource-grid font-body" data-testid="resource-snapshot">
+        <div>
+          <dt>CPU</dt>
+          <dd>
+            {resourceSnapshot.cpu_model} · {resourceSnapshot.logical_cores}
+            threads{#if resourceSnapshot.physical_cores}
+              ({resourceSnapshot.physical_cores} cores){/if}
+          </dd>
+        </div>
+        <div>
+          <dt>GPU</dt>
+          <dd>
+            {#if resourceSnapshot.gpus.length > 0}
+              {resourceSnapshot.gpus
+                .map(
+                  (g) =>
+                    `${g.name} (${BACKEND_LABELS[g.backend]}${g.vram_bytes ? `, ${formatGiB(g.vram_bytes)}` : ""})`,
+                )
+                .join(" · ")}
+            {:else}
+              None detected — CPU execution
+            {/if}
+          </dd>
+        </div>
+        <div>
+          <dt>Memory</dt>
+          <dd>
+            {formatGiB(resourceSnapshot.available_memory_bytes)} available of
+            {formatGiB(resourceSnapshot.total_memory_bytes)}
+          </dd>
+        </div>
+        <div>
+          <dt>Tile size</dt>
+          <dd>{resourceSnapshot.recommended.tile_size}px</dd>
+        </div>
+        <div>
+          <dt>Precision</dt>
+          <dd>{PRECISION_LABELS[resourceSnapshot.recommended.precision]}</dd>
+        </div>
+        <div>
+          <dt>Backend</dt>
+          <dd>{BACKEND_LABELS[resourceSnapshot.recommended.backend]}</dd>
+        </div>
+        <div>
+          <dt>Threads</dt>
+          <dd>{resourceSnapshot.recommended.thread_count}</dd>
+        </div>
+        <div>
+          <dt>Memory budget</dt>
+          <dd>{formatGiB(resourceSnapshot.recommended.memory_budget_bytes)}</dd>
+        </div>
+      </dl>
+    {/if}
+  </details>
 </section>
 
 <style>
@@ -636,5 +753,38 @@
   .placeholder {
     color: var(--on-surface-variant);
     font-style: italic;
+  }
+  /* CR-05 P4 slice 7 (§21) — resource inspect block. */
+  .resource-inspect {
+    border-top: 1px solid var(--outline-variant, var(--outline));
+    padding-top: var(--sp-sm);
+  }
+  .resource-inspect summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--on-surface-variant);
+  }
+  .resource-note {
+    margin: var(--sp-xs) 0;
+    color: var(--on-surface-variant);
+    font-size: 0.8rem;
+    font-style: italic;
+  }
+  .resource-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--sp-xs) var(--sp-md);
+    margin: var(--sp-xs) 0 0 0;
+  }
+  .resource-grid dt {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--on-surface-variant);
+  }
+  .resource-grid dd {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--on-surface);
   }
 </style>

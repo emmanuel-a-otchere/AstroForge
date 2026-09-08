@@ -1,12 +1,14 @@
 //! CR-05 P4 slice 5.1 — real TIFF + FITS pixel decoders.
 //!
 //! Replaces the aspirational `from_tiff_bytes` / `from_fits_bytes`
-//! references with working implementations using the `tiff` and
-//! `fitsrs` crates. Both produce `F32Image` in the crate's
-//! `(channels, height, width)` layout with values normalized to
-//! the `[0.0, 1.0]` range (integer formats) or left as-is
-//! (floating-point formats, already in whatever range the source
-//! data carries).
+//! references with working implementations. The TIFF decoder uses
+//! the `tiff` crate (image-rs org, MIT/Apache-2.0). The FITS decoder
+//! is a minimal in-house reader (~150 lines, zero deps) — see the
+//! commit message for why we hand-rolled instead of using fitsrs.
+//!
+//! Both produce `F32Image` in the crate's `(channels, height,
+//! width)` layout with values normalized to the `[0.0, 1.0]` range
+//! (integer formats) or left as-is (floating-point formats).
 //!
 //! **Error handling**: every decode failure maps to a descriptive
 //! `ImageDecodeError`; nothing panics.
@@ -141,116 +143,177 @@ impl F32Image {
 
     /// CR-05 P4 slice 5.1 — decode a FITS image from bytes.
     ///
-    /// Supports BITPIX = -64 (f64), -32 (f32), 16 (i16), 8 (u8) and
-    /// NAXIS = 2 (mono) or NAXIS = 3 (multi-channel).
+    /// Minimal in-house FITS reader: handles BITPIX = 8 / 16 / 32 /
+    /// 64 (signed) and -32 / -64 (IEEE float), NAXIS = 2 or 3.
     ///
-    /// FITS data is big-endian; `fitsrs` handles the byte swap
-    /// internally. Integer formats are normalized to [0.0, 1.0].
+    /// FITS records are 80-char cards in 2880-byte blocks; the
+    /// header is followed by the data, padded to a 2880-byte
+    /// boundary. Integer formats are normalized to [0, 1] via
+    /// division by the maximum positive value; floats pass through
+    /// unchanged (clamped to the source data's range).
     pub fn from_fits_bytes(bytes: &[u8]) -> Result<Self, ImageDecodeError> {
-        use fitsrs::hdu::HDU;
-        use fitsrs::Fits;
+        // 1. Parse the header: scan 80-char cards, terminate on END.
+        let mut i = 0;
+        let mut bitpix: Option<i32> = None;
+        let mut naxis: Option<usize> = None;
+        let mut naxes: Vec<usize> = Vec::new();
+        let header_end;
 
-        let cursor = std::io::Cursor::new(bytes);
-        let mut fits = Fits::from_reader(cursor);
+        loop {
+            if i + 80 > bytes.len() {
+                return Err(ImageDecodeError::Fits("header truncated before END".into()));
+            }
+            let card = std::str::from_utf8(&bytes[i..i + 80])
+                .map_err(|e| ImageDecodeError::Fits(format!("card utf8: {e}")))?;
+            i += 80;
 
-        // Walk HDUs; the first one with NAXIS >= 2 is our image.
-        while let Some(hdu_result) = fits.next() {
-            let hdu = hdu_result.map_err(|e| ImageDecodeError::Fits(format!("hdu parse: {e}")))?;
-
-            // We only care about image HDUs (primary or extension).
-            let image_hdu = match hdu {
-                HDU::Primary(h) => h,
-                HDU::XImage(h) => h,
-                _ => continue,
-            };
-
-            let header = image_hdu.get_header();
-            let xtension = header.get_xtension();
-
-            let naxis = xtension.get_naxis();
-            if naxis.len() < 2 {
+            // Skip blank-padding cards at the end of the header block.
+            if card.trim().is_empty() {
+                if i % 2880 == 0 {
+                    header_end = i;
+                    break;
+                }
                 continue;
             }
 
-            let _bitpix = xtension.get_bitpix(); // unused: we infer from the data variant
-            let naxis1 = naxis[0] as usize; // width
-            let naxis2 = naxis[1] as usize; // height
-            let channels = if naxis.len() >= 3 {
-                naxis[2] as usize
-            } else {
-                1
-            };
-
-            // Read the data.
-            let data = fits.get_data(&image_hdu);
-            let pixels = data.pixels();
-
-            let n_pixels = naxis1 * naxis2 * channels;
-            let mut flat: Vec<f64> = Vec::with_capacity(n_pixels);
-
-            match pixels {
-                fitsrs::hdu::data::image::Pixels::U8(it) => {
-                    let inv = 1.0 / u8::MAX as f64;
-                    for v in it {
-                        flat.push(v as f64 * inv);
-                    }
-                }
-                fitsrs::hdu::data::image::Pixels::I16(it) => {
-                    let inv = 1.0 / i16::MAX as f64;
-                    for v in it {
-                        flat.push(v as f64 * inv);
-                    }
-                }
-                fitsrs::hdu::data::image::Pixels::I32(it) => {
-                    let inv = 1.0 / i32::MAX as f64;
-                    for v in it {
-                        flat.push(v as f64 * inv);
-                    }
-                }
-                fitsrs::hdu::data::image::Pixels::I64(it) => {
-                    let inv = 1.0 / i64::MAX as f64;
-                    for v in it {
-                        flat.push(v as f64 * inv);
-                    }
-                }
-                fitsrs::hdu::data::image::Pixels::F32(it) => {
-                    for v in it {
-                        flat.push(v as f64);
-                    }
-                }
-                fitsrs::hdu::data::image::Pixels::F64(it) => {
-                    for v in it {
-                        flat.push(v);
-                    }
-                }
+            // END card terminates the header.
+            if card.starts_with("END ") || card.starts_with("END=") || card.trim() == "END" {
+                header_end = i;
+                break;
             }
 
-            if flat.len() != n_pixels {
-                return Err(ImageDecodeError::Fits(format!(
-                    "pixel count mismatch: header says {n_pixels}, data has {}",
-                    flat.len()
-                )));
-            }
+            // Parse KEY = VALUE / COMMENT
+            let key = card.get(..8).unwrap_or("").trim();
+            let value_part = card.get(9..80).unwrap_or("").trim();
+            let value_str = value_part.split('/').next().unwrap_or("").trim();
 
-            // FITS stores data in row-major order: for NAXIS=3,
-            // axis order is (NAXIS1=width, NAXIS2=height, NAXIS3=channel).
-            // We need (channels, height, width).
-            let mut out = ndarray::Array3::<f32>::zeros((channels, naxis2, naxis1));
-            for c in 0..channels {
-                for y in 0..naxis2 {
-                    for x in 0..naxis1 {
-                        let src_idx = c * (naxis1 * naxis2) + y * naxis1 + x;
-                        out[(c, y, x)] = flat[src_idx] as f32;
-                    }
+            match key {
+                "BITPIX" => {
+                    bitpix = Some(
+                        value_str
+                            .parse::<i32>()
+                            .map_err(|e| ImageDecodeError::Fits(format!("BITPIX: {e}")))?,
+                    );
                 }
+                "NAXIS" => {
+                    naxis = Some(
+                        value_str
+                            .parse::<usize>()
+                            .map_err(|e| ImageDecodeError::Fits(format!("NAXIS: {e}")))?,
+                    );
+                }
+                k if k.starts_with("NAXIS") && k.len() > 5 => {
+                    let v: usize = value_str
+                        .parse()
+                        .map_err(|e| ImageDecodeError::Fits(format!("{k}: {e}")))?;
+                    naxes.push(v);
+                }
+                _ => {} // ignore unknown cards
             }
-
-            return Ok(F32Image::from(out));
+            // Compiler note: `?` inside a `match` arm that
+            // assigns to an outer `let` doesn't propagate
+            // properly, so we use an explicit `Some(..)` wrapper
+            // for BITPIX/NAXIS and `push(..)` for NAXISn — the
+            // `?` returns from `from_fits_bytes` on parse error.
+            // (The `?`s above are inside expressions that yield
+            //  values of the right type.)
         }
 
-        Err(ImageDecodeError::Fits(
-            "no HDU with NAXIS >= 2 found".into(),
-        ))
+        let bitpix = bitpix.ok_or_else(|| ImageDecodeError::Fits("missing BITPIX".into()))?;
+        let naxis = naxis.unwrap_or(0);
+        if naxis < 2 {
+            return Err(ImageDecodeError::Fits(format!(
+                "NAXIS < 2 (got {naxis}); not an image HDU"
+            )));
+        }
+        if naxes.len() < 2 {
+            return Err(ImageDecodeError::Fits("missing NAXIS1/NAXIS2".into()));
+        }
+
+        let width = naxes[0];
+        let height = naxes[1];
+        let channels = if naxis >= 3 && naxes.len() >= 3 {
+            naxes[2]
+        } else {
+            1
+        };
+        let n_pixels = width * height * channels;
+
+        // 2. Compute data block start. FITS spec: header_end snaps up to
+        //    the next 2880-byte boundary, then data follows.
+        let data_start = header_end.div_ceil(2880) * 2880;
+        let bytes_per_pixel = (bitpix.unsigned_abs() / 8) as usize;
+        let data_len = n_pixels * bytes_per_pixel;
+        if data_start + data_len > bytes.len() {
+            return Err(ImageDecodeError::Fits(format!(
+                "data truncated: need {data_len} bytes from offset {data_start}, have {}",
+                bytes.len().saturating_sub(data_start)
+            )));
+        }
+        let data = &bytes[data_start..data_start + data_len];
+
+        // 3. Decode pixels according to BITPIX.
+        let mut flat: Vec<f64> = Vec::with_capacity(n_pixels);
+        let mut cursor = 0;
+        for _ in 0..n_pixels {
+            let v = match bitpix {
+                8 => {
+                    let bytes_arr = [data[cursor]; 1];
+                    cursor += 1;
+                    i8::from_be_bytes(bytes_arr) as f64 / i8::MAX as f64
+                }
+                16 => {
+                    let mut a = [0u8; 2];
+                    a.copy_from_slice(&data[cursor..cursor + 2]);
+                    cursor += 2;
+                    i16::from_be_bytes(a) as f64 / i16::MAX as f64
+                }
+                32 => {
+                    let mut a = [0u8; 4];
+                    a.copy_from_slice(&data[cursor..cursor + 4]);
+                    cursor += 4;
+                    i32::from_be_bytes(a) as f64 / i32::MAX as f64
+                }
+                64 => {
+                    let mut a = [0u8; 8];
+                    a.copy_from_slice(&data[cursor..cursor + 8]);
+                    cursor += 8;
+                    i64::from_be_bytes(a) as f64 / i64::MAX as f64
+                }
+                -32 => {
+                    let mut a = [0u8; 4];
+                    a.copy_from_slice(&data[cursor..cursor + 4]);
+                    cursor += 4;
+                    f32::from_be_bytes(a) as f64
+                }
+                -64 => {
+                    let mut a = [0u8; 8];
+                    a.copy_from_slice(&data[cursor..cursor + 8]);
+                    cursor += 8;
+                    f64::from_be_bytes(a)
+                }
+                other => {
+                    return Err(ImageDecodeError::Fits(format!(
+                        "unsupported BITPIX: {other}"
+                    )))
+                }
+            };
+            flat.push(v);
+        }
+
+        // 4. Reshape (channels, height, width) from row-major FITS
+        //    data layout.
+        let mut out = ndarray::Array3::<f32>::zeros((channels, height, width));
+        for c in 0..channels {
+            for y in 0..height {
+                for x in 0..width {
+                    let src_idx = c * (width * height) + y * width + x;
+                    out[(c, y, x)] = flat[src_idx] as f32;
+                }
+            }
+        }
+
+        Ok(F32Image::from(out))
     }
 }
 
@@ -349,5 +412,50 @@ mod tests {
         assert!((img[(0, 0, 1)] - 0.5).abs() < 1e-6);
         assert!((img[(0, 1, 0)] - 0.25).abs() < 1e-6);
         assert!((img[(0, 1, 1)] - 0.75).abs() < 1e-6);
+    }
+
+    /// Build a minimal FITS file (BITPIX=16, NAXIS=3, 3 channels)
+    /// and decode. Verifies multi-axis FITS layout.
+    #[test]
+    fn fits_round_trip_i16_rgb() {
+        let width = 2;
+        let height = 2;
+        let channels = 3;
+        let n_pixels = width * height * channels;
+        let data_bytes = n_pixels * 2; // i16 = 2 bytes
+
+        let mut cards = String::new();
+        cards.push_str(&format!("{:80}", "SIMPLE  =                    T"));
+        cards.push_str(&format!("{:80}", "BITPIX  =                   16"));
+        cards.push_str(&format!("{:80}", "NAXIS   =                    3"));
+        cards.push_str(&format!("{:80}", format!("NAXIS1  = {:>20}", width)));
+        cards.push_str(&format!("{:80}", format!("NAXIS2  = {:>20}", height)));
+        cards.push_str(&format!("{:80}", format!("NAXIS3  = {:>20}", channels)));
+        cards.push_str(&format!("{:80}", "END"));
+        while !cards.len().is_multiple_of(2880) {
+            cards.push(' ');
+        }
+
+        let mut buf = cards.into_bytes();
+        // 3 channels of i16 data, values [1000, 2000, 3000, 4000] per channel.
+        for _ in 0..channels {
+            let values: [i16; 4] = [1000, 2000, 3000, 4000];
+            for v in values {
+                buf.extend_from_slice(&v.to_be_bytes());
+            }
+        }
+        let header_blocks = (buf.len() - data_bytes) / 2880;
+        let total_needed = (header_blocks + 1) * 2880;
+        while buf.len() < total_needed {
+            buf.push(0);
+        }
+
+        let img = F32Image::from_fits_bytes(&buf).unwrap();
+        assert_eq!(img.width(), 2);
+        assert_eq!(img.height(), 2);
+        assert_eq!(img.channels(), 3);
+        // First channel first pixel: 1000 / 32767 ≈ 0.0305
+        let expected = 1000.0 / i16::MAX as f64;
+        assert!((img[(0, 0, 0)] as f64 - expected).abs() < 1e-4);
     }
 }

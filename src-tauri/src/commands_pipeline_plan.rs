@@ -48,6 +48,10 @@ pub struct PipelinePlanState {
     /// snapshot triggers `engine.evaluate()` and persists the
     /// resulting rows. None means the engine is dormant (tests).
     pub recommendation_engine: Option<Arc<astroforge_core::recommendation::RecommendationEngine>>,
+    /// CR-05 P4 slice 5 — directory where preview PNGs are written
+    /// (`<projects_root>/previews`). `read_preview_artifact` refuses
+    /// to serve any path outside this directory.
+    pub previews_dir: std::path::PathBuf,
 }
 
 /// CR-05 P1 — input to `create_pipeline_plan`. Mirrors the `astroforge-api.ts`

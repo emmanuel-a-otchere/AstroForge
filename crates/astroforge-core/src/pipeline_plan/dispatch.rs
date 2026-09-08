@@ -1515,6 +1515,19 @@ fn load_frames_from_assets(_ctx: &StageContext) -> Result<Vec<F32Image>, StageHa
     Ok(Vec::new())
 }
 
+/// CR-05 P4 slice 5 — public frame-loading helper shared by the
+/// preview driver and (once asset decoding lands) the handlers
+/// themselves.
+///
+/// **Stubbed.** There is no TIFF/FITS pixel decoder in the crate yet
+/// (D-CR05-12 references `F32Image::from_tiff_bytes`, which is
+/// aspirational as of slice 5). Returns an empty vec; callers must
+/// treat empty as "no source frames" and surface a real error rather
+/// than synthesizing substitute data.
+pub fn load_frames_for_session(_domain_store: &DomainStore, _session_id: &str) -> Vec<F32Image> {
+    Vec::new()
+}
+
 /// Parse kappa / max_iterations from the stage's parameters_json.
 /// Falls back to defaults when parsing fails (kappa=3.0, iterations=5).
 fn parse_stack_params(parameters_json: Option<&str>) -> (f64, u32) {

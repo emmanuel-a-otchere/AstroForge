@@ -233,6 +233,11 @@ pub enum DomainStoreError {
     Sqlite(#[from] rusqlite::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    /// CR-05 P4 slice 5 — filesystem failures (preview PNG write,
+    /// previews-dir creation). Stringly-typed so the store stays
+    /// free of `std::io::Error` coupling in public signatures.
+    #[error("I/O error: {0}")]
+    Io(String),
     #[error("invalid project status transition: {from} -> {to}")]
     InvalidTransition { from: String, to: String },
     #[error("not found: {0}")]

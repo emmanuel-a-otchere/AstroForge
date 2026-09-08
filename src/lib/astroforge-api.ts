@@ -376,11 +376,13 @@ export const getPreviewRun = (
   previewId: string,
 ): Promise<PreviewRunDto> => invoke("get_preview_run", { previewId });
 
-export const markPreviewFailed = (
-  previewId: string,
-  errorJson: string,
-): Promise<void> =>
-  invoke("mark_preview_failed", { previewId, errorJson });
+/**
+ * CR-05 P4 slice 5 — read a preview's PNG artifact back as base64.
+ * Only files inside the app's previews directory are served; the
+ * asset protocol stays disabled.
+ */
+export const readPreviewArtifact = (previewId: string): Promise<string> =>
+  invoke("read_preview_artifact", { previewId });
 
 export const deletePreviewRun = (
   previewId: string,

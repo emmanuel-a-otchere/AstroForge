@@ -21,6 +21,7 @@
 pub mod builtin;
 pub mod dispatch;
 pub mod plan;
+pub mod preview;
 pub mod runner;
 pub mod stage;
 

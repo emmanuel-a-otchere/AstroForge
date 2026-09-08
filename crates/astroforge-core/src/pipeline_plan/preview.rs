@@ -10,12 +10,12 @@
 //! ## Input loading
 //!
 //! Frames are loaded through the same helper the production handlers
-//! use ([`dispatch::load_frames_for_session`]). As of slice 5 the
-//! disk-loading path is still stubbed (P2.6 slice 1 gap): the helper
-//! returns an empty vec and the driver surfaces that as
-//! [`PreviewError::NoSourceFrames`]. **No synthetic frames are
-//! substituted in production** — a failed preview row with a real
-//! error message is the honest outcome until asset loading lands.
+//! use ([`dispatch::load_frames_for_session`]). Slice 5.1 replaced
+//! the stub with real TIFF/FITS decoding; files that fail to decode
+//! are logged and skipped so one corrupt asset doesn't kill the
+//! whole run. **No synthetic frames are substituted in production**
+//! — a failed preview row with a real error message is the honest
+//! outcome when no source assets exist.
 //! Tests feed frames through [`StageContext::preloaded_frames`] so
 //! the downsample → dispatch → output path is exercised end-to-end.
 

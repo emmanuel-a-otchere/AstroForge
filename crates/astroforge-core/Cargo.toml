@@ -13,3 +13,6 @@ thiserror = { workspace = true }
 log = { workspace = true }
 sha2 = { workspace = true }
 rusqlite = { version = "0.32", features = ["bundled"] }
+# CR-05 P4 slice 5.1 — real TIFF + FITS pixel decoders so preview
+# runs produce real PNGs instead of failing with NoSourceFrames.
+tiff = "0.11"

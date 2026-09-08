@@ -436,3 +436,33 @@ export interface ResourceSnapshot {
  */
 export const getResourceSnapshot = (): Promise<ResourceSnapshot> =>
   invoke("get_resource_snapshot");
+
+// ─── CR-05 P5 slice 1 — backend enumeration + §22 execution budget ───────
+// Mirrors `crates/astroforge-core/src/resource.rs` (serde snake_case).
+
+export interface BackendCapability {
+  backend: ExecutionBackend;
+  available: boolean;
+  device: string | null;
+  /** Why the backend is unavailable — render verbatim in Expert mode. */
+  unavailable_reason: string | null;
+}
+
+export interface ExecutionBudget {
+  memory_budget_bytes: number;
+  requires_tiling: boolean;
+  tile_size: number;
+  thread_count: number;
+  /** §22 pre-flight warning copy when memory is tight; null when fine. */
+  warning: string | null;
+}
+
+/** Advertised capability of every §21 backend on this device. */
+export const listBackendCapabilities = (): Promise<BackendCapability[]> =>
+  invoke("list_backend_capabilities");
+
+/** Pre-flight budget for a stage input of `datasetSizeBytes` uncompressed. */
+export const deriveExecutionBudget = (
+  datasetSizeBytes: number,
+): Promise<ExecutionBudget> =>
+  invoke("derive_execution_budget", { datasetSizeBytes });

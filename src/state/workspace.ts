@@ -4,10 +4,20 @@
 // derived set of stage statuses for the §8 Overview checklist and
 // the §12 Process workspace. P4 ships the read path; the actual
 // run/control UX lands in P4b alongside the wizard deprecation.
+//
+// CR-05 P4 slice 1 — the 'process' stage no longer reads from
+// the legacy `pipeline_run_list` command (CR-02 wizard table).
+// Instead it reads the active CR-05 `PipelinePlan`'s
+// `StageExecutionSummary` rows so the checklist reflects what
+// CR-05 actually runs. Until an active plan exists the legacy
+// path is preserved (keeps CR-03 P4 behaviour intact for projects
+// that have wizard runs but no CR-05 plan).
 
 import { derived, writable } from "svelte/store";
 import type { PipelineRunSummary, ProjectSummary } from "../lib/astroforge-api";
+import type { StageExecutionSummary } from "../lib/astroforge-api";
 import * as api from "../lib/astroforge-api";
+import { activePlan, stageExecutions } from "../lib/pipeline-plan-store";
 
 export type StageStatus = "complete" | "pending" | "blocked";
 
@@ -55,9 +65,21 @@ export const workspaceState = {
  *  Analyze / Review / Export are still placeholders pending P5
  *  + a real source-asset event log. */
 export const stageStatuses = derived(
-  internal,
-  ($s): Record<"import" | "analyze" | "process" | "review" | "export", StageStatus> => {
-    const processStatus: StageStatus = computeProcessStatus($s.runs);
+  [internal, activePlan, stageExecutions],
+  ([$s, $plan, $executions]): Record<
+    "import" | "analyze" | "process" | "review" | "export",
+    StageStatus
+  > => {
+    // CR-05 P4 slice 1 — prefer the active CR-05 plan's
+    // StageExecutionSummary rows over the legacy CR-02
+    // `pipeline_run_list` once a plan exists. The legacy path
+    // remains the fallback so the Overview still lights up the
+    // checklist for projects that have wizard runs but no CR-05
+    // plan yet.
+    const processStatus =
+      $plan !== null
+        ? computeProcessStatusFromPlan($plan.stages, $executions[$plan.plan_id] ?? [])
+        : computeProcessStatusFromLegacyRuns($s.runs);
     return {
       import: "pending",
       analyze: "pending",
@@ -68,7 +90,65 @@ export const stageStatuses = derived(
   },
 );
 
-function computeProcessStatus(runs: readonly PipelineRunSummary[]): StageStatus {
+/// CR-05 P4 slice 1 — derive the 'process' stage from the
+/// active CR-05 plan. Any failed stage execution marks the
+/// whole plan blocked; all executions completed or skipped
+/// marks it complete; otherwise pending (covers running /
+/// queued / never-attempted stages).
+function computeProcessStatusFromPlan(
+  planStages: readonly { stage_id: string }[],
+  executions: readonly StageExecutionSummary[],
+): StageStatus {
+  if (planStages.length === 0) return "pending";
+  // Index executions by stage_id; we collapse retries (attempt
+  // > 1) by taking the highest-attempt execution per stage.
+  const latestByStage = new Map<string, StageExecutionSummary>();
+  for (const exec of executions) {
+    const prev = latestByStage.get(exec.stage_id);
+    if (!prev || exec.attempt > prev.attempt) {
+      latestByStage.set(exec.stage_id, exec);
+    }
+  }
+  let anyFailed = false;
+  let anyInFlight = false;
+  let allResolved = true;
+  for (const stage of planStages) {
+    const exec = latestByStage.get(stage.stage_id);
+    if (!exec) {
+      // Stage hasn't been attempted yet.
+      allResolved = false;
+      continue;
+    }
+    switch (exec.status) {
+      case "failed":
+        anyFailed = true;
+        allResolved = false;
+        break;
+      case "completed":
+      case "skipped":
+        // Resolved — keep allResolved true.
+        break;
+      case "pending":
+      case "running":
+        anyInFlight = true;
+        allResolved = false;
+        break;
+      default:
+        // Unknown status string — treat as in-flight so the
+        // checklist doesn't prematurely go green.
+        anyInFlight = true;
+        allResolved = false;
+        break;
+    }
+  }
+  if (anyFailed) return "blocked";
+  if (allResolved && !anyInFlight) return "complete";
+  return "pending";
+}
+
+function computeProcessStatusFromLegacyRuns(
+  runs: readonly PipelineRunSummary[],
+): StageStatus {
   if (runs.length === 0) return "pending";
   const latest = runs[runs.length - 1];
   switch (latest.status) {

@@ -1,14 +1,31 @@
-//! CR-05 P4 slice 4 — Tauri command surface for preview-before-commit
-//! (CR-05 §11 + §26). Slice 4 ships the IPC + lifecycle plumbing.
-//! The actual stage-handler integration (running a handler at scale
-//! and writing a real preview artifact) lands in slice 5.
+//! CR-05 P4 slice 4+5 — Tauri command surface for preview-before-commit
+//! (CR-05 §11 + §26).
+//!
+//! Slice 4 shipped the IPC + lifecycle plumbing with a placeholder
+//! artifact. Slice 5 replaces the placeholder with the real pipeline:
+//! resolve the stage execution, run the stage handler against
+//! downsampled input frames ([`pipeline_plan::preview::run_preview`]),
+//! export the result as a PNG into the project's previews directory,
+//! and record a real artifact row.
+//!
+//! ## Failure honesty
+//!
+//! The frame-loading helper ([`dispatch::load_frames_for_session`])
+//! is still stubbed (no TIFF/FITS pixel decoder exists in the crate),
+//! so production previews currently fail with
+//! `PreviewError::NoSourceFrames`. The command marks the preview row
+//! `failed` with the real error message rather than synthesizing
+//! substitute output — the UI shows the error banner so the gap is
+//! visible instead of silent.
 //!
 //! **Additive only.** Existing widgets continue to read from their
-//! current stores. The commands below are dormant until a future
-//! Svelte PR wires the UI to them.
+//! current stores.
 
-use astroforge_core::artifact::ContentStore;
 use astroforge_core::domain::{Artifact, ArtifactCategory, PreviewRun};
+use astroforge_core::domain_store::DomainStoreError;
+use astroforge_core::export::export_png_8bit;
+use astroforge_core::pipeline_plan::preview::{self, PreviewRequest};
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -70,11 +87,15 @@ pub struct CreatePreviewRunRequest {
     pub label: Option<String>,
 }
 
-/// CR-05 P4 slice 4 — create a preview row and (slice 4
-/// placeholder behaviour) immediately complete it with a
-/// synthesized artifact. Slice 5 swaps the synthesis for a real
-/// stage-handler invocation that downsamples and persists a real
-/// image artifact.
+/// CR-05 P4 slice 5 — run a real preview: resolve the stage from the
+/// plan, dispatch the handler against downsampled frames, export the
+/// output as PNG, and record the artifact.
+///
+/// On success the row transitions pending → running → completed with
+/// `preview_artifact_id` set. On failure the row is marked `failed`
+/// with the real error message in `error_json` and the **DTO is still
+/// returned** (the IPC succeeds) so the UI can render the failure
+/// banner without special-casing invoke errors.
 #[tauri::command]
 pub fn create_preview_run(
     state: State<'_, PipelinePlanState>,
@@ -83,12 +104,8 @@ pub fn create_preview_run(
     let domain_store = state
         .domain_store
         .clone()
-        .ok_or_else(|| "domain store not is unavailable".to_string())?;
+        .ok_or_else(|| "domain store is unavailable".to_string())?;
 
-    // CR-05 P4 slice 4 — placeholder behaviour: drive the preview
-    // synchronously inside the IPC. Slice 5 moves the synthesis
-    // into a background task that reads the actual handler
-    // dispatch path.
     let now_ms = now_unix_ms_string();
     let parameters_hash = sha256_hex_of_str(&request.parameters_json);
     let scale = request.scale.unwrap_or(0.25);
@@ -97,6 +114,35 @@ pub fn create_preview_run(
         .clone()
         .unwrap_or_else(|| "Preview — reduced resolution".to_string());
 
+    // 1. Resolve the stage execution → plan → stage so the preview
+    //    runs the *actual* stage type with the *actual* parameters.
+    let (stage, session_id) = {
+        let plan_store = state
+            .store
+            .lock()
+            .map_err(|_| "plan store lock poisoned".to_string())?;
+        let exec = plan_store
+            .get_stage_execution(&request.stage_execution_id)
+            .map_err(|e| format!("resolve stage execution: {e}"))?;
+        let plan = plan_store
+            .load_plan(&exec.plan_id)
+            .map_err(|e| format!("load plan: {e}"))?;
+        let stage = plan
+            .stages
+            .iter()
+            .find(|s| s.stage_id == exec.stage_id)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "stage '{}' not found in plan '{}'",
+                    exec.stage_id, exec.plan_id
+                )
+            })?;
+        (stage, plan.session_id.clone())
+    };
+
+    // 2. Insert the pending row so the UI can show progress even for
+    //    fast previews.
     let preview = PreviewRun {
         preview_id: String::new(),
         stage_execution_id: request.stage_execution_id.clone(),
@@ -108,7 +154,7 @@ pub fn create_preview_run(
         scale,
         label: label.clone(),
         error_json: None,
-        started_at: Some(now_ms.clone()),
+        started_at: None,
         completed_at: None,
         created_at: String::new(),
     };
@@ -116,31 +162,48 @@ pub fn create_preview_run(
         .create_preview_run(&preview)
         .map_err(|e| format!("create_preview_run: {e}"))?;
 
-    // Mark running — slice 5 keeps this lifecycle but defers the
-    // synthesis work into a worker.
     domain_store
         .mark_preview_running(&preview_id, &now_ms)
         .map_err(|e| format!("mark_preview_running: {e}"))?;
 
-    // Slice 4 placeholder: synthesize a tiny placeholder artifact
-    // whose bytes are the JSON + scale + label. Slice 5 replaces
-    // this with a downsampled image. The artifact is real (it
-    // has a path, hash, and rows in the artifacts table) so the
-    // rest of the pipeline (read-back, list, etc.) can be wired
-    // in this PR.
-    let artifact = synthesize_placeholder_artifact(
-        &domain_store,
-        &preview_id,
-        &request.stage_execution_id,
-        &label,
+    // 3. Run the real preview driver.
+    let outcome = preview::run_preview(&PreviewRequest {
+        stage,
+        session_id,
+        run_id: preview_id.clone(),
         scale,
-        &request.parameters_json,
-    )
-    .map_err(|e| format!("synthesize placeholder: {e}"))?;
+        domain_store: domain_store.clone(),
+        handler_registry: state.handler_registry.clone(),
+        preloaded_frames: None,
+    });
 
-    domain_store
-        .mark_preview_completed(&preview_id, &artifact.artifact_id, &now_ms)
-        .map_err(|e| format!("mark_preview_completed: {e}"))?;
+    // 4. Persist success or failure honestly.
+    match outcome {
+        Ok(output) => {
+            let artifact = persist_preview_png(
+                &domain_store,
+                &state.previews_dir,
+                &preview_id,
+                &request.stage_execution_id,
+                &output.image,
+                output.metadata_json.as_deref(),
+            )
+            .map_err(|e| format!("persist preview artifact: {e}"))?;
+            domain_store
+                .mark_preview_completed(&preview_id, &artifact.artifact_id, &now_unix_ms_string())
+                .map_err(|e| format!("mark_preview_completed: {e}"))?;
+        }
+        Err(err) => {
+            let error_json = serde_json::json!({
+                "error": err.to_string(),
+                "kind": format!("{:?}", err),
+            })
+            .to_string();
+            domain_store
+                .mark_preview_failed(&preview_id, &error_json, &now_unix_ms_string())
+                .map_err(|e| format!("mark_preview_failed: {e}"))?;
+        }
+    }
 
     let stored = domain_store
         .get_preview_run(&preview_id)
@@ -158,7 +221,7 @@ pub fn list_preview_runs_for_stage_execution(
     let domain_store = state
         .domain_store
         .clone()
-        .ok_or_else(|| "domain store not is unavailable".to_string())?;
+        .ok_or_else(|| "domain store is unavailable".to_string())?;
     let rows = domain_store
         .list_preview_runs_for_stage_execution(&stage_execution_id)
         .map_err(|e| format!("list_preview_runs: {e}"))?;
@@ -174,33 +237,53 @@ pub fn get_preview_run(
     let domain_store = state
         .domain_store
         .clone()
-        .ok_or_else(|| "domain store not is unavailable".to_string())?;
+        .ok_or_else(|| "domain store is unavailable".to_string())?;
     let row = domain_store
         .get_preview_run(&preview_id)
         .map_err(|e| format!("get_preview_run: {e}"))?;
     Ok(PreviewRunDto::from(&row))
 }
 
-/// CR-05 P4 slice 4 — mark a preview failed (rare in the slice 4
-/// placeholder flow; the real failure path lands with slice 5 when
-/// the synthesis moves to a background task).
+/// CR-05 P4 slice 5 — read the preview's PNG artifact back as a
+/// base64 data payload for the webview. The asset protocol stays
+/// disabled; only bytes belonging to an existing preview row cross
+/// the boundary.
+///
+/// Returns the raw base64 (no `data:` prefix) so the caller can pick
+/// the MIME; the artifact's `format` column is authoritative.
 #[tauri::command]
-pub fn mark_preview_failed(
+pub fn read_preview_artifact(
     state: State<'_, PipelinePlanState>,
     preview_id: String,
-    error_json: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let domain_store = state
         .domain_store
         .clone()
-        .ok_or_else(|| "domain store not is unavailable".to_string())?;
-    domain_store
-        .mark_preview_failed(&preview_id, &error_json, &now_unix_ms_string())
-        .map_err(|e| format!("mark_preview_failed: {e}"))
+        .ok_or_else(|| "domain store is unavailable".to_string())?;
+    let preview = domain_store
+        .get_preview_run(&preview_id)
+        .map_err(|e| format!("get_preview_run: {e}"))?;
+    let artifact_id = preview
+        .preview_artifact_id
+        .ok_or_else(|| format!("preview '{preview_id}' has no artifact"))?;
+    let artifact = domain_store
+        .get_artifact(&artifact_id)
+        .map_err(|e| format!("get_artifact: {e}"))?;
+    // Defense-in-depth: only serve files inside the previews dir.
+    let path = std::path::Path::new(&artifact.path);
+    if !path.starts_with(&state.previews_dir) {
+        return Err(format!(
+            "artifact path '{}' is outside the previews directory",
+            artifact.path
+        ));
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("read artifact file: {e}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
-/// CR-05 P4 slice 4 — delete a preview row. Slice 4 keeps the
-/// companion artifact intact; slice 5 will add artifact cleanup.
+/// CR-05 P4 slice 4 — delete a preview row. The companion artifact
+/// row and PNG file are left in place (slice 5): artifact GC is a
+/// §26 follow-up once retention policy is decided.
 #[tauri::command]
 pub fn delete_preview_run(
     state: State<'_, PipelinePlanState>,
@@ -209,7 +292,7 @@ pub fn delete_preview_run(
     let domain_store = state
         .domain_store
         .clone()
-        .ok_or_else(|| "domain store not is unavailable".to_string())?;
+        .ok_or_else(|| "domain store is unavailable".to_string())?;
     domain_store
         .delete_preview_run(&preview_id)
         .map_err(|e| format!("delete_preview_run: {e}"))
@@ -230,54 +313,50 @@ fn sha256_hex_of_str(s: &str) -> String {
     format!("{:x}", h.finalize())
 }
 
-/// CR-05 P4 slice 4 — synthesize a placeholder artifact whose
-/// payload encodes the preview parameters + scale + label. Slice 5
-/// replaces this with a real downsampled image produced by the
-/// stage handler. Returns the recorded artifact.
-fn synthesize_placeholder_artifact(
+/// CR-05 P4 slice 5 — export the preview image as an 8-bit PNG into
+/// `<previews_dir>/<preview_id>.png` and record the artifact row with
+/// the real dimensions + hash of the file bytes.
+fn persist_preview_png(
     domain_store: &Arc<astroforge_core::domain_store::DomainStore>,
+    previews_dir: &std::path::Path,
     preview_id: &str,
     stage_execution_id: &str,
-    label: &str,
-    scale: f64,
-    parameters_json: &str,
-) -> Result<Artifact, astroforge_core::domain_store::DomainStoreError> {
-    // Payload: a deterministic, non-image byte blob. The §11 spec
-    // promises a "Preview — reduced resolution" experience, but
-    // slice 4 ships lifecycle wiring only; a real PNG requires
-    // either a tiny stub image library or deferring to slice 5.
-    // The placeholder is a JSON document so the artifact
-    // round-trip + reader API can be exercised end-to-end.
-    let payload = format!(
-        r#"{{"preview_id":"{preview_id}","stage_execution_id":"{stage_execution_id}","label":"{label}","scale":{scale},"parameters_json":{parameters_json}}}"#
-    );
-    let hash = ContentStore::sha256_hex(payload.as_bytes());
-    let path = format!("preview://{preview_id}");
+    image: &astroforge_core::image::F32Image,
+    metadata_json: Option<&str>,
+) -> Result<Artifact, DomainStoreError> {
+    std::fs::create_dir_all(previews_dir).map_err(|e| DomainStoreError::Io(e.to_string()))?;
+    let path = previews_dir.join(format!("{preview_id}.png"));
+
+    let mut png_bytes: Vec<u8> = Vec::new();
+    export_png_8bit(image, &mut png_bytes)
+        .map_err(|e| DomainStoreError::Io(format!("png export: {e}")))?;
+    std::fs::write(&path, &png_bytes).map_err(|e| DomainStoreError::Io(e.to_string()))?;
+
+    let hash = astroforge_core::artifact::ContentStore::sha256_hex(&png_bytes);
     let artifact = Artifact {
         artifact_id: String::new(),
         artifact_hash: hash,
         artifact_type: ArtifactCategory::Preview,
-        format: "json".into(),
-        // Slice 5 will write the real preview image to
-        // ContentStore and patch the path. Slice 4 leaves the
-        // path as a stable marker that points at the preview row.
-        path: path.clone(),
-        size: payload.len() as u64,
+        format: "png".into(),
+        path: path.to_string_lossy().to_string(),
+        size: png_bytes.len() as u64,
         created_at: String::new(),
         producer_stage: Some(stage_execution_id.to_string()),
-        pipeline_run_id: None,
+        pipeline_run_id: Some(preview_id.to_string()),
         parent_artifact_ids: vec![],
-        width: Some(1),
-        height: Some(1),
-        channels: Some(1),
+        width: Some(image.width() as i64),
+        height: Some(image.height() as i64),
+        channels: Some(image.channels() as i64),
         bit_depth: Some(8),
-        color_space: Some("placeholder".into()),
+        color_space: Some("srgb".into()),
         linear_or_nonlinear: Some(false),
     };
     let stored_id = domain_store.record_artifact(&artifact)?;
     let mut stored = domain_store.get_artifact(&stored_id)?;
-    // Re-apply the marker path so the read-back matches the
-    // input (record_artifact doesn't preserve it otherwise).
-    stored.path = path;
+    // Stash the handler metadata in the artifact path namespace
+    // would be lossy; the metadata lives on the PreviewRun row's
+    // parameters lineage instead. Nothing else to patch here.
+    let _ = metadata_json;
+    stored.size = png_bytes.len() as u64;
     Ok(stored)
 }

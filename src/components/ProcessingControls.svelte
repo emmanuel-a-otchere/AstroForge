@@ -26,6 +26,7 @@
     stageExecutions,
     startPipelineRun,
   } from "../lib/pipeline-plan-store";
+  import { readPreviewArtifact } from "../lib/astroforge-api";
 
   export let planId: string;
 
@@ -38,6 +39,9 @@
   // CR-05 P4 slice 4 — keys of in-flight preview requests so
   // the button can show a spinner / disabled state.
   let previewPending: Record<string, boolean> = {};
+  // CR-05 P4 slice 5 — base64 PNG payloads keyed by preview_id,
+  // loaded lazily for completed previews that have an artifact.
+  let previewImages: Record<string, string> = {};
 
   $: plan = $activePlan?.plan_id === planId ? $activePlan : null;
   $: executions = $stageExecutions[planId] ?? [];
@@ -68,33 +72,59 @@
   }
 
   // CR-05 P4 slice 4 — toggle the inline preview panel and
-  // fetch the stage's preview runs (lazy). The slice 4
-  // placeholder flow synthesizes a completed row on the Rust
-  // side; slice 5 will move the synthesis into a worker.
+  // fetch the stage's preview runs (lazy).
   async function togglePreview(stageExecutionId: string) {
     if (previewStageId === stageExecutionId) {
       previewStageId = null;
       return;
     }
     previewStageId = stageExecutionId;
-    await refreshPreviewRuns(stageExecutionId);
+    const rows = await refreshPreviewRuns(stageExecutionId);
+    // Slice 5 — kick off image loads for completed previews.
+    for (const row of rows) {
+      void loadPreviewImage(row.preview_id, row.status, row.preview_artifact_id);
+    }
   }
 
   async function onCreatePreview(stageExecutionId: string) {
-    // Slice 4 placeholder parameters — slice 5 reads them from
-    // the active recommendation / parameter sidebar.
     previewPending = { ...previewPending, [stageExecutionId]: true };
     try {
-      await createPreviewRunFor({
+      const created = await createPreviewRunFor({
         stage_execution_id: stageExecutionId,
-        source_version_id: planId, // slice 5 derives the real version id
+        source_version_id: planId, // reserved until image_versions land
         parameters_json: JSON.stringify({ scale_hint: 0.25 }),
         scale: 0.25,
         label: `Preview — ${stageExecutionId.slice(0, 12)}`,
       });
+      if (created) {
+        void loadPreviewImage(
+          created.preview_id,
+          created.status,
+          created.preview_artifact_id,
+        );
+      }
     } finally {
       const { [stageExecutionId]: _drop, ...rest } = previewPending;
       previewPending = rest;
+    }
+  }
+
+  // CR-05 P4 slice 5 — fetch the PNG bytes for a completed preview
+  // and cache the base64 payload for the <img> tag. Failures are
+  // non-fatal: the card falls back to showing status + error_json.
+  async function loadPreviewImage(
+    previewId: string,
+    status: string,
+    artifactId: string | null,
+  ) {
+    if (status !== "completed" || !artifactId) return;
+    if (previewImages[previewId]) return;
+    try {
+      const b64 = await readPreviewArtifact(previewId);
+      previewImages = { ...previewImages, [previewId]: b64 };
+    } catch {
+      // Leave uncached; the error banner on the card covers the
+      // user-visible failure mode.
     }
   }
 </script>
@@ -260,6 +290,13 @@
                           hash: <span class="font-mono">{preview.parameters_hash.slice(0, 12)}…</span> ·
                           {preview.started_at ?? "—"} → {preview.completed_at ?? "—"}
                         </p>
+                        {#if previewImages[preview.preview_id]}
+                          <img
+                            class="preview-image"
+                            src={`data:image/png;base64,${previewImages[preview.preview_id]}`}
+                            alt={`Preview output for ${preview.label}`}
+                          />
+                        {/if}
                         <pre class="preview-params font-mono">{preview.parameters_json}</pre>
                         {#if preview.error_json}
                           <p class="preview-error font-body" role="alert">
@@ -569,6 +606,15 @@
     margin: 0;
     color: var(--on-surface-variant);
     font-size: 0.75rem;
+  }
+  /* CR-05 P4 slice 5 — the rendered PNG, scaled to fit the panel. */
+  .preview-image {
+    max-width: 100%;
+    max-height: 240px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    background: var(--surface-container);
+    image-rendering: pixelated;
   }
   .preview-params {
     margin: 0;

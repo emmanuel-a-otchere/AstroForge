@@ -561,6 +561,46 @@ impl PipelinePlanStore {
         Ok(stage_execution_id)
     }
 
+    /// CR-05 P4 slice 5 — fetch a single stage execution row by id.
+    /// The preview command needs this to resolve
+    /// `stage_execution_id` → (plan_id, stage_id, parameters) before
+    /// dispatching the preview driver.
+    pub fn get_stage_execution(
+        &self,
+        stage_execution_id: &str,
+    ) -> Result<StageExecution, PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        conn.query_row(
+            "SELECT stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json, metric_snapshot_json
+             FROM stage_executions WHERE stage_execution_id = ?1",
+            params![stage_execution_id],
+            |row| {
+                Ok(StageExecution {
+                    stage_execution_id: row.get(0)?,
+                    plan_id: row.get(1)?,
+                    stage_id: row.get(2)?,
+                    attempt: row.get(3)?,
+                    status: row.get(4)?,
+                    input_version_id: row.get(5)?,
+                    output_artifact_id: row.get(6)?,
+                    parameters_json: row.get(7)?,
+                    parameters_hash: row.get(8)?,
+                    started_at: row.get(9)?,
+                    completed_at: row.get(10)?,
+                    resource_usage_json: row.get(11)?,
+                    error_json: row.get(12)?,
+                    metric_snapshot_json: row.get(13)?,
+                })
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                PipelinePlanStoreError::NotFound(stage_execution_id.to_string())
+            }
+            other => PipelinePlanStoreError::Sqlite(other),
+        })
+    }
+
     /// CR-05 P3 slice 2.5 — resolve a recommendation row by id
     /// (without committing to a user_decision value yet). Used by
     /// the apply / dismiss / reset commands so they share the
@@ -957,6 +997,28 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].stage_id, "stage_calibrate");
         assert_eq!(listed[0].status, "running");
+    }
+
+    /// CR-05 P4 slice 5 — `get_stage_execution` fetches a single row
+    /// by id; unknown ids return NotFound.
+    #[test]
+    fn get_stage_execution_round_trip_and_not_found() {
+        let store = PipelinePlanStore::in_memory().unwrap();
+        let exec = synthetic_entry("plan_1", "stage_calibrate", "completed");
+        store.insert_stage_execution(&exec).unwrap();
+
+        let fetched = store
+            .get_stage_execution("exec_plan_1_stage_calibrate")
+            .unwrap();
+        assert_eq!(fetched.plan_id, "plan_1");
+        assert_eq!(fetched.stage_id, "stage_calibrate");
+        assert_eq!(fetched.status, "completed");
+
+        let err = store.get_stage_execution("exec_missing").unwrap_err();
+        match err {
+            PipelinePlanStoreError::NotFound(id) => assert_eq!(id, "exec_missing"),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
     }
 
     #[test]

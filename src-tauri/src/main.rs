@@ -512,7 +512,9 @@ fn main() {
             app.manage(commands_project::ProjectState {
                 manager: Mutex::new(ProjectManager::new(projects_root.clone())),
                 store: Mutex::new(project_store),
-                projects_root,
+                // CR-05 P4 slice 5 — clone so the PipelinePlanState
+                // below can derive the previews dir from the same root.
+                projects_root: projects_root.clone(),
             });
 
             // CR-05 P1 — PipelinePlan store (additive; P1 only).
@@ -581,6 +583,9 @@ fn main() {
                 recommendation_engine: Some(std::sync::Arc::new(
                     astroforge_core::recommendation::RecommendationEngine::with_defaults(),
                 )),
+                // CR-05 P4 slice 5 — preview PNGs live under the
+                // projects root. Created lazily on first preview.
+                previews_dir: projects_root.join("previews"),
             });
 
             Ok(())
@@ -639,11 +644,13 @@ fn main() {
             commands_pipeline_plan::apply_recommendation,
             commands_pipeline_plan::dismiss_recommendation,
             commands_pipeline_plan::reset_recommendation,
-            // CR-05 P4 slice 4 — preview-before-commit IPC.
+            // CR-05 P4 slice 4+5 — preview-before-commit IPC. Slice 5
+            // replaced `mark_preview_failed` (placeholder-only path)
+            // with `read_preview_artifact` (real PNG read-back).
             commands_preview::create_preview_run,
             commands_preview::list_preview_runs_for_stage_execution,
             commands_preview::get_preview_run,
-            commands_preview::mark_preview_failed,
+            commands_preview::read_preview_artifact,
             commands_preview::delete_preview_run,
         ])
         .run(tauri::generate_context!())

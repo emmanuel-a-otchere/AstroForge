@@ -18,6 +18,7 @@ use tauri::{Manager, State};
 mod commands_pipeline_plan;
 mod commands_preview;
 mod commands_project;
+mod commands_resource;
 
 /// Tauri-managed state: holds the GalleryStore (rusqlite) behind a
 /// mutex so the IPC handlers can borrow it immutably across awaits.
@@ -652,6 +653,8 @@ fn main() {
             commands_preview::get_preview_run,
             commands_preview::read_preview_artifact,
             commands_preview::delete_preview_run,
+            // CR-05 P4 slice 7 — §21 resource snapshot.
+            commands_resource::get_resource_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

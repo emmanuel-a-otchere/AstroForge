@@ -18,6 +18,14 @@
     - `AutoPlanPanel` (rendered only when `!$activePlan`, since
       the plan summary it shows is redundant with the
       IntelligencePanel's plan-scoped view)
+
+  CR-05 P3 slice 2.8 — mounts `ProcessingControls` so the user
+  has Start / Pause / Resume / Cancel in the same surface as
+  the recommendations + run history. The spec's "Zone C"
+  right-hand panel (Intelligence & Controls) is a future
+  layout refactor (P3 slice 2.10+); for now we stack the
+  controls vertically above the run list, consistent with the
+  recovery / auto-plan / intelligence zones already wired here.
 -->
 <script lang="ts">
   import { onDestroy } from "svelte";
@@ -26,6 +34,7 @@
   import IntelligencePanel from "./IntelligencePanel.svelte";
   import RecoveryBanner from "./RecoveryBanner.svelte";
   import AutoPlanPanel from "./AutoPlanPanel.svelte";
+  import ProcessingControls from "./ProcessingControls.svelte";
   import { activeProject } from "../state/project-context";
   import {
     activePlan,
@@ -121,6 +130,17 @@
       <section class="intelligence-zone" aria-label="Active plan intelligence">
         <IntelligencePanel planId={$activePlan.plan_id} />
       </section>
+
+      <!--
+        CR-05 P3 slice 2.8 — ProcessingControls mounted
+        directly below the intelligence zone so the read →
+        act → history flow reads top-to-bottom. The component
+        is self-contained: Start / Pause / Resume / Cancel
+        + per-stage execution list, scoped to the plan id.
+      -->
+      <section class="processing-controls-zone" aria-label="Pipeline run controls">
+        <ProcessingControls planId={$activePlan.plan_id} />
+      </section>
     {/if}
 
     {#if $workspaceState.runs.length === 0}
@@ -189,6 +209,13 @@
   /* CR-05 P3 slice 2.7 — auto-plan generator sits below the
      recovery banner and above the intelligence zone. */
   .auto-plan-zone {
+    margin-bottom: var(--sp-lg);
+  }
+
+  /* CR-05 P3 slice 2.8 — processing controls sit between the
+     intelligence zone (read) and the run list (history) so
+     the read → act → history flow reads top-to-bottom. */
+  .processing-controls-zone {
     margin-bottom: var(--sp-lg);
   }
 

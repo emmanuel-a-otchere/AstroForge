@@ -22,20 +22,15 @@ pub const DOMAIN_SCHEMA_VERSION: u32 = 1;
 // ─── Enums ──────────────────────────────────────────────────────────────────
 
 /// CR-02 §4 — astronomical subject classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ObjectType {
     DeepSky,
     Planet,
     Lunar,
     Solar,
+    #[default]
     Unknown,
-}
-
-impl Default for ObjectType {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 /// CR-02 §19 — how source files are held: copied into project storage
@@ -485,9 +480,10 @@ pub mod preview_status {
 /// CR-05 §26 — status of a PipelinePlan. Mirrors the §8 state vocabulary
 /// (Not started / Ready / Running / Completed / Paused / Needs attention /
 /// Failed / Recovering) but as a persisted, queryable enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelinePlanStatus {
+    #[default]
     Draft,
     Ready,
     Running,
@@ -495,12 +491,6 @@ pub enum PipelinePlanStatus {
     Completed,
     Failed,
     Cancelled,
-}
-
-impl Default for PipelinePlanStatus {
-    fn default() -> Self {
-        Self::Draft
-    }
 }
 
 /// CR-02 §15 — AI provenance. Deterministic is the default; stochastic /

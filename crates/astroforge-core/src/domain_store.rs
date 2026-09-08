@@ -1631,7 +1631,13 @@ mod tests {
         let pid = s.create_project("M42", None, "0.1.0").unwrap();
         let sid = s.create_session(&pid, "night 1").unwrap();
         let run = s
-            .create_pipeline_run(&pid, &[sid.clone()], None, "0.1.0", "engine-1.0")
+            .create_pipeline_run(
+                &pid,
+                std::slice::from_ref(&sid),
+                None,
+                "0.1.0",
+                "engine-1.0",
+            )
             .unwrap();
         assert!(run.starts_with("run_"));
 

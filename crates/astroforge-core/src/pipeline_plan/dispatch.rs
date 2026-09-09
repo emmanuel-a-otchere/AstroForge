@@ -1638,3 +1638,34 @@ mod tests {
         assert!(reg.get("unregistered").is_none());
     }
 }
+
+/// CR-05 P6.1b — test-only handler that toggles between
+/// "fail" and "succeed" so retry-style tests can prove that
+/// `runner.retry_stage` actually re-runs the handler (rather
+/// than just inserting a new exec row with stale state).
+///
+/// Set `fails_first: true` for the canonical pattern:
+/// 1. First call returns Err.
+/// 2. Subsequent calls return Ok (no-op StageOutput).
+pub struct FailingHandler {
+    pub fails_first: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl StageHandler for FailingHandler {
+    fn handle(&self, _ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
+        if self
+            .fails_first
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(StageHandlerError::NotImplemented(
+                "FailingHandler: simulated failure".into(),
+            ));
+        }
+        Ok(StageOutput {
+            image: None,
+            parameters_json: None,
+            metadata_json: None,
+            artifact_id: None,
+        })
+    }
+}

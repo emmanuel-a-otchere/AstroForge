@@ -650,6 +650,11 @@ fn main() {
             commands_pipeline_plan::get_processing_metrics,
             // CR-05 P6 slice 3 (§25) — processing timeline per stage.
             commands_pipeline_plan::get_processing_timeline,
+            // CR-05 P6.1b (§9) — per-stage retry + skip commands
+            // that close the ErrorRecoveryPanel button wiring
+            // deferred from P6.1.
+            commands_pipeline_plan::retry_stage,
+            commands_pipeline_plan::skip_stage,
             // CR-05 P4 slice 4+5 — preview-before-commit IPC. Slice 5
             // replaced `mark_preview_failed` (placeholder-only path)
             // with `read_preview_artifact` (real PNG read-back).

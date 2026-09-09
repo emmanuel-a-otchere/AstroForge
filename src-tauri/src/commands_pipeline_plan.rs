@@ -20,7 +20,7 @@ use astroforge_core::pipeline_plan::{
         HandlerRegistry, RegisterHandler, StackHandler, StretchHandler,
     },
     plan::{generate_plan as generate_plan_inner, GenerationContext, SessionUnderstanding},
-    runner::{CancelHandle, PauseHandle, PipelineRunner, RunOutcome},
+    runner::{CancelHandle, PauseHandle, PipelineRunner, RetryKind, RunOutcome},
     AcquisitionMode, CalibrationAvailability,
 };
 use astroforge_core::adaptive::AdaptiveParameterSet;
@@ -920,4 +920,110 @@ impl From<astroforge_core::processing_timeline::ProcessingTimeline> for Processi
             events: t.events.into_iter().map(Into::into).collect(),
         }
     }
+}
+
+/// CR-05 P6.1b (§9) — UI payload for `retry_stage` / `skip_stage`.
+/// Mirrors the new `StageExecution` row produced by the runner.
+#[derive(Debug, Clone, Serialize)]
+pub struct StageExecutionDto {
+    pub stage_execution_id: String,
+    pub plan_id: String,
+    pub stage_id: String,
+    pub attempt: u32,
+    pub status: String,
+    pub output_artifact_id: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub error_json: Option<String>,
+}
+
+impl From<astroforge_core::domain::StageExecution> for StageExecutionDto {
+    fn from(e: astroforge_core::domain::StageExecution) -> Self {
+        Self {
+            stage_execution_id: e.stage_execution_id,
+            plan_id: e.plan_id,
+            stage_id: e.stage_id,
+            attempt: e.attempt,
+            status: e.status,
+            output_artifact_id: e.output_artifact_id,
+            started_at: e.started_at,
+            completed_at: e.completed_at,
+            error_json: e.error_json,
+        }
+    }
+}
+
+/// CR-05 P6.1b (§9) — `retry_stage` command.
+///
+/// Re-dispatches a single stage that previously failed. The
+/// runner validates that the plan is in `Failed` state and that
+/// the named stage exists on the plan. On success the new exec
+/// row carries `attempt = prev + 1` and `status = "completed"`;
+/// on failure the row carries the structured §28 error and the
+/// plan stays `Failed`.
+#[tauri::command]
+pub fn retry_stage(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+    stage_id: String,
+    kind: RetryKindDto,
+) -> Result<StageExecutionDto, String> {
+    let runner = {
+        let store = state.store.clone();
+        PipelineRunner::with_engine(
+            store,
+            state.handler_registry.clone(),
+            state.domain_store.clone(),
+            state.recommendation_engine.clone(),
+        )
+    };
+    let rust_kind = match kind {
+        RetryKindDto::Optimized => RetryKind::Optimized,
+        RetryKindDto::AsIs => RetryKind::AsIs,
+    };
+    runner
+        .retry_stage(&plan_id, &stage_id, rust_kind)
+        .map(Into::into)
+        .map_err(runner_err_to_string)
+}
+
+/// CR-05 P6.1b (§9) — UI representation of the retry variant.
+/// Today both variants produce the same runner behaviour; the
+/// distinction is recorded on the new exec row's parameters_json
+/// for traceability.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub enum RetryKindDto {
+    Optimized,
+    AsIs,
+}
+
+/// CR-05 P6.1b (§9) — `skip_stage` command.
+///
+/// Marks a stage's latest exec row as `skipped` and flips the
+/// plan back to `Ready`. Refuses on required stages per §9.
+#[tauri::command]
+pub fn skip_stage(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+    stage_id: String,
+) -> Result<StageExecutionDto, String> {
+    let runner = {
+        let store = state.store.clone();
+        PipelineRunner::with_engine(
+            store,
+            state.handler_registry.clone(),
+            state.domain_store.clone(),
+            state.recommendation_engine.clone(),
+        )
+    };
+    runner
+        .skip_stage(&plan_id, &stage_id)
+        .map(Into::into)
+        .map_err(runner_err_to_string)
+}
+
+/// CR-05 P6.1b — translate `RunnerError` to a user-facing string.
+/// Mirrors `store_err_to_string` for store errors.
+fn runner_err_to_string(e: astroforge_core::pipeline_plan::runner::RunnerError) -> String {
+    e.to_string()
 }

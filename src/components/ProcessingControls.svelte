@@ -29,6 +29,7 @@
   import {
     getResourceSnapshot,
     getProcessingMetrics,
+    getProcessingTimeline,
     readPreviewArtifact,
     stageExecutionBudget,
     type ExecutionBackend,
@@ -36,10 +37,12 @@
     type Precision,
     type ProcessingMetricsDto,
     type ResourceSnapshot,
+    type ProcessingTimelineDto,
   } from "../lib/astroforge-api";
   import ExpertDagView from "./ExpertDagView.svelte";
   import StageCard from "./StageCard.svelte";
   import ErrorRecoveryPanel from "./ErrorRecoveryPanel.svelte";
+  import ProcessingTimeline from "./ProcessingTimeline.svelte";
 
   export let planId: string;
 
@@ -80,6 +83,29 @@
       processingMetrics = null;
     } finally {
       processingMetricsLoading = false;
+    }
+  }
+
+  // CR-05 P6 slice 3 (§25) — per-stage processing timeline. Same
+  // refresh strategy as `processingMetrics`: pull on plan change
+  // and after each completion; failure is non-fatal (the panel
+  // surfaces an empty-state message).
+  let processingTimeline: ProcessingTimelineDto | null = null;
+  let processingTimelineLoading = false;
+
+  async function loadProcessingTimeline() {
+    if (processingTimelineLoading) return;
+    processingTimelineLoading = true;
+    try {
+      processingTimeline = await getProcessingTimeline(planId);
+    } catch (err) {
+      console.warn(
+        "[ProcessingControls] getProcessingTimeline failed",
+        err,
+      );
+      processingTimeline = null;
+    } finally {
+      processingTimelineLoading = false;
     }
   }
 
@@ -156,6 +182,7 @@
   // either the active plan or its stage executions change, so the
   // DAG view's recommendation banner stays current during a run.
   $: if (plan || executions.length > 0) void loadProcessingMetrics();
+  $: if (plan || executions.length > 0) void loadProcessingTimeline();
   // The plan is "paused" if the backend reports that status. Slice 2.5
   // surfaces a Resume button in that case instead of Start.
   $: planStatus = plan?.status ?? "ready";
@@ -541,6 +568,29 @@
        most-recent stage. Component handles the non-AI / null cases
        internally (renders nothing). -->
   <StageCard metrics={processingMetrics} />
+
+  <!-- CR-05 P6 slice 3 (§25) — per-stage processing timeline.
+       Click a row to reveal the corresponding Image Version (the
+       actual reveal wiring is downstream of P6.3; the panel
+       surfaces the version_id for the parent to act on). -->
+  <section class="timeline-section" data-testid="timeline-section">
+    <h3>Processing Timeline</h3>
+    <ProcessingTimeline
+      events={processingTimeline?.events ?? []}
+      onSelect={(versionId) => {
+        // §25 reproducibility invariant: clicking a timeline row
+        // reveals the Image Version it produced. The actual reveal
+        // (likely ImageViewer.focus(versionId) or a CR-02 §10
+        // branch-and-compare UI) lands downstream of P6.3 — for
+        // now we surface the version id so the user can correlate
+        // the click with the panel.
+        console.info(
+          "[ProcessingControls] timeline event selected",
+          versionId,
+        );
+      }}
+    />
+  </section>
 </section>
 
 <style>

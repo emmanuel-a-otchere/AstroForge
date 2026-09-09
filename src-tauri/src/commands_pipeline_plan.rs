@@ -846,3 +846,78 @@ pub fn get_processing_metrics(
     let payload = astroforge_core::processing_metrics::aggregate_processing_metrics(&plan, &execs);
     Ok(payload.into())
 }
+
+/// CR-05 P6 slice 3 (§25) — `get_processing_timeline`.
+///
+/// Derives the per-stage pipeline timeline (§25) from the same
+/// stage executions that `get_processing_metrics` already reads.
+/// Pure function of the store — no IO, no system calls. Aggregation
+/// lives in `astroforge_core::processing_timeline` so it's caught
+/// by `cargo test --workspace` (src-tauri is a binary-only crate
+/// outside the workspace).
+#[tauri::command]
+pub fn get_processing_timeline(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+) -> Result<ProcessingTimelineDto, String> {
+    let store = state.store.lock().map_err(lock_err)?;
+    let plan = store
+        .get_pipeline_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    let execs = store
+        .list_stage_executions_for_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    let timeline = astroforge_core::processing_timeline::build_processing_timeline(&plan, &execs);
+    Ok(timeline.into())
+}
+
+/// CR-05 P6 slice 3 (§25) — UI payload for `get_processing_timeline`.
+/// Mirrors `astroforge_core::processing_timeline::ProcessingTimeline`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessingTimelineDto {
+    pub plan_id: String,
+    pub events: Vec<TimelineEventDto>,
+}
+
+/// CR-05 P6 slice 3 (§25) — single event on the processing timeline.
+/// Mirrors `astroforge_core::processing_timeline::TimelineEvent`.
+#[derive(Debug, Clone, Serialize)]
+pub struct TimelineEventDto {
+    pub stage_id: String,
+    pub stage_label: String,
+    pub stage_type: String,
+    pub sequence: u32,
+    /// Unix milliseconds; `None` for events with no parseable
+    /// start time (legacy rows, unparseable encoding).
+    pub timestamp_unix_ms: Option<u64>,
+    /// Wall-clock duration; `None` when start or end is missing or
+    /// clock-skew-negative.
+    pub duration_ms: Option<u64>,
+    /// `ImageVersion.version_id` this stage produced.
+    pub output_version_id: Option<String>,
+    pub status: String,
+}
+
+impl From<astroforge_core::processing_timeline::TimelineEvent> for TimelineEventDto {
+    fn from(e: astroforge_core::processing_timeline::TimelineEvent) -> Self {
+        Self {
+            stage_id: e.stage_id,
+            stage_label: e.stage_label,
+            stage_type: e.stage_type,
+            sequence: e.sequence,
+            timestamp_unix_ms: e.timestamp_unix_ms,
+            duration_ms: e.duration_ms,
+            output_version_id: e.output_version_id,
+            status: e.status,
+        }
+    }
+}
+
+impl From<astroforge_core::processing_timeline::ProcessingTimeline> for ProcessingTimelineDto {
+    fn from(t: astroforge_core::processing_timeline::ProcessingTimeline) -> Self {
+        Self {
+            plan_id: t.plan_id,
+            events: t.events.into_iter().map(Into::into).collect(),
+        }
+    }
+}

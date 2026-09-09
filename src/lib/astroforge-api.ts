@@ -533,6 +533,9 @@ export interface ProcessingMetricsDto {
   latest_metrics: ImageMetricsDto | null;
   latest_resource_budget: ExecutionBudgetDto | null;
   adaptive_parameters: AdaptiveParameterSetDto | null;
+  /** CR-05 P6.2 (§23) — AI label for the most-recent execution.
+   *  null when `ai_label_json` is missing (pre-P6.2 rows). */
+  latest_ai_label: AiBoundaryLabelDto | null;
 }
 
 /** §27 — single-roundtrip aggregate metrics for the Expert DAG view. */
@@ -540,3 +543,18 @@ export const getProcessingMetrics = (
   planId: string,
 ): Promise<ProcessingMetricsDto> =>
   invoke("get_processing_metrics", { planId });
+
+// ─── CR-05 P6 slice 2 (§23 AI Boundary) ─────────────────────────────
+
+/** §23 — AI boundary label per stage. Mirrors
+ *  astroforge_core::ai_boundary::AiBoundaryLabel. */
+export interface AiBoundaryLabelDto {
+  /** Whether the stage crosses the AI boundary. */
+  uses_ai: boolean;
+  /** Model identifier; null for classical stages. */
+  model_id: string | null;
+  /** Whether the stage is bit-reproducible. */
+  deterministic: boolean;
+  /** RNG seed; null when uses_ai is false or the stage has no seed. */
+  seed: number | null;
+}

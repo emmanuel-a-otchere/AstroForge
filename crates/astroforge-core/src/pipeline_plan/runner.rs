@@ -303,7 +303,17 @@ impl PipelineRunner {
                 // P3 slice 1 — populated by the runner after a
                 // successful stage dispatch (see below).
                 metric_snapshot_json: None,
+                // CR-05 P6.2 (§23) — populated by the runner below.
+                ai_label_json: None,
             };
+
+            // CR-05 P6.2 (§23) — derive the AI boundary label from
+            // `stage_type` and persist it before the stage runs. The
+            // §23 badge is a property of *what the stage is*, not
+            // whether it succeeded; pre-computing here means the
+            // `StageCard` can show the badge even on a failed stage.
+            let ai_label = crate::ai_boundary::AiBoundaryLabel::for_stage_type(&stage.stage_type);
+            exec.ai_label_json = serde_json::to_string(&ai_label).ok();
 
             // Dispatch via the handler registry (P2.6); fall back to the
             // no-op dispatcher for stages that don't have a registered
@@ -775,6 +785,8 @@ mod tests {
                 resource_usage_json: None,
                 error_json: None,
                 metric_snapshot_json: None,
+                // CR-05 P6.2 (§23) — populated by the runner below.
+                ai_label_json: None,
             };
             store.insert_stage_execution(&exec).unwrap();
         }
@@ -893,6 +905,9 @@ mod tests {
             resource_usage_json: None,
             error_json: None,
             metric_snapshot_json: Some(json.clone()),
+            // CR-05 P6.2 (§23) — see ai_boundary::tests for dedicated
+            // coverage of these fields.
+            ai_label_json: None,
         };
         store.insert_stage_execution(&exec).unwrap();
 
@@ -935,6 +950,8 @@ mod tests {
             resource_usage_json: None,
             error_json: None,
             metric_snapshot_json: None,
+            // CR-05 P6.2 (§23) — populated by the runner below.
+            ai_label_json: None,
         };
         store.insert_stage_execution(&exec).unwrap();
 
@@ -1006,6 +1023,8 @@ mod tests {
             resource_usage_json: None,
             error_json: None,
             metric_snapshot_json: None,
+            // CR-05 P6.2 (§23) — populated by the runner below.
+            ai_label_json: None,
         };
         plan_store.insert_stage_execution(&exec).unwrap();
 
@@ -1129,5 +1148,68 @@ mod tests {
             output.image.is_some(),
             "stack handler must produce an image"
         );
+    }
+
+    /// CR-05 P6.2 (§23) — runner populates `ai_label_json` from
+    /// `stage_type` at insertion time. Confirms both the AI (denoise)
+    /// and the classical (stretch, stack, ...) paths using the
+    /// canonical `deep_sky_osc_balanced()` plan.
+    #[test]
+    fn runner_persists_ai_boundary_label_per_stage() {
+        use crate::ai_boundary::AiBoundaryLabel;
+
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let plan_id = plan_in_store(&store);
+        let runner = PipelineRunner::new(store.clone());
+
+        let outcome = runner.start(&plan_id).unwrap();
+        assert_eq!(outcome, RunOutcome::Completed);
+
+        let execs = store.list_stage_executions_for_plan(&plan_id).unwrap();
+        assert!(!execs.is_empty(), "all stages must produce rows");
+
+        let stretch_label: AiBoundaryLabel = execs
+            .iter()
+            .find(|e| {
+                store
+                    .load_plan(&plan_id)
+                    .unwrap()
+                    .stages
+                    .iter()
+                    .find(|s| s.stage_id == e.stage_id)
+                    .map(|s| s.stage_type == "stretch")
+                    .unwrap_or(false)
+            })
+            .expect("stretch stage exec must exist")
+            .ai_label_json
+            .as_deref()
+            .map(|s| serde_json::from_str(s).unwrap())
+            .expect("stretch must have ai_label_json");
+        assert!(!stretch_label.uses_ai);
+        assert_eq!(stretch_label.model_id, None);
+
+        let denoise_label: AiBoundaryLabel = execs
+            .iter()
+            .find(|e| {
+                store
+                    .load_plan(&plan_id)
+                    .unwrap()
+                    .stages
+                    .iter()
+                    .find(|s| s.stage_id == e.stage_id)
+                    .map(|s| s.stage_type == "denoise")
+                    .unwrap_or(false)
+            })
+            .expect("denoise stage exec must exist")
+            .ai_label_json
+            .as_deref()
+            .map(|s| serde_json::from_str(s).unwrap())
+            .expect("denoise must have ai_label_json");
+        assert!(denoise_label.uses_ai);
+        assert_eq!(
+            denoise_label.model_id.as_deref(),
+            Some("astroforge_denoise_v1")
+        );
+        assert_eq!(denoise_label.seed, Some(0));
     }
 }

@@ -22,6 +22,7 @@
 //!   second IPC round-trip.
 
 use crate::adaptive::{derive_adaptive_parameters, AdaptiveParameterSet, ImageMetrics};
+use crate::ai_boundary::AiBoundaryLabel;
 use crate::domain::{PipelinePlan, StageExecution};
 use crate::resource::ExecutionBudget;
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,10 @@ pub struct ProcessingMetrics {
     /// make progress, but the UI surfaces absence honestly rather
     /// than fabricating a recommendation).
     pub adaptive_parameters: Option<AdaptiveParameterSet>,
+    /// CR-05 P6.2 (§23 AI Boundary) — AI label from the most-recent
+    /// execution. `None` when `ai_label_json` is missing (pre-P6.2
+    /// rows) or unparseable.
+    pub latest_ai_label: Option<AiBoundaryLabel>,
 }
 
 /// Pure aggregation. No IO, no system calls — exhaustive unit tests
@@ -94,6 +99,17 @@ pub fn aggregate_processing_metrics(
 
     let adaptive_parameters = latest_metrics.as_ref().map(derive_adaptive_parameters);
 
+    // CR-05 P6.2 (§23) — `latest_ai_label` is sourced from the same
+    // `latest` row that drives `latest_metrics`. Pre-P6.2 rows have
+    // `ai_label_json = None` and surface as `None` here; the
+    // StageCard renders no badge in that case (absence, not a
+    // "no AI" line).
+    let latest_ai_label = latest.and_then(|e| {
+        e.ai_label_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<AiBoundaryLabel>(s).ok())
+    });
+
     ProcessingMetrics {
         plan_id: plan.plan_id.clone(),
         stage_count,
@@ -104,6 +120,7 @@ pub fn aggregate_processing_metrics(
         latest_metrics,
         latest_resource_budget,
         adaptive_parameters,
+        latest_ai_label,
     }
 }
 
@@ -186,6 +203,10 @@ mod tests {
             resource_usage_json,
             error_json: None,
             metric_snapshot_json,
+            // CR-05 P6.2 (§23) — AI label is populated by the runner
+            // for real StageExecution rows; the test fixture leaves it
+            // None (see ai_boundary::tests for dedicated coverage).
+            ai_label_json: None,
         }
     }
 

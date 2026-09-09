@@ -192,7 +192,191 @@ pub fn recommend_execution(
     }
 }
 
-// ─── GPU probing ─────────────────────────────────────────────────────────────
+// ─── P5 slice 1 — backend enumeration + execution budget (D-CR05-8) ─────────
+//
+// Placement note: D-CR05-8 names `execution/resource.rs`; the repository
+// convention is flat crate-root modules (`pipeline/` and `pipeline_plan/`
+// are the only directories), so the budget lives here in `resource.rs`
+// alongside the snapshot it derives from. Same ownership, less churn.
+
+/// One backend's advertised capability at snapshot time (§21 + D-CR05-8:
+/// "backends advertise capability at startup").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendCapability {
+    pub backend: ExecutionBackend,
+    pub available: bool,
+    /// Human-readable device name when available (e.g. the GPU model).
+    pub device: Option<String>,
+    /// Why the backend is unavailable — surfaced verbatim in Expert mode
+    /// so the user never has to guess why e.g. CUDA is greyed out.
+    pub unavailable_reason: Option<String>,
+}
+
+/// Pure enumeration from an existing snapshot — deterministic for a given
+/// snapshot shape, which is what the P5 determinism tests pin down.
+pub fn enumerate_backends_from(snapshot: &ResourceSnapshot) -> Vec<BackendCapability> {
+    let gpu_for = |backend: ExecutionBackend| {
+        snapshot
+            .gpus
+            .iter()
+            .find(|g| g.backend == backend)
+            .map(|g| g.name.clone())
+    };
+    let capability = |backend: ExecutionBackend, platform_ok: bool, missing: &str| {
+        let device = gpu_for(backend);
+        let available = platform_ok && device.is_some();
+        BackendCapability {
+            backend,
+            available,
+            device,
+            unavailable_reason: if available {
+                None
+            } else if !platform_ok {
+                Some(format!(
+                    "{} is not supported on this platform",
+                    backend.label()
+                ))
+            } else {
+                Some(missing.to_string())
+            },
+        }
+    };
+
+    vec![
+        BackendCapability {
+            backend: ExecutionBackend::Cpu,
+            available: true, // CPU execution is always available.
+            device: Some(snapshot.cpu_model.clone()),
+            unavailable_reason: None,
+        },
+        capability(
+            ExecutionBackend::Cuda,
+            cfg!(any(target_os = "linux", target_os = "windows")),
+            "no NVIDIA GPU detected",
+        ),
+        capability(
+            ExecutionBackend::DirectMl,
+            cfg!(target_os = "windows"),
+            "no DirectML-capable GPU detected",
+        ),
+        capability(
+            ExecutionBackend::CoreMl,
+            cfg!(target_os = "macos"),
+            "no CoreML-capable GPU detected",
+        ),
+        // OpenVINO is a *runtime*, not just hardware: zero-dependency
+        // detection of the runtime is out of scope for this slice, so we
+        // report honestly rather than guess.
+        BackendCapability {
+            backend: ExecutionBackend::OpenVino,
+            available: false,
+            device: None,
+            unavailable_reason: Some("OpenVINO runtime detection not implemented yet".to_string()),
+        },
+    ]
+}
+
+/// Detect the device and enumerate backends. Thin wrapper so callers who
+/// already hold a snapshot can use the pure variant instead.
+pub fn enumerate_backends() -> Vec<BackendCapability> {
+    enumerate_backends_from(&ResourceSnapshot::detect())
+}
+
+/// What the runner is allowed to spend on one stage, derived from the
+/// dataset and the memory actually available right now (§22).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionBudget {
+    /// Ceiling for the stage's working set (50% of available RAM, 512 MiB
+    /// floor — same rule as `RecommendedExecution.memory_budget_bytes`).
+    pub memory_budget_bytes: u64,
+    /// True when the dataset cannot fit in the budget whole and the stage
+    /// must run tiled / streamed (§22 "process it in smaller tiles").
+    pub requires_tiling: bool,
+    /// Tile edge length in pixels when `requires_tiling` (still meaningful
+    /// otherwise — the runner may always run tiled for uniformity).
+    pub tile_size: u32,
+    pub thread_count: u32,
+    /// §22 pre-flight warning copy when memory is tight; `None` when the
+    /// stage fits comfortably. Rendered verbatim by the UI.
+    pub warning: Option<String>,
+}
+
+/// Assumed working-set multiplier: an RGB f32 tile is 12 bytes/px, and a
+/// stage typically needs input + output + two intermediate buffers.
+/// Documented so the estimate is auditable, not magic.
+const WORKING_SET_BUFFERS: u64 = 4;
+const BYTES_PER_PIXEL_F32_RGB: u64 = 12;
+
+/// Derive the per-stage execution budget.
+///
+/// - `dataset_size_bytes`: uncompressed size of the stage's input
+///   (width × height × channels × bytes-per-sample × frames for stacks).
+/// - `available_memory_bytes`: current *available* RAM, not total.
+/// - `logical_cores`: for the thread-count headroom rule.
+pub fn derive_budget(
+    dataset_size_bytes: u64,
+    available_memory_bytes: u64,
+    logical_cores: u32,
+) -> ExecutionBudget {
+    let memory_budget_bytes = (available_memory_bytes / 2).max(512 * 1024 * 1024);
+    let thread_count = logical_cores.saturating_sub(2).max(1);
+
+    // The dataset must fit alongside its working set; tiling splits the
+    // dataset dimension, not the working-set dimension, so compare the
+    // whole dataset against the budget first.
+    let requires_tiling = dataset_size_bytes > memory_budget_bytes;
+    let tile_size = tile_size_for(dataset_size_bytes, memory_budget_bytes);
+
+    let warning = if requires_tiling {
+        let tiles = tile_count(dataset_size_bytes, tile_size);
+        Some(format!(
+            "This operation requires more memory than is currently available. \
+             AstroForge will process it in {tiles} smaller tiles."
+        ))
+    } else {
+        None
+    };
+
+    ExecutionBudget {
+        memory_budget_bytes,
+        requires_tiling,
+        tile_size,
+        thread_count,
+        warning,
+    }
+}
+
+/// Number of `tile_size`² tiles needed to cover an image whose total
+/// uncompressed size is `dataset_size_bytes` (RGB f32 assumed, matching
+/// `BYTES_PER_PIXEL_F32_RGB`). Used for the §22 warning copy.
+fn tile_count(dataset_size_bytes: u64, tile_size: u32) -> u64 {
+    let pixels = dataset_size_bytes / BYTES_PER_PIXEL_F32_RGB;
+    let tile_pixels = (tile_size as u64).saturating_pow(2).max(1);
+    pixels.div_ceil(tile_pixels).max(1)
+}
+
+/// Pick the tile edge length for a stage. Candidate ladder mirrors the
+/// `HardwareProbe` tiers and extends upward for well-resourced machines:
+/// the largest tile whose *full working set* fits within half the budget
+/// (the other half is reserved for the streamed dataset + OS). Falls
+/// back to 256 with the understanding that the budget warning already
+/// fired — we never return a tile of 0.
+pub fn tile_size_for(dataset_size_bytes: u64, memory_budget_bytes: u64) -> u32 {
+    const CANDIDATES: [u32; 5] = [1024, 768, 512, 384, 256];
+    let per_tile_ceiling = memory_budget_bytes / 2;
+    let dataset_pixels = dataset_size_bytes / BYTES_PER_PIXEL_F32_RGB;
+    for &tile in &CANDIDATES {
+        let tile_working_set = (tile as u64).pow(2) * BYTES_PER_PIXEL_F32_RGB * WORKING_SET_BUFFERS;
+        // Fit within the ceiling, and don't return a tile larger than the
+        // dataset itself (a 1024px tile for a 400px image is wasteful).
+        // The smallest candidate is always allowed so we never return 0.
+        let covers_dataset = (tile as u64).pow(2) <= dataset_pixels || tile == 256;
+        if tile_working_set <= per_tile_ceiling && covers_dataset {
+            return tile;
+        }
+    }
+    256
+}
 
 /// Best-effort GPU inventory. Returns an empty vec when nothing is
 /// detected — that is a valid answer (CPU-only device), not an error.
@@ -474,5 +658,143 @@ mod tests {
             assert_ne!(gpu.backend, ExecutionBackend::Cpu);
             assert!(!gpu.name.is_empty());
         }
+    }
+
+    // ── P5 slice 1: backend enumeration ──
+
+    fn snapshot_with_gpus(gpus: Vec<GpuInfo>) -> ResourceSnapshot {
+        let mut snap = ResourceSnapshot {
+            cpu_model: "Test CPU".to_string(),
+            logical_cores: 8,
+            physical_cores: Some(8),
+            total_memory_bytes: 16 * GIB,
+            available_memory_bytes: 12 * GIB,
+            gpus,
+            recommended: recommend_execution(ExecutionBackend::Cpu, 8, 12 * GIB, None),
+        };
+        snap.recommended = recommend_execution(
+            snap.gpus
+                .first()
+                .map(|g| g.backend)
+                .unwrap_or(ExecutionBackend::Cpu),
+            8,
+            12 * GIB,
+            snap.gpus.iter().filter_map(|g| g.vram_bytes).max(),
+        );
+        snap
+    }
+
+    #[test]
+    fn enumerate_backends_cpu_only_snapshot() {
+        let caps = enumerate_backends_from(&snapshot_with_gpus(Vec::new()));
+        assert_eq!(caps.len(), 5); // §21 vocabulary, always complete
+        let cpu = &caps[0];
+        assert_eq!(cpu.backend, ExecutionBackend::Cpu);
+        assert!(cpu.available);
+        assert_eq!(cpu.device.as_deref(), Some("Test CPU"));
+        // No GPU anywhere → every GPU backend unavailable with a reason.
+        for cap in &caps[1..] {
+            assert!(!cap.available);
+            assert!(cap.unavailable_reason.is_some());
+        }
+        // Determinism: same snapshot → identical enumeration.
+        assert_eq!(
+            caps,
+            enumerate_backends_from(&snapshot_with_gpus(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn enumerate_backends_with_matching_gpu_is_platform_gated() {
+        let cuda_gpu = GpuInfo {
+            name: "NVIDIA RTX 3060".to_string(),
+            backend: ExecutionBackend::Cuda,
+            vram_bytes: Some(12 * GIB),
+        };
+        let caps = enumerate_backends_from(&snapshot_with_gpus(vec![cuda_gpu]));
+        let cuda = caps
+            .iter()
+            .find(|c| c.backend == ExecutionBackend::Cuda)
+            .unwrap();
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        {
+            assert!(cuda.available);
+            assert_eq!(cuda.device.as_deref(), Some("NVIDIA RTX 3060"));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            assert!(!cuda.available);
+            assert_eq!(
+                cuda.unavailable_reason.as_deref(),
+                Some("CUDA is not supported on this platform")
+            );
+        }
+    }
+
+    // ── P5 slice 1: budget derivation ──
+
+    #[test]
+    fn derive_budget_fits_whole_dataset_no_tiling() {
+        // 100 MP RGB f32 ≈ 1.2 GB; 12 GB available → budget 6 GB, fits.
+        let dataset = 100_000_000 * BYTES_PER_PIXEL_F32_RGB;
+        let b = derive_budget(dataset, 12 * GIB, 8);
+        assert_eq!(b.memory_budget_bytes, 6 * GIB);
+        assert!(!b.requires_tiling);
+        assert!(b.warning.is_none());
+        assert_eq!(b.thread_count, 6);
+    }
+
+    #[test]
+    fn derive_budget_oversized_dataset_requires_tiling_with_s22_copy() {
+        // 500 MP RGB f32 ≈ 6 GB; 4 GB available → budget 2 GB, must tile.
+        let dataset = 500_000_000 * BYTES_PER_PIXEL_F32_RGB;
+        let b = derive_budget(dataset, 4 * GIB, 8);
+        assert!(b.requires_tiling);
+        let warning = b.warning.expect("tiling must warn per §22");
+        assert!(
+            warning.starts_with("This operation requires more memory than is currently available.")
+        );
+        assert!(warning.contains("smaller tiles"));
+    }
+
+    #[test]
+    fn derive_budget_tiny_memory_still_makes_progress() {
+        let b = derive_budget(50 * GIB, 600 * 1024 * 1024, 2);
+        assert_eq!(b.memory_budget_bytes, 512 * 1024 * 1024); // floor
+        assert_eq!(b.thread_count, 1);
+        assert!(b.requires_tiling);
+        // 1024² working set (48 MiB) still fits the 256 MiB per-tile
+        // ceiling even on a starved machine — the floor budget keeps
+        // tiles large enough to make real progress.
+        assert_eq!(b.tile_size, 1024);
+    }
+
+    // ── P5 slice 1: tile-size table ──
+
+    #[test]
+    fn tile_size_for_table() {
+        // Working set of tile N = N² × 12 B/px × 4 buffers.
+        // Ceiling = budget / 2.
+        let big_image = 2000 * 2000 * BYTES_PER_PIXEL_F32_RGB; // 2000² image
+
+        // 1024² ws = 48 MiB → needs ceiling ≥ 48 MiB → budget ≥ 96 MiB.
+        assert_eq!(tile_size_for(big_image, 512 * 1024 * 1024), 1024);
+        // Budget 32 MiB → ceiling 16 MiB → 512² ws = 12 MiB fits, 768² doesn't.
+        assert_eq!(tile_size_for(big_image, 32 * 1024 * 1024), 512);
+        // Tiny image (400²) never gets a tile bigger than itself.
+        let small_image = 400 * 400 * BYTES_PER_PIXEL_F32_RGB;
+        assert_eq!(tile_size_for(small_image, 512 * 1024 * 1024), 384);
+        // Starved budget → 256 floor, never zero.
+        assert_eq!(tile_size_for(big_image, 1024), 256);
+    }
+
+    #[test]
+    fn tile_count_covers_dataset() {
+        // 2000² image with 512px tiles → ceil(4M / 262144) = 16 tiles.
+        let dataset = 2000 * 2000 * BYTES_PER_PIXEL_F32_RGB;
+        assert_eq!(tile_count(dataset, 512), 16);
+        assert_eq!(tile_count(dataset, 1024), 4);
+        // Degenerate input still reports one tile, never zero.
+        assert_eq!(tile_count(0, 256), 1);
     }
 }

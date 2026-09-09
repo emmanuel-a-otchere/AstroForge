@@ -655,6 +655,9 @@ fn main() {
             commands_preview::delete_preview_run,
             // CR-05 P4 slice 7 — §21 resource snapshot.
             commands_resource::get_resource_snapshot,
+            // CR-05 P5 slice 1 — backend enumeration + §22 budget.
+            commands_resource::list_backend_capabilities,
+            commands_resource::derive_execution_budget,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

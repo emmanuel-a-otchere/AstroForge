@@ -38,6 +38,7 @@
     type ResourceSnapshot,
   } from "../lib/astroforge-api";
   import ExpertDagView from "./ExpertDagView.svelte";
+  import StageCard from "./StageCard.svelte";
 
   export let planId: string;
 
@@ -521,6 +522,11 @@
       executions.map((e) => [e.stage_id, e.status]),
     )}
   />
+
+  <!-- CR-05 P6.2 (§23) — render the AI provenance badge for the
+       most-recent stage. Component handles the non-AI / null cases
+       internally (renders nothing). -->
+  <StageCard metrics={processingMetrics} />
 </section>
 
 <style>

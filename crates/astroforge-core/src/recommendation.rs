@@ -412,6 +412,10 @@ mod tests {
             resource_usage_json: None,
             error_json: None,
             metric_snapshot_json: None,
+            // CR-05 P6.2 (§23) — AI label is populated by the runner
+            // for real StageExecution rows; the synthetic fixture
+            // leaves it None (see ai_boundary::tests).
+            ai_label_json: None,
         }
     }
 

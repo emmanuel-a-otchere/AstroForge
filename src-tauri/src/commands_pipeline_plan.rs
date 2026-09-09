@@ -795,6 +795,10 @@ pub struct ProcessingMetricsDto {
     /// to make progress" means the engine always returns *something*,
     /// but we surface the absence to the UI rather than fabricate).
     pub adaptive_parameters: Option<AdaptiveParameterSet>,
+    /// CR-05 P6.2 (§23 AI Boundary) — AI label from the most-recent
+    /// stage execution. `None` when `ai_label_json` is missing
+    /// (pre-P6.2 row) or unparseable.
+    pub latest_ai_label: Option<astroforge_core::ai_boundary::AiBoundaryLabel>,
 }
 
 impl From<astroforge_core::processing_metrics::ProcessingMetrics> for ProcessingMetricsDto {
@@ -809,6 +813,7 @@ impl From<astroforge_core::processing_metrics::ProcessingMetrics> for Processing
             latest_metrics: m.latest_metrics,
             latest_resource_budget: m.latest_resource_budget,
             adaptive_parameters: m.adaptive_parameters,
+            latest_ai_label: m.latest_ai_label,
         }
     }
 }

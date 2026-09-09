@@ -422,6 +422,16 @@ pub struct StageExecution {
     /// gradient / mean / stddev). JSON for forward compatibility —
     /// the recommendation engine (P3 slice 2) reads this column.
     pub metric_snapshot_json: Option<String>,
+    /// CR-05 P6.2 (§23 AI Boundary) — `AiBoundaryLabel` JSON blob
+    /// derived from `stage_type` at insertion time. Persisted as a
+    /// blob (not split into 4 columns) because:
+    ///   1. the shape is small and read together as a unit;
+    ///   2. pre-P6.2 rows have no values, so the column is nullable
+    ///      and the absence deserialises to `AiBoundaryLabel::default()`
+    ///      (classical deterministic processing);
+    ///   3. future CR-06 stages may add fields without another
+    ///      migration round.
+    pub ai_label_json: Option<String>,
 }
 
 /// CR-05 P4 slice 3 — preview-before-commit row (CR-05 §11 + §26).

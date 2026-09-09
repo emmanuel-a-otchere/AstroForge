@@ -125,6 +125,15 @@ impl PipelinePlanStore {
             "applied_with_preview_id",
             "ALTER TABLE recommendations ADD COLUMN applied_with_preview_id TEXT",
         )?;
+        // v5: P6.2 (§23 AI Boundary) — JSON blob per stage execution
+        // holding the `AiBoundaryLabel`. Nullable so pre-P6.2 rows
+        // read as `None` (treated as classical deterministic).
+        Self::add_column_if_missing(
+            conn,
+            "stage_executions",
+            "ai_label_json",
+            "ALTER TABLE stage_executions ADD COLUMN ai_label_json TEXT",
+        )?;
         Ok(())
     }
 
@@ -291,8 +300,8 @@ impl PipelinePlanStore {
         let conn = self.conn.lock().expect("poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO stage_executions
-             (stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json, metric_snapshot_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             (stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json, metric_snapshot_json, ai_label_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 exec.stage_execution_id,
                 exec.plan_id,
@@ -308,6 +317,8 @@ impl PipelinePlanStore {
                 exec.resource_usage_json,
                 exec.error_json,
                 exec.metric_snapshot_json,
+                // CR-05 P6.2 (§23) — AI label persisted as JSON blob.
+                exec.ai_label_json,
             ],
         )?;
         Ok(())
@@ -327,7 +338,7 @@ impl PipelinePlanStore {
     ) -> Result<Vec<StageExecution>, PipelinePlanStoreError> {
         let conn = self.conn.lock().expect("poisoned");
         let mut stmt = conn.prepare(
-            "SELECT stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json, metric_snapshot_json
+            "SELECT stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json, metric_snapshot_json, ai_label_json
              FROM stage_executions WHERE plan_id = ?1 ORDER BY started_at ASC",
         )?;
         let rows = stmt
@@ -347,6 +358,9 @@ impl PipelinePlanStore {
                     resource_usage_json: row.get(11)?,
                     error_json: row.get(12)?,
                     metric_snapshot_json: row.get(13)?,
+                    // CR-05 P6.2 (§23) — AI label persisted as JSON
+                    // blob; pre-P6.2 rows read as `None`.
+                    ai_label_json: row.get(14)?,
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -589,7 +603,7 @@ impl PipelinePlanStore {
     ) -> Result<StageExecution, PipelinePlanStoreError> {
         let conn = self.conn.lock().expect("poisoned");
         conn.query_row(
-            "SELECT stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json, metric_snapshot_json
+            "SELECT stage_execution_id, plan_id, stage_id, attempt, status, input_version_id, output_artifact_id, parameters_json, parameters_hash, started_at, completed_at, resource_usage_json, error_json, metric_snapshot_json, ai_label_json
              FROM stage_executions WHERE stage_execution_id = ?1",
             params![stage_execution_id],
             |row| {
@@ -608,6 +622,9 @@ impl PipelinePlanStore {
                     resource_usage_json: row.get(11)?,
                     error_json: row.get(12)?,
                     metric_snapshot_json: row.get(13)?,
+                    // CR-05 P6.2 (§23) — AI label persisted as JSON
+                    // blob; pre-P6.2 rows read as `None`.
+                    ai_label_json: row.get(14)?,
                 })
             },
         )
@@ -1037,6 +1054,9 @@ mod tests {
             resource_usage_json: None,
             error_json: None,
             metric_snapshot_json: None,
+            // CR-05 P6.2 (§23) — AI label is populated by the runner;
+            // synthetic fixtures leave it None. See ai_boundary::tests.
+            ai_label_json: None,
         }
     }
 
@@ -1307,6 +1327,8 @@ mod tests {
             resource_usage_json: None,
             error_json: None,
             metric_snapshot_json: None,
+            // CR-05 P6.2 (§23) — see ai_boundary::tests.
+            ai_label_json: None,
         };
         let exec_b = StageExecution {
             stage_execution_id: "exec_b".into(),
@@ -1323,6 +1345,8 @@ mod tests {
             resource_usage_json: None,
             error_json: None,
             metric_snapshot_json: None,
+            // CR-05 P6.2 (§23) — see ai_boundary::tests.
+            ai_label_json: None,
         };
         (plan, exec_a, exec_b)
     }
@@ -1703,6 +1727,9 @@ mod tests {
             resource_usage_json: None,
             error_json: None,
             metric_snapshot_json: None,
+            // CR-05 P6.2 (§23) — AI label is populated by the runner;
+            // synthetic fixtures leave it None. See ai_boundary::tests.
+            ai_label_json: None,
         }
     }
 

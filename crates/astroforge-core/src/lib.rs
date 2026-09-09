@@ -49,6 +49,7 @@ pub mod resource;
 pub mod seed;
 pub mod session;
 pub mod stacking;
+pub mod stage_error;
 pub mod star_segmentation;
 pub mod stretching;
 pub mod telemetry;

@@ -536,6 +536,9 @@ export interface ProcessingMetricsDto {
   /** CR-05 P6.2 (§23) — AI label for the most-recent execution.
    *  null when `ai_label_json` is missing (pre-P6.2 rows). */
   latest_ai_label: AiBoundaryLabelDto | null;
+  /** CR-05 P6.1 (§28) — populated when the most-recent execution
+   *  is failed; the UI renders `ErrorRecoveryPanel` from this. */
+  latest_stage_error: StageErrorDto | null;
 }
 
 /** §27 — single-roundtrip aggregate metrics for the Expert DAG view. */
@@ -558,3 +561,30 @@ export interface AiBoundaryLabelDto {
   /** RNG seed; null when uses_ai is false or the stage has no seed. */
   seed: number | null;
 }
+
+// ─── CR-05 P6 slice 1 (§28 Error and Recovery UX) ───────────────────
+
+/** §28 — SuggestedActionKind enum. Variants match the Rust
+ *  `SuggestedActionKind` and the snake_case renames in serde. */
+export type SuggestedActionKind =
+  | "retry_optimized"
+  | "retry"
+  | "adjust_processing"
+  | "skip_stage"
+  | "cancel"
+  | "contact_support";
+
+/** §28 — Single suggested next action, surfaced as a button. */
+export interface SuggestedActionDto {
+  label: string;
+  kind: SuggestedActionKind;
+}
+
+/** §28 — Structured stage error payload. Round-trips through
+ *  StageExecution.error_json. Mirrors astroforge_core::stage_error::StageError. */
+export interface StageErrorDto {
+  what_happened: string;
+  what_was_preserved: string;
+  suggested_actions: SuggestedActionDto[];
+}
+

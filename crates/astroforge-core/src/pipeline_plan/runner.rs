@@ -392,7 +392,24 @@ impl PipelineRunner {
                 }
                 Err(msg) => {
                     exec.status = "failed".into();
-                    exec.error_json = Some(format!(r#"{{"what_happened":"{}"}}"#, msg));
+                    // CR-05 P6.1 (§28) — populate the full structured
+                    // error payload instead of just `what_happened`.
+                    // The aggregator in `ProcessingMetrics.latest_stage_id`
+                    // surfaces failed rows directly to the UI, so this
+                    // string is the contract for `ErrorRecoveryPanel`.
+                    let prior_stage_count = self
+                        .store
+                        .list_stage_executions_for_plan(plan_id)
+                        .map(|execs| {
+                            execs.iter().filter(|e| e.status == "completed").count() as u32
+                        })
+                        .unwrap_or(0);
+                    let structured = crate::stage_error::StageError::from_failure(
+                        &stage.stage_type,
+                        prior_stage_count,
+                        &msg,
+                    );
+                    exec.error_json = serde_json::to_string(&structured).ok();
                     exec.completed_at = Some(format!("unix_ms:{}", now_unix_ms()));
                     self.store.insert_stage_execution(&exec)?;
                     self.store

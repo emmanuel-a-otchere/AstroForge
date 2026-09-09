@@ -25,6 +25,7 @@ use crate::adaptive::{derive_adaptive_parameters, AdaptiveParameterSet, ImageMet
 use crate::ai_boundary::AiBoundaryLabel;
 use crate::domain::{PipelinePlan, StageExecution};
 use crate::resource::ExecutionBudget;
+use crate::stage_error::StageError;
 use serde::{Deserialize, Serialize};
 
 /// Aggregate payload — same shape as the Tauri `ProcessingMetricsDto`
@@ -52,6 +53,11 @@ pub struct ProcessingMetrics {
     /// execution. `None` when `ai_label_json` is missing (pre-P6.2
     /// rows) or unparseable.
     pub latest_ai_label: Option<AiBoundaryLabel>,
+    /// §28 structured error from the most-recent failure. `None`
+    /// when the latest stage hasn't failed or when `error_json`
+    /// is malformed (legacy rows pre-P6.1 used the bare
+    /// `{"what_happened":"..."}` shape).
+    pub latest_stage_error: Option<StageError>,
 }
 
 /// Pure aggregation. No IO, no system calls — exhaustive unit tests
@@ -110,6 +116,21 @@ pub fn aggregate_processing_metrics(
             .and_then(|s| serde_json::from_str::<AiBoundaryLabel>(s).ok())
     });
 
+    // CR-05 P6.1 (§28) — `latest_stage_error` is sourced from the
+    // most-recent *failed* execution, NOT from the same `latest`
+    // row that drives `latest_metrics`. A user who watches a stage
+    // fail wants to see the recovery panel immediately, even if a
+    // prior stage completed successfully.
+    let latest_failed = execs
+        .iter()
+        .filter(|e| e.status == "failed")
+        .max_by_key(|e| e.completed_at.clone().unwrap_or_default());
+    let latest_stage_error = latest_failed.and_then(|e| {
+        e.error_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<StageError>(s).ok())
+    });
+
     ProcessingMetrics {
         plan_id: plan.plan_id.clone(),
         stage_count,
@@ -121,6 +142,7 @@ pub fn aggregate_processing_metrics(
         latest_resource_budget,
         adaptive_parameters,
         latest_ai_label,
+        latest_stage_error,
     }
 }
 
@@ -324,6 +346,27 @@ mod tests {
         let metrics = aggregate_processing_metrics(&plan, &execs);
         assert!(metrics.latest_metrics.is_none());
         assert!(metrics.adaptive_parameters.is_none());
+    }
+
+    #[test]
+    fn failed_stage_error_surfaces_in_aggregator() {
+        let plan = test_plan(vec![test_stage(0, "calibrate"), test_stage(1, "stack")]);
+        let err = crate::stage_error::StageError::from_failure("stack", 1, "out of memory");
+        let err_json = serde_json::to_string(&err).unwrap();
+        let mut failed_exec = test_exec("stage_1", "failed", Some(2000), None, None);
+        failed_exec.error_json = Some(err_json);
+        let execs = vec![
+            test_exec("stage_0", "completed", Some(1000), None, None),
+            failed_exec,
+        ];
+        let metrics = aggregate_processing_metrics(&plan, &execs);
+        let surf = metrics
+            .latest_stage_error
+            .expect("latest_stage_error must be populated when a stage failed");
+        assert!(surf.what_happened.contains("Stacking"));
+        assert!(surf.what_happened.contains("out of memory"));
+        assert!(surf.what_was_preserved.contains("1 Image Version"));
+        assert!(!surf.suggested_actions.is_empty());
     }
 
     #[test]

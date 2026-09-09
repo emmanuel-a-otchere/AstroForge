@@ -1,3 +1,4 @@
+pub mod adaptive;
 pub mod artifact;
 pub mod background;
 pub mod bayer_detection;

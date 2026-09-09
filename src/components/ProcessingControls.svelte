@@ -39,6 +39,7 @@
   } from "../lib/astroforge-api";
   import ExpertDagView from "./ExpertDagView.svelte";
   import StageCard from "./StageCard.svelte";
+  import ErrorRecoveryPanel from "./ErrorRecoveryPanel.svelte";
 
   export let planId: string;
 
@@ -522,6 +523,19 @@
       executions.map((e) => [e.stage_id, e.status]),
     )}
   />
+
+  <!-- CR-05 P6.1 (§28) — when the most-recent stage failed, surface
+       the structured recovery panel. The panel reads from
+       `processingMetrics.latest_stage_error`, which the backend
+       populates from StageExecution.error_json via the slice 4
+       metrics aggregator. Renders above any other guidance so the
+       user sees it first. -->
+  {#if processingMetrics?.latest_stage_error}
+    <ErrorRecoveryPanel
+      error={processingMetrics.latest_stage_error}
+      stageLabel={processingMetrics.latest_stage_type ?? null}
+    />
+  {/if}
 
   <!-- CR-05 P6.2 (§23) — render the AI provenance badge for the
        most-recent stage. Component handles the non-AI / null cases

@@ -799,6 +799,10 @@ pub struct ProcessingMetricsDto {
     /// stage execution. `None` when `ai_label_json` is missing
     /// (pre-P6.2 row) or unparseable.
     pub latest_ai_label: Option<astroforge_core::ai_boundary::AiBoundaryLabel>,
+    /// CR-05 P6.1 (§28) — structured error from the most-recent
+    /// failed stage, parsed from `error_json`. `None` when no stage
+    /// has failed or the persisted shape is pre-P6.1.
+    pub latest_stage_error: Option<astroforge_core::stage_error::StageError>,
 }
 
 impl From<astroforge_core::processing_metrics::ProcessingMetrics> for ProcessingMetricsDto {
@@ -814,6 +818,7 @@ impl From<astroforge_core::processing_metrics::ProcessingMetrics> for Processing
             latest_resource_budget: m.latest_resource_budget,
             adaptive_parameters: m.adaptive_parameters,
             latest_ai_label: m.latest_ai_label,
+            latest_stage_error: m.latest_stage_error,
         }
     }
 }

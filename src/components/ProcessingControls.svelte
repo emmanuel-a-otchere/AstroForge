@@ -28,13 +28,16 @@
   } from "../lib/pipeline-plan-store";
   import {
     getResourceSnapshot,
+    getProcessingMetrics,
     readPreviewArtifact,
     stageExecutionBudget,
     type ExecutionBackend,
     type ExecutionBudget,
     type Precision,
+    type ProcessingMetricsDto,
     type ResourceSnapshot,
   } from "../lib/astroforge-api";
+  import ExpertDagView from "./ExpertDagView.svelte";
 
   export let planId: string;
 
@@ -57,6 +60,26 @@
   let resourceSnapshot: ResourceSnapshot | null = null;
   let resourceError: string | null = null;
   let resourceLoading = false;
+
+  // CR-05 P5 slice 4 (§27) — aggregate metrics for the Expert DAG view.
+  // Refreshed whenever the active plan changes or a new stage completes.
+  let processingMetrics: ProcessingMetricsDto | null = null;
+  let processingMetricsLoading = false;
+
+  async function loadProcessingMetrics() {
+    if (processingMetricsLoading) return;
+    processingMetricsLoading = true;
+    try {
+      processingMetrics = await getProcessingMetrics(planId);
+    } catch (err) {
+      // Failure is non-fatal — the DAG view still renders without
+      // metrics; the recommendation banner just stays hidden.
+      console.warn("[ProcessingControls] getProcessingMetrics failed", err);
+      processingMetrics = null;
+    } finally {
+      processingMetricsLoading = false;
+    }
+  }
 
   async function loadResourceSnapshot() {
     if (resourceLoading) return;
@@ -127,6 +150,10 @@
 
   $: plan = $activePlan?.plan_id === planId ? $activePlan : null;
   $: executions = $stageExecutions[planId] ?? [];
+  // CR-05 P5 slice 4 — re-fetch the §27 aggregate metrics whenever
+  // either the active plan or its stage executions change, so the
+  // DAG view's recommendation banner stays current during a run.
+  $: if (plan || executions.length > 0) void loadProcessingMetrics();
   // The plan is "paused" if the backend reports that status. Slice 2.5
   // surfaces a Resume button in that case instead of Start.
   $: planStatus = plan?.status ?? "ready";
@@ -482,6 +509,18 @@
       </dl>
     {/if}
   </details>
+
+  <!-- CR-05 P5 slice 4 (§24 Pipeline Visualization + §27 metrics).
+       Renders the plan as a DAG with the latest adaptive recommendation
+       banner underneath. Pulls `get_processing_metrics` lazily; the
+       component itself handles the "not loaded" state. -->
+  <ExpertDagView
+    {plan}
+    metrics={processingMetrics}
+    stageStatus={Object.fromEntries(
+      executions.map((e) => [e.stage_id, e.status]),
+    )}
+  />
 </section>
 
 <style>

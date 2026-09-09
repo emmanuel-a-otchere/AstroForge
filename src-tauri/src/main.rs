@@ -645,6 +645,9 @@ fn main() {
             commands_pipeline_plan::apply_recommendation,
             commands_pipeline_plan::dismiss_recommendation,
             commands_pipeline_plan::reset_recommendation,
+            // CR-05 P5 slice 4 (§24 + §27) — aggregate metrics for the
+            // Expert DAG view and the recommendation banner.
+            commands_pipeline_plan::get_processing_metrics,
             // CR-05 P4 slice 4+5 — preview-before-commit IPC. Slice 5
             // replaced `mark_preview_failed` (placeholder-only path)
             // with `read_preview_artifact` (real PNG read-back).

@@ -43,6 +43,7 @@
 use crate::domain::{PipelinePlan, PipelinePlanStatus, StageExecution};
 use crate::pipeline_plan::dispatch::{HandlerRegistry, StageContext, StageOutput};
 use crate::pipeline_plans_store::{PipelinePlanStore, PipelinePlanStoreError};
+use crate::resource::{self, ExecutionBudget, ResourceSnapshot, UNKNOWN_DATASET_SIZE_BYTES};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -114,6 +115,11 @@ pub struct PipelineRunner {
     /// the resulting recommendations. When `None` (default), the
     /// runner skips recommendation emission (slice-1 behaviour).
     engine: Option<Arc<crate::recommendation::RecommendationEngine>>,
+    /// CR-05 P5 slice 2 (D-CR05-8) — memoise the device snapshot across
+    /// the runner's lifetime so per-stage budget derivation never re-
+    /// detects the device. Detection is cheap; this just keeps the hot
+    /// path off syscalls.
+    snapshot_cache: std::cell::OnceCell<ResourceSnapshot>,
 }
 
 impl PipelineRunner {
@@ -151,7 +157,22 @@ impl PipelineRunner {
             handler_registry,
             domain_store,
             engine,
+            snapshot_cache: std::cell::OnceCell::new(),
         }
+    }
+
+    /// CR-05 P5 slice 2 (D-CR05-8 + §22) — derive the per-stage execution
+    /// budget. The dataset size comes from `parameters_json.dataset_size_bytes`
+    /// when an upstream handler stamped it; otherwise we treat the size as
+    /// unknown (`u64::MAX`) so the budget reports no tiling warning — this
+    /// keeps handlers that haven't been updated from breaking; they simply
+    /// skip §22 pre-flight coverage. The snapshot is memoise'd per runner.
+    pub fn stage_budget_for(&self, stage: &crate::domain::PipelineStage) -> ExecutionBudget {
+        let snapshot = self.snapshot_cache.get_or_init(ResourceSnapshot::detect);
+        let dataset_size_bytes =
+            resource::parse_dataset_size_bytes_opt(stage.parameters_json.as_ref())
+                .unwrap_or(UNKNOWN_DATASET_SIZE_BYTES);
+        resource::derive_stage_budget(snapshot, dataset_size_bytes)
     }
 
     /// Returns a handle the caller can use to request cancel. Calling
@@ -292,6 +313,23 @@ impl PipelineRunner {
                 Ok(output) => {
                     exec.status = "completed".into();
                     exec.completed_at = Some(format!("unix_ms:{}", now_unix_ms()));
+                    // CR-05 P5 slice 2 (D-CR05-8 + §22) — record the
+                    // per-stage execution budget on the row. Best-effort:
+                    // a serialisation failure is logged via error_json but
+                    // must not fail the stage (consistent with the metric
+                    // snapshot policy above).
+                    let budget = self.stage_budget_for(stage);
+                    match serde_json::to_string(&budget) {
+                        Ok(json) => exec.resource_usage_json = Some(json),
+                        Err(e) => {
+                            let mut existing = exec.error_json.clone().unwrap_or_default();
+                            existing.push_str(&format!(
+                                r#"|{{"what_happened":"resource budget serialisation failed: {}"}}"#,
+                                e
+                            ));
+                            exec.error_json = Some(existing);
+                        }
+                    }
                     // CR-05 P3 slice 1 — compute deterministic
                     // quality metrics on the produced image and
                     // persist them in metric_snapshot_json. Skipped
@@ -490,6 +528,10 @@ fn dispatch_stage_via_registry(
         run_id: exec.plan_id.clone(),
         domain_store,
         preloaded_frames: None,
+        // CR-05 P5 slice 2 (D-CR05-8) — the runner's derived per-stage
+        // budget is exposed to handlers so tiling / streaming can be
+        // aligned with what §22 promises. Handlers may ignore it.
+        execution_budget: runner.stage_budget_for(stage),
     };
 
     match handler.handle(&ctx) {
@@ -767,6 +809,56 @@ mod tests {
         assert!(matches!(err, RunnerError::PlanNotFound(_)));
     }
 
+    // ─── CR-05 P5 slice 2 — runner pre-flight budget (§22) ─────────────
+
+    #[test]
+    fn stage_budget_for_reads_dataset_size_from_parameters_json() {
+        // Construct a synthetic stage with a known dataset size; verify
+        // the runner computes a budget that flags it for tiling on any
+        // realistic machine (5 GB ≫ typical available RAM).
+        use crate::domain::PipelineStage;
+
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let runner = PipelineRunner::new(store);
+
+        let big_stage = PipelineStage {
+            plan_id: "plan_unused".into(),
+            stage_id: "stack".into(),
+            stage_type: "stack".into(),
+            label: "Stack".into(),
+            sequence: 0,
+            required: true,
+            enabled: true,
+            // 50 GiB is far beyond any CI runner's available memory,
+            // so the §22 budget must require tiling on every platform.
+            parameters_json: Some(r#"{"dataset_size_bytes": 53687091200}"#.to_string()),
+            produces_image_version: true,
+            undo_supported: false,
+        };
+        let big_budget = runner.stage_budget_for(&big_stage);
+        assert!(big_budget.memory_budget_bytes > 0);
+        assert!(big_budget.requires_tiling);
+        assert!(big_budget.warning.is_some());
+
+        let small_stage = PipelineStage {
+            parameters_json: Some(r#"{"dataset_size_bytes": 1000}"#.to_string()),
+            ..big_stage.clone()
+        };
+        let small_budget = runner.stage_budget_for(&small_stage);
+        assert!(!small_budget.requires_tiling);
+        assert!(small_budget.warning.is_none());
+
+        // No dataset_size_bytes reported → unknown → no warning, no
+        // tiling (the §22 promise of "never refuse to make progress").
+        let unknown_stage = PipelineStage {
+            parameters_json: None,
+            ..big_stage
+        };
+        let unknown_budget = runner.stage_budget_for(&unknown_stage);
+        assert!(!unknown_budget.requires_tiling);
+        assert!(unknown_budget.warning.is_none());
+    }
+
     // ─── CR-05 P3 slice 1 — metric snapshot persistence ────────────────
 
     #[test]
@@ -923,6 +1015,7 @@ mod tests {
             run_id: plan_id.clone(),
             domain_store: domain_store.clone(),
             preloaded_frames: Some(vec![frame_a, frame_b]),
+            execution_budget: ExecutionBudget::default(),
         };
         let output = StackHandler.handle(&ctx).unwrap();
         let image = output.image.as_ref().expect("stack produced image");
@@ -1010,6 +1103,7 @@ mod tests {
             run_id: plan.plan_id.clone(),
             domain_store: domain_store.clone(),
             preloaded_frames: Some(vec![frame_a, frame_b]),
+            execution_budget: ExecutionBudget::default(),
         };
         let output = StackHandler.handle(&ctx).unwrap();
         let metadata = output.metadata_json.unwrap();

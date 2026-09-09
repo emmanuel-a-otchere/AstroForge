@@ -38,3 +38,17 @@ pub fn derive_execution_budget(dataset_size_bytes: u64) -> ExecutionBudget {
         snap.logical_cores,
     )
 }
+
+/// CR-05 P5 slice 2 (§22) — pre-flight budget read straight from a
+/// stage's `parameters_json` (if the upstream handler stamped
+/// `dataset_size_bytes`). Returns the same `ExecutionBudget` shape so
+/// the UI can render the §22 copy verbatim without a separate code path.
+#[tauri::command]
+pub fn stage_execution_budget(parameters_json: Option<String>) -> ExecutionBudget {
+    let snap = ResourceSnapshot::detect();
+    let dataset_size_bytes = parameters_json
+        .as_deref()
+        .and_then(astroforge_core::resource::parse_dataset_size_bytes)
+        .unwrap_or(astroforge_core::resource::UNKNOWN_DATASET_SIZE_BYTES);
+    astroforge_core::resource::derive_stage_budget(&snap, dataset_size_bytes)
+}

@@ -658,6 +658,8 @@ fn main() {
             // CR-05 P5 slice 1 — backend enumeration + §22 budget.
             commands_resource::list_backend_capabilities,
             commands_resource::derive_execution_budget,
+            // CR-05 P5 slice 2 — stage-parameter pre-flight budget.
+            commands_resource::stage_execution_budget,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

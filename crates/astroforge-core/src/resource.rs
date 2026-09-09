@@ -284,20 +284,25 @@ pub fn enumerate_backends() -> Vec<BackendCapability> {
 
 /// What the runner is allowed to spend on one stage, derived from the
 /// dataset and the memory actually available right now (§22).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ExecutionBudget {
     /// Ceiling for the stage's working set (50% of available RAM, 512 MiB
     /// floor — same rule as `RecommendedExecution.memory_budget_bytes`).
+    #[serde(default)]
     pub memory_budget_bytes: u64,
     /// True when the dataset cannot fit in the budget whole and the stage
     /// must run tiled / streamed (§22 "process it in smaller tiles").
+    #[serde(default)]
     pub requires_tiling: bool,
     /// Tile edge length in pixels when `requires_tiling` (still meaningful
     /// otherwise — the runner may always run tiled for uniformity).
+    #[serde(default)]
     pub tile_size: u32,
+    #[serde(default)]
     pub thread_count: u32,
     /// §22 pre-flight warning copy when memory is tight; `None` when the
     /// stage fits comfortably. Rendered verbatim by the UI.
+    #[serde(default)]
     pub warning: Option<String>,
 }
 
@@ -311,6 +316,10 @@ const BYTES_PER_PIXEL_F32_RGB: u64 = 12;
 ///
 /// - `dataset_size_bytes`: uncompressed size of the stage's input
 ///   (width × height × channels × bytes-per-sample × frames for stacks).
+///   Pass [`UNKNOWN_DATASET_SIZE_BYTES`] (or any value larger than
+///   `available_memory_bytes`) when the size isn't known — the budget
+///   stays conservative (no tiling warning) so §22 never refuses to
+///   make progress.
 /// - `available_memory_bytes`: current *available* RAM, not total.
 /// - `logical_cores`: for the thread-count headroom rule.
 pub fn derive_budget(
@@ -321,11 +330,19 @@ pub fn derive_budget(
     let memory_budget_bytes = (available_memory_bytes / 2).max(512 * 1024 * 1024);
     let thread_count = logical_cores.saturating_sub(2).max(1);
 
-    // The dataset must fit alongside its working set; tiling splits the
-    // dataset dimension, not the working-set dimension, so compare the
-    // whole dataset against the budget first.
-    let requires_tiling = dataset_size_bytes > memory_budget_bytes;
-    let tile_size = tile_size_for(dataset_size_bytes, memory_budget_bytes);
+    // §22 promise: when the dataset size is unknown (sentinel), report a
+    // conservative budget that does NOT require tiling or warn. Real
+    // oversized datasets take the regular path.
+    let real_size_known = dataset_size_bytes < UNKNOWN_DATASET_SIZE_BYTES;
+    let requires_tiling = real_size_known && dataset_size_bytes > memory_budget_bytes;
+    let tile_size = tile_size_for(
+        if real_size_known {
+            dataset_size_bytes
+        } else {
+            memory_budget_bytes
+        },
+        memory_budget_bytes,
+    );
 
     let warning = if requires_tiling {
         let tiles = tile_count(dataset_size_bytes, tile_size);
@@ -353,6 +370,48 @@ fn tile_count(dataset_size_bytes: u64, tile_size: u32) -> u64 {
     let pixels = dataset_size_bytes / BYTES_PER_PIXEL_F32_RGB;
     let tile_pixels = (tile_size as u64).saturating_pow(2).max(1);
     pixels.div_ceil(tile_pixels).max(1)
+}
+
+/// Default dataset-size fallback when a stage doesn't report one.
+/// §22 says we should never refuse to make progress — so when the size
+/// is unknown we assume the dataset fits the memory budget and no
+/// tiling warning is needed. Handlers that know better can override by
+/// stamping `dataset_size_bytes` on the stage's `parameters_json`.
+pub const UNKNOWN_DATASET_SIZE_BYTES: u64 = u64::MAX;
+
+/// Pure wrapper around `derive_budget` for callers that already hold a
+/// snapshot (typically handlers inside the runner). Avoids the cost of
+/// re-detecting the device for every stage.
+pub fn derive_stage_budget(
+    snapshot: &ResourceSnapshot,
+    dataset_size_bytes: u64,
+) -> ExecutionBudget {
+    derive_budget(
+        dataset_size_bytes,
+        snapshot.available_memory_bytes,
+        snapshot.logical_cores,
+    )
+}
+
+/// Optional explicit dataset size encoded by a stage's
+/// `parameters_json.dataset_size_bytes` (D-CR05-8 follow-up: an upstream
+/// handler can stamp the dataset size so the runner can budget against
+/// it without re-loading source assets). Returns `None` when the
+/// parameter is missing or not a non-negative integer, so callers must
+/// treat the absence as "unknown — use conservative defaults".
+pub fn parse_dataset_size_bytes(parameters_json: Option<&str>) -> Option<u64> {
+    let raw = parameters_json?;
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let n = v.get("dataset_size_bytes")?.as_u64()?;
+    Some(n)
+}
+
+/// Convenience for the common call-site shape where the JSON string
+/// is `Option<String>`. Returns `None` for both "absent" and
+/// "not-a-positive-integer" cases (same semantics as the `Option<&str>`
+/// variant).
+pub fn parse_dataset_size_bytes_opt(parameters_json: Option<&String>) -> Option<u64> {
+    parse_dataset_size_bytes(parameters_json.map(String::as_str))
 }
 
 /// Pick the tile edge length for a stage. Candidate ladder mirrors the
@@ -796,5 +855,45 @@ mod tests {
         assert_eq!(tile_count(dataset, 1024), 4);
         // Degenerate input still reports one tile, never zero.
         assert_eq!(tile_count(0, 256), 1);
+    }
+
+    // ── P5 slice 2: dataset-size parsing + budget derivation ──
+
+    #[test]
+    fn parse_dataset_size_bytes_round_trip() {
+        assert_eq!(
+            parse_dataset_size_bytes(Some(r#"{"dataset_size_bytes": 12345}"#)),
+            Some(12345)
+        );
+        // Missing field → None (caller falls back to UNKNOWN).
+        assert_eq!(parse_dataset_size_bytes(Some("{}")), None);
+        // Wrong type → None, not a panic.
+        assert_eq!(
+            parse_dataset_size_bytes(Some(r#"{"dataset_size_bytes": "nope"}"#)),
+            None
+        );
+        // Not JSON → None.
+        assert_eq!(parse_dataset_size_bytes(Some("not json")), None);
+        // No parameters at all → None.
+        assert_eq!(parse_dataset_size_bytes(None), None);
+    }
+
+    #[test]
+    fn parse_dataset_size_bytes_opt_handles_option_string() {
+        let json = r#"{"dataset_size_bytes": 4096}"#.to_string();
+        assert_eq!(parse_dataset_size_bytes_opt(Some(&json)), Some(4096));
+        assert_eq!(parse_dataset_size_bytes_opt(None), None);
+    }
+
+    #[test]
+    fn unknown_dataset_size_never_triggers_tiling_warning() {
+        // §22 says we should never refuse to make progress — unknown size
+        // must report no warning even when "size" is u64::MAX.
+        let snap = ResourceSnapshot::detect();
+        let budget = derive_stage_budget(&snap, UNKNOWN_DATASET_SIZE_BYTES);
+        assert!(
+            budget.warning.is_none(),
+            "unknown size must not produce a §22 warning"
+        );
     }
 }

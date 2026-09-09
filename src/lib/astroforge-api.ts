@@ -588,3 +588,36 @@ export interface StageErrorDto {
   suggested_actions: SuggestedActionDto[];
 }
 
+
+// ─── CR-05 P6 slice 3 (§25 Processing Timeline) ────────────────────
+
+/** §25 — single event on the processing timeline. Mirrors
+ *  astroforge_core::processing_timeline::TimelineEvent. */
+export interface TimelineEventDto {
+  stage_id: string;
+  /** Human-readable label, e.g. "Stack", "AI denoise". */
+  stage_label: string;
+  /** Stage type token, e.g. "stack", "denoise". */
+  stage_type: string;
+  sequence: number;
+  /** Unix milliseconds parsed from `started_at`. null for legacy
+   *  rows where the timestamp couldn't be parsed. */
+  timestamp_unix_ms: number | null;
+  /** `completed_at - started_at` in ms, when both parse cleanly. */
+  duration_ms: number | null;
+  /** `ImageVersion.version_id` this stage produced. */
+  output_version_id: string | null;
+  status: string;
+}
+
+/** §25 — processing timeline for a plan. */
+export interface ProcessingTimelineDto {
+  plan_id: string;
+  events: TimelineEventDto[];
+}
+
+/** §25 — single-roundtrip timeline fetch for the timeline panel. */
+export const getProcessingTimeline = (
+  planId: string,
+): Promise<ProcessingTimelineDto> =>
+  invoke("get_processing_timeline", { planId });

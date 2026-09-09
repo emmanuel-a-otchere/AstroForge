@@ -466,3 +466,12 @@ export const deriveExecutionBudget = (
   datasetSizeBytes: number,
 ): Promise<ExecutionBudget> =>
   invoke("derive_execution_budget", { datasetSizeBytes });
+
+/** CR-05 P5 slice 2 (§22) — pre-flight budget from a stage's
+ *  parameters_json. Returns the same shape as `deriveExecutionBudget`
+ *  but reads the dataset_size_bytes from the JSON rather than as a
+ *  separate argument, mirroring how the runner resolves it. */
+export const stageExecutionBudget = (
+  parametersJson: string | null,
+): Promise<ExecutionBudget> =>
+  invoke("stage_execution_budget", { parametersJson });

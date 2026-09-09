@@ -29,7 +29,9 @@
   import {
     getResourceSnapshot,
     readPreviewArtifact,
+    stageExecutionBudget,
     type ExecutionBackend,
+    type ExecutionBudget,
     type Precision,
     type ResourceSnapshot,
   } from "../lib/astroforge-api";
@@ -85,15 +87,49 @@
     return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
   }
 
+  // CR-05 P5 slice 2 (§22) — pre-flight budget for the active plan's
+  // first stage. Re-runs on `plan` change and on Start click so memory
+  // pressure is fresh. The §22 "more memory than available" warning is
+  // surfaced verbatim when the budget requires tiling.
+  let prefetchedBudget: ExecutionBudget | null = null;
+  let prefetchedBudgetError: string | null = null;
+  let prefetchedBudgetLoading = false;
+
+  async function refreshPreflightBudget() {
+    if (!plan || plan.stages.length === 0) {
+      prefetchedBudget = null;
+      prefetchedBudgetError = null;
+      return;
+    }
+    prefetchedBudgetLoading = true;
+    prefetchedBudgetError = null;
+    try {
+      prefetchedBudget = await stageExecutionBudget(
+        plan.stages[0].parameters_json,
+      );
+    } catch (err) {
+      prefetchedBudget = null;
+      prefetchedBudgetError = err instanceof Error ? err.message : String(err);
+    } finally {
+      prefetchedBudgetLoading = false;
+    }
+  }
+
+  $: if (plan) void refreshPreflightBudget();
+
+  async function onStart() {
+    // CR-05 P5 slice 2 (§22) — refresh pre-flight on Start so memory
+    // pressure is current. The warning is advisory (matches §22 copy);
+    // we don't block the run, only surface the message.
+    await refreshPreflightBudget();
+    await startPipelineRun(planId);
+  }
+
   $: plan = $activePlan?.plan_id === planId ? $activePlan : null;
   $: executions = $stageExecutions[planId] ?? [];
   // The plan is "paused" if the backend reports that status. Slice 2.5
   // surfaces a Resume button in that case instead of Start.
   $: planStatus = plan?.status ?? "ready";
-
-  async function onStart() {
-    await startPipelineRun(planId);
-  }
 
   async function onPause() {
     await pausePipelineRun(planId);
@@ -235,6 +271,17 @@
 
   {#if $lastError}
     <p class="error font-body" role="alert">{$lastError}</p>
+  {/if}
+
+  <!-- CR-05 P5 slice 2 (§22) — pre-flight memory warning surfaced
+       verbatim from `derive_execution_budget` when memory is tight.
+       Advisory per the spec; not blocking. -->
+  {#if prefetchedBudget?.warning}
+    <p class="memory-warning font-body" role="alert" data-testid="memory-warning">
+      {prefetchedBudget.warning}
+    </p>
+  {:else if prefetchedBudgetError}
+    <p class="error font-body" role="alert">{prefetchedBudgetError}</p>
   {/if}
 
   {#if executions.length > 0}
@@ -786,5 +833,17 @@
     margin: 0;
     font-size: 0.85rem;
     color: var(--on-surface);
+  }
+  /* CR-05 P5 slice 2 (§22) — pre-flight memory warning, distinct
+     from the run-error red. Uses the accent token so the user sees
+     it as "informational about memory pressure", not a failure. */
+  .memory-warning {
+    margin: 0;
+    color: var(--on-surface);
+    background: var(--surface-container-high);
+    border-left: 3px solid var(--primary);
+    padding: var(--sp-xs) var(--sp-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
   }
 </style>

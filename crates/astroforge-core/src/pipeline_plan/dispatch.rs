@@ -59,6 +59,14 @@ pub struct StageContext {
     pub run_id: String,
     pub domain_store: Arc<DomainStore>,
     pub preloaded_frames: Option<Vec<F32Image>>,
+    /// CR-05 P5 slice 2 (D-CR05-8 + §22) — the per-stage execution
+    /// budget the runner derived for this stage. Handlers may ignore
+    /// it; when they don't, they should pick a tile size / concurrency
+    /// that fits `memory_budget_bytes` and surface the §22 copy if
+    /// `warning` is `Some`. Tests that don't care about resource
+    /// budgeting build contexts with this field elided; the runner /
+    /// preview paths always populate it.
+    pub execution_budget: crate::resource::ExecutionBudget,
 }
 
 /// CR-05 P2.6 — output from a stage handler. Carries the produced
@@ -1067,6 +1075,7 @@ mod p29_tests {
             run_id: "run_p29".into(),
             domain_store: Arc::new(domain_store),
             preloaded_frames: preloaded,
+            execution_budget: crate::resource::ExecutionBudget::default(),
         }
     }
 
@@ -1313,6 +1322,7 @@ mod p28_tests {
             run_id: "run_1".into(),
             domain_store: Arc::new(domain_store),
             preloaded_frames: preloaded,
+            execution_budget: crate::resource::ExecutionBudget::default(),
         }
     }
 
@@ -1441,6 +1451,7 @@ mod calibrate_tests {
             run_id: "run_1".into(),
             domain_store: Arc::new(domain_store),
             preloaded_frames: preloaded,
+            execution_budget: crate::resource::ExecutionBudget::default(),
         }
     }
 

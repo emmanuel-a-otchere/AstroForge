@@ -25,6 +25,9 @@ use crate::image::F32Image;
 use crate::pipeline_plan::dispatch::{
     load_frames_for_session, HandlerRegistry, StageContext, StageHandlerError, StageOutput,
 };
+use crate::resource::{
+    derive_stage_budget, parse_dataset_size_bytes_opt, ResourceSnapshot, UNKNOWN_DATASET_SIZE_BYTES,
+};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -118,6 +121,14 @@ pub fn run_preview(request: &PreviewRequest) -> Result<PreviewOutput, PreviewErr
         run_id: request.run_id.clone(),
         domain_store: request.domain_store.clone(),
         preloaded_frames: Some(frames),
+        // CR-05 P5 slice 2 — preview uses the same budget derivation
+        // as the runner so a preview tiles identically to the full run
+        // (P5 closed the preview / full-resolution parameter-parity loop).
+        execution_budget: derive_stage_budget(
+            &ResourceSnapshot::detect(),
+            parse_dataset_size_bytes_opt(request.stage.parameters_json.as_ref())
+                .unwrap_or(UNKNOWN_DATASET_SIZE_BYTES),
+        ),
     };
 
     let StageOutput {

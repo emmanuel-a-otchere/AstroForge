@@ -23,6 +23,7 @@ use astroforge_core::pipeline_plan::{
     runner::{CancelHandle, PauseHandle, PipelineRunner, RunOutcome},
     AcquisitionMode, CalibrationAvailability,
 };
+use astroforge_core::adaptive::AdaptiveParameterSet;
 use astroforge_core::pipeline_plans_store::{PipelinePlanStore, PipelinePlanStoreError};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -767,4 +768,71 @@ pub fn reset_recommendation(
         recommendation: RecommendationDto::from(&rec),
         applied_stage_id: None,
     })
+}
+
+// ─── CR-05 P5 slice 4 — §24 Pipeline Visualization + §27 metrics ─────────
+
+/// CR-05 P5 slice 4 (§27) — UI payload for `get_processing_metrics`.
+/// Mirror of `astroforge_core::processing_metrics::ProcessingMetrics`;
+/// lives in the Tauri layer so the IPC contract is stable when the
+/// core type evolves.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessingMetricsDto {
+    pub plan_id: String,
+    pub stage_count: u32,
+    pub completed_count: u32,
+    /// `0.0..=1.0`. `0.0` when no stages have completed yet.
+    pub completion_ratio: f64,
+    pub latest_stage_id: Option<String>,
+    pub latest_stage_type: Option<String>,
+    pub latest_metrics: Option<astroforge_core::adaptive::ImageMetrics>,
+    /// Persisted `resource_usage_json` from the most recent completed
+    /// stage, deserialised into `ExecutionBudget`. `None` when no
+    /// stage has completed or the runner hasn't persisted a budget yet.
+    pub latest_resource_budget: Option<astroforge_core::resource::ExecutionBudget>,
+    /// §12 adaptive output derived from `latest_metrics`. `None` when
+    /// no metrics are available yet (the §12 promise of "never refuse
+    /// to make progress" means the engine always returns *something*,
+    /// but we surface the absence to the UI rather than fabricate).
+    pub adaptive_parameters: Option<AdaptiveParameterSet>,
+}
+
+impl From<astroforge_core::processing_metrics::ProcessingMetrics> for ProcessingMetricsDto {
+    fn from(m: astroforge_core::processing_metrics::ProcessingMetrics) -> Self {
+        Self {
+            plan_id: m.plan_id,
+            stage_count: m.stage_count,
+            completed_count: m.completed_count,
+            completion_ratio: m.completion_ratio,
+            latest_stage_id: m.latest_stage_id,
+            latest_stage_type: m.latest_stage_type,
+            latest_metrics: m.latest_metrics,
+            latest_resource_budget: m.latest_resource_budget,
+            adaptive_parameters: m.adaptive_parameters,
+        }
+    }
+}
+
+/// CR-05 P5 slice 4 (§24 + §27) — `get_processing_metrics`.
+///
+/// Aggregates persisted stage executions into a single UI-friendly
+/// payload so `ExpertDagView` doesn't need to make 5+ round trips.
+/// Pure function of the store — no IO, no system calls.
+#[tauri::command]
+pub fn get_processing_metrics(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+) -> Result<ProcessingMetricsDto, String> {
+    let store = state.store.lock().map_err(lock_err)?;
+    let plan = store
+        .get_pipeline_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    let execs = store
+        .list_stage_executions_for_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    // §27 aggregate lives in astroforge-core so it can be unit-tested
+    // as part of the workspace `cargo test --workspace` run that CI
+    // executes (src-tauri is a binary-only crate outside the workspace).
+    let payload = astroforge_core::processing_metrics::aggregate_processing_metrics(&plan, &execs);
+    Ok(payload.into())
 }

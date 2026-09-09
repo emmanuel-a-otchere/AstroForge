@@ -37,6 +37,7 @@ pub mod planetary_lucky;
 pub mod planetary_pipeline;
 pub mod planetary_routing;
 pub mod plate_solve;
+pub mod processing_metrics;
 pub mod project;
 pub mod quality;
 pub mod recipe;

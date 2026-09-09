@@ -475,3 +475,68 @@ export const stageExecutionBudget = (
   parametersJson: string | null,
 ): Promise<ExecutionBudget> =>
   invoke("stage_execution_budget", { parametersJson });
+
+// ─── CR-05 P5 slice 4 (§24 + §27) — aggregate metrics ────────────────
+
+/** CR-05 §14 metric list, subset exposed to the Expert DAG view. */
+export interface ImageMetricsDto {
+  snr: number;
+  fwhm: number;
+  star_count: number;
+  background_gradient: number;
+  mean: number;
+  stddev: number;
+}
+
+/** CR-05 §12 noise banding — see `adaptive::NoiseKind` on the core. */
+export type NoiseKindDto = "low" | "moderate" | "high" | "extreme";
+
+export interface NoiseProfileDto {
+  kind: NoiseKindDto;
+  recommended_strength: number;
+  label: string;
+  reason: string;
+}
+
+export interface SharpeningProfileDto {
+  strength: number;
+  reason: string;
+}
+
+/** §12 adaptive parameter set. Every field is optional so the UI can
+ *  gracefully degrade when only partial data is available (e.g. a
+ *  stage that hasn't emitted metrics yet). */
+export interface AdaptiveParameterSetDto {
+  noise?: NoiseProfileDto;
+  sharpening?: SharpeningProfileDto;
+}
+
+/** §22 execution budget from the runner's persisted `resource_usage_json`. */
+export interface ExecutionBudgetDto {
+  memory_budget_bytes: number;
+  requires_tiling: boolean;
+  tile_size: number;
+  thread_count: number;
+  warning: string | null;
+}
+
+/** CR-05 §27 `get_processing_metrics` payload. Aggregates stage
+ *  executions + the latest metrics + the adaptive engine's current
+ *  parameter set, so the Expert DAG view can render in a single IPC. */
+export interface ProcessingMetricsDto {
+  plan_id: string;
+  stage_count: number;
+  completed_count: number;
+  completion_ratio: number;
+  latest_stage_id: string | null;
+  latest_stage_type: string | null;
+  latest_metrics: ImageMetricsDto | null;
+  latest_resource_budget: ExecutionBudgetDto | null;
+  adaptive_parameters: AdaptiveParameterSetDto | null;
+}
+
+/** §27 — single-roundtrip aggregate metrics for the Expert DAG view. */
+export const getProcessingMetrics = (
+  planId: string,
+): Promise<ProcessingMetricsDto> =>
+  invoke("get_processing_metrics", { planId });

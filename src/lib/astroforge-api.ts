@@ -166,6 +166,60 @@ export const imageVersionList = (
 ): Promise<ImageVersionListResponse> =>
   invoke("image_version_list", { projectId });
 
+// ─── CR-06 P1 — AI Enhancement Studio IPC shells ──────────────────────────
+//
+// P1 only persists the data model + provenance fields. The
+// substantive behavior (analysis, recommendations, enhancement
+// operations, masks, stacks, previews) lands in P2–P6; these
+// wrappers expose the IPC surface so the TS types and the
+// project-lifecycle reset hook can land alongside the schema
+// migration without further changes.
+//
+// The wire shapes are JSON values (`unknown` in TS) so the
+// frontend doesn't take a hard dependency on the Rust serde
+// shapes until P2 defines the analysis / recommendation
+// payload contracts. Consumers in P3+ will narrow these to
+// concrete types once the contracts land.
+
+export const aiOperationGet = (
+  operationId: string,
+): Promise<unknown> => invoke("ai_operation_get", { operationId });
+
+export const aiOperationListForStage = (
+  stageRunId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("ai_operation_list_for_stage", { stageRunId });
+
+export const imageAnalysisLatest = (
+  imageVersionId: string,
+): Promise<unknown> =>
+  invoke("image_analysis_latest", { imageVersionId });
+
+export const imageRegionList = (
+  imageVersionId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("image_region_list", { imageVersionId });
+
+export const aiRecommendationListForVersion = (
+  imageVersionId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("ai_recommendation_list_for_version", { imageVersionId });
+
+export const aiMaskList = (
+  imageVersionId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("ai_mask_list", { imageVersionId });
+
+export const enhancementStackListForSource = (
+  imageVersionId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("enhancement_stack_list_for_source", { imageVersionId });
+
+export const enhancementPreviewListForOperation = (
+  operationId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("enhancement_preview_list_for_operation", { operationId });
+
 // ─── CR-05 P1 — PipelinePlan commands (additive) ─────────────────────────
 //
 // PipelinePlan is the user-facing, human-readable processing workflow

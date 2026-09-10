@@ -11,9 +11,10 @@
 //! other stores.
 
 use crate::domain::{
-    Artifact, ArtifactCategory, PipelineRun, PipelineRunStatus, PreviewRun, Project, ProjectEvent,
-    ProjectEventKind, ProjectStatus, Session, SourceAsset, StageRunRecord, Target,
-    DOMAIN_SCHEMA_VERSION,
+    AiMask, AiOperation, AiRecommendation, AiSafetyClassification, Artifact, ArtifactCategory,
+    EnhancementPreview, EnhancementStack, ImageAnalysis, ImageRegion, PipelineRun,
+    PipelineRunStatus, PreviewRun, Project, ProjectEvent, ProjectEventKind, ProjectStatus, Session,
+    SourceAsset, StageRunRecord, Target, DOMAIN_SCHEMA_VERSION,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
@@ -217,6 +218,154 @@ CREATE INDEX idx_preview_runs_status
     ON preview_runs(status);
 CREATE INDEX idx_preview_runs_parameters_hash
     ON preview_runs(parameters_hash);
+"#,
+    ),
+    (
+        5,
+        r#"
+-- CR-06 P1 — AI Enhancement Studio data model + provenance.
+--
+-- Tables introduced by CR-06 §26 plus the durable backing for
+-- the `AiOperation` row that CR-02 already defined in domain.rs
+-- but never persisted. Schema is additive: existing rows in
+-- `image_versions` and elsewhere are untouched.
+
+-- CR-06 §21 — durable backing for the existing `AiOperation`
+-- struct. The CR-02 struct gains three new fields (engine
+-- version, tile configuration, resource metrics) plus the
+-- `safety_classification` text column. Older rows that lack
+-- the new columns would be migrated in v5 in production; for
+-- the in-memory / test path the table simply starts empty and
+-- every insert carries the new fields.
+CREATE TABLE ai_operations (
+    operation_id TEXT PRIMARY KEY,
+    stage_run_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    model_hash TEXT,
+    runtime TEXT,
+    backend TEXT,
+    precision TEXT,
+    parameters_json TEXT,
+    seed INTEGER,
+    deterministic INTEGER NOT NULL DEFAULT 1,
+    safety_classification TEXT NOT NULL DEFAULT 'deterministic'
+        CHECK (safety_classification IN ('deterministic','perceptual','generative')),
+    experimental INTEGER NOT NULL DEFAULT 0,
+    input_artifact_id TEXT,
+    output_artifact_id TEXT,
+    engine_version TEXT,
+    tile_configuration TEXT,
+    resource_metrics TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_ai_operations_stage_run
+    ON ai_operations(stage_run_id);
+CREATE INDEX idx_ai_operations_safety
+    ON ai_operations(safety_classification);
+CREATE INDEX idx_ai_operations_model
+    ON ai_operations(model_id, model_version);
+
+-- CR-06 §26 — image analysis rows. One row per analysis run;
+-- the profile is a JSON blob so the schema does not pin a
+-- single shape (P2 defines the deserialization contract).
+CREATE TABLE image_analyses (
+    analysis_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    image_version_id TEXT NOT NULL,
+    profile_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_image_analyses_version
+    ON image_analyses(image_version_id);
+CREATE INDEX idx_image_analyses_project
+    ON image_analyses(project_id);
+
+-- CR-06 §26 — image regions (stars / nebula / galaxy / etc.).
+-- Backed by P5 in the type system; P1 only persists rows so
+-- P2 / P5 can read and write without a second schema change.
+CREATE TABLE image_regions (
+    region_id TEXT PRIMARY KEY,
+    image_version_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    label TEXT,
+    source TEXT,
+    mask_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_image_regions_version
+    ON image_regions(image_version_id);
+
+-- CR-06 §26 — AI recommendations. P3 writes these.
+CREATE TABLE ai_recommendations (
+    recommendation_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    image_version_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    rationale TEXT,
+    confidence REAL NOT NULL,
+    risk_level TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_ai_recommendations_version
+    ON ai_recommendations(image_version_id);
+CREATE INDEX idx_ai_recommendations_project
+    ON ai_recommendations(project_id);
+
+-- CR-06 §26 — AI masks (P5 writes these).
+CREATE TABLE ai_masks (
+    mask_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    image_version_id TEXT NOT NULL,
+    provenance TEXT NOT NULL,
+    parents_json TEXT,
+    mask_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_ai_masks_version
+    ON ai_masks(image_version_id);
+CREATE INDEX idx_ai_masks_project
+    ON ai_masks(project_id);
+
+-- CR-06 §22 — enhancement stacks (ordered AI operations on top
+-- of an Image Version). P4 writes these.
+CREATE TABLE enhancement_stacks (
+    stack_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    source_image_version_id TEXT NOT NULL,
+    operation_ids_json TEXT NOT NULL,
+    branched_from_version_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_enhancement_stacks_source_version
+    ON enhancement_stacks(source_image_version_id);
+CREATE INDEX idx_enhancement_stacks_project
+    ON enhancement_stacks(project_id);
+
+-- CR-06 §26 — temporary preview artifact references. P4 writes
+-- these.
+CREATE TABLE enhancement_previews (
+    preview_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    source_image_version_id TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    artifact_id TEXT,
+    parameters_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_enhancement_previews_version
+    ON enhancement_previews(source_image_version_id);
+CREATE INDEX idx_enhancement_previews_project
+    ON enhancement_previews(project_id);
 "#,
     ),
 ];
@@ -876,6 +1025,413 @@ impl DomainStore {
         Ok(out)
     }
 
+    // ─── CR-06 P1 — AI Enhancement Studio entity CRUD ───────────────────────
+    //
+    // Each helper mirrors the R2/R3 pattern: insert-or-replace by id,
+    // query by parent. The `AiSafetyClassification` enum is serialized
+    // via `enum_str` (snake_case) and round-tripped through `parse_enum`
+    // so the wire shape is `"deterministic" / "perceptual" / "generative"`.
+    //
+    // The helpers are intentionally minimal in P1: read by id, list by
+    // parent (image_version_id or project_id), and insert-or-replace.
+    // Update / delete flows land alongside the operations that
+    // produce the rows (P3 recommendations, P4 stacks, P5 masks) so
+    // each phase carries its own CRUD surface.
+
+    /// Insert (or replace) an `AiOperation` row. The caller supplies
+    /// a stable `operation_id`; collisions replace in place so callers
+    /// can re-persist a partially-built row during a retry.
+    pub fn upsert_ai_operation(&self, op: &AiOperation) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO ai_operations (
+                operation_id, stage_run_id, model_id, model_version,
+                model_hash, runtime, backend, precision,
+                parameters_json, seed, deterministic, safety_classification,
+                experimental, input_artifact_id, output_artifact_id,
+                engine_version, tile_configuration, resource_metrics
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            params![
+                op.operation_id,
+                op.stage_run_id,
+                op.model_id,
+                op.model_version,
+                op.model_hash,
+                op.runtime,
+                op.backend,
+                op.precision,
+                op.parameters_json,
+                op.seed,
+                op.deterministic as i32,
+                enum_str(&op.safety_classification)?,
+                op.experimental as i32,
+                op.input_artifact_id,
+                op.output_artifact_id,
+                op.engine_version,
+                op.tile_configuration,
+                op.resource_metrics,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Fetch a single `AiOperation` by id. Returns `NotFound` if no
+    /// row matches.
+    pub fn get_ai_operation(&self, operation_id: &str) -> Result<AiOperation> {
+        let conn = self.conn.lock().unwrap();
+        let row = conn
+            .query_row(
+                "SELECT operation_id, stage_run_id, model_id, model_version,
+                        model_hash, runtime, backend, precision,
+                        parameters_json, seed, deterministic, safety_classification,
+                        experimental, input_artifact_id, output_artifact_id,
+                        engine_version, tile_configuration, resource_metrics
+                 FROM ai_operations WHERE operation_id = ?1",
+                params![operation_id],
+                ai_operation_row,
+            )
+            .map_err(|e| not_found_if_missing(e, "ai_operation", operation_id))?;
+        Ok(row)
+    }
+
+    /// List the `AiOperation` rows attached to a `stage_run_id`,
+    /// oldest first. Used by P4 to render the operation history
+    /// of a single stage execution.
+    pub fn list_ai_operations_for_stage(&self, stage_run_id: &str) -> Result<Vec<AiOperation>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT operation_id, stage_run_id, model_id, model_version,
+                    model_hash, runtime, backend, precision,
+                    parameters_json, seed, deterministic, safety_classification,
+                    experimental, input_artifact_id, output_artifact_id,
+                    engine_version, tile_configuration, resource_metrics
+             FROM ai_operations WHERE stage_run_id = ?1 ORDER BY created_at ASC, operation_id ASC",
+        )?;
+        let rows = stmt.query_map(params![stage_run_id], ai_operation_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Insert (or replace) an `ImageAnalysis` row. P2 calls this once
+    /// per analysis run; replacing on collision lets the analysis
+    /// engine retry idempotently.
+    pub fn upsert_image_analysis(&self, row: &ImageAnalysis) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO image_analyses
+                (analysis_id, project_id, image_version_id, profile_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, COALESCE(NULLIF(?5, ''), datetime('now')))",
+            params![
+                row.analysis_id,
+                row.project_id,
+                row.image_version_id,
+                row.profile_json,
+                row.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Fetch the most recent `ImageAnalysis` for a given Image Version,
+    /// or `None` if the version has not been analysed yet. P2 / P4
+    /// surface this to the UI.
+    pub fn latest_image_analysis_for_version(
+        &self,
+        image_version_id: &str,
+    ) -> Result<Option<ImageAnalysis>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT analysis_id, project_id, image_version_id, profile_json, created_at
+             FROM image_analyses WHERE image_version_id = ?1
+             ORDER BY created_at DESC, analysis_id DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![image_version_id])?;
+        if let Some(r) = rows.next()? {
+            Ok(Some(ImageAnalysis {
+                analysis_id: r.get(0)?,
+                project_id: r.get(1)?,
+                image_version_id: r.get(2)?,
+                profile_json: r.get(3)?,
+                created_at: r.get(4)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Insert (or replace) an `ImageRegion` row. P5 calls this from
+    /// the auto / parametric / user / composite mask writers.
+    pub fn upsert_image_region(&self, row: &ImageRegion) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO image_regions
+                (region_id, image_version_id, kind, label, source, mask_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(NULLIF(?7, ''), datetime('now')))",
+            params![
+                row.region_id,
+                row.image_version_id,
+                enum_str(&row.kind)?,
+                row.label,
+                row.source,
+                row.mask_json,
+                row.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// List the `ImageRegion` rows for an Image Version, oldest first.
+    pub fn list_image_regions(&self, image_version_id: &str) -> Result<Vec<ImageRegion>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT region_id, image_version_id, kind, label, source, mask_json, created_at
+             FROM image_regions WHERE image_version_id = ?1
+             ORDER BY created_at ASC, region_id ASC",
+        )?;
+        let rows = stmt.query_map(params![image_version_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (region_id, image_version_id, kind_str, label, source, mask_json, created_at) = r?;
+            out.push(ImageRegion {
+                region_id,
+                image_version_id,
+                kind: parse_enum(&kind_str)?,
+                label,
+                source,
+                mask_json,
+                created_at,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Insert (or replace) an `AiRecommendation` row. P3 calls this
+    /// from the recommendation engine.
+    pub fn upsert_ai_recommendation(&self, row: &AiRecommendation) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO ai_recommendations
+                (recommendation_id, project_id, image_version_id, operation,
+                 rationale, confidence, risk_level, payload_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, COALESCE(NULLIF(?9, ''), datetime('now')))",
+            params![
+                row.recommendation_id,
+                row.project_id,
+                row.image_version_id,
+                row.operation,
+                row.rationale,
+                row.confidence,
+                row.risk_level,
+                row.payload_json,
+                row.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// List the `AiRecommendation` rows for an Image Version,
+    /// highest-confidence first. P3 surfaces these in the AI
+    /// Enhancement Studio's Zone C panel.
+    pub fn list_ai_recommendations_for_version(
+        &self,
+        image_version_id: &str,
+    ) -> Result<Vec<AiRecommendation>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT recommendation_id, project_id, image_version_id, operation,
+                    rationale, confidence, risk_level, payload_json, created_at
+             FROM ai_recommendations WHERE image_version_id = ?1
+             ORDER BY confidence DESC, created_at ASC, recommendation_id ASC",
+        )?;
+        let rows = stmt.query_map(params![image_version_id], |row| {
+            Ok(AiRecommendation {
+                recommendation_id: row.get(0)?,
+                project_id: row.get(1)?,
+                image_version_id: row.get(2)?,
+                operation: row.get(3)?,
+                rationale: row.get(4)?,
+                confidence: row.get(5)?,
+                risk_level: row.get(6)?,
+                payload_json: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Insert (or replace) an `AiMask` row. P5 calls this from the
+    /// mask writer.
+    pub fn upsert_ai_mask(&self, row: &AiMask) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO ai_masks
+                (mask_id, project_id, image_version_id, provenance,
+                 parents_json, mask_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(NULLIF(?7, ''), datetime('now')))",
+            params![
+                row.mask_id,
+                row.project_id,
+                row.image_version_id,
+                row.provenance,
+                row.parents_json,
+                row.mask_json,
+                row.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// List the `AiMask` rows for an Image Version, oldest first.
+    pub fn list_ai_masks(&self, image_version_id: &str) -> Result<Vec<AiMask>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT mask_id, project_id, image_version_id, provenance,
+                    parents_json, mask_json, created_at
+             FROM ai_masks WHERE image_version_id = ?1
+             ORDER BY created_at ASC, mask_id ASC",
+        )?;
+        let rows = stmt.query_map(params![image_version_id], |row| {
+            Ok(AiMask {
+                mask_id: row.get(0)?,
+                project_id: row.get(1)?,
+                image_version_id: row.get(2)?,
+                provenance: row.get(3)?,
+                parents_json: row.get(4)?,
+                mask_json: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Insert (or replace) an `EnhancementStack` row. P4 calls this
+    /// once per stack creation.
+    pub fn upsert_enhancement_stack(&self, row: &EnhancementStack) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO enhancement_stacks
+                (stack_id, project_id, source_image_version_id,
+                 operation_ids_json, branched_from_version_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(NULLIF(?6, ''), datetime('now')))",
+            params![
+                row.stack_id,
+                row.project_id,
+                row.source_image_version_id,
+                row.operation_ids_json,
+                row.branched_from_version_id,
+                row.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// List the `EnhancementStack` rows attached to a project's
+    /// source Image Version. P4 uses this to surface branches.
+    pub fn list_enhancement_stacks_for_source(
+        &self,
+        image_version_id: &str,
+    ) -> Result<Vec<EnhancementStack>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT stack_id, project_id, source_image_version_id,
+                    operation_ids_json, branched_from_version_id, created_at
+             FROM enhancement_stacks WHERE source_image_version_id = ?1
+             ORDER BY created_at ASC, stack_id ASC",
+        )?;
+        let rows = stmt.query_map(params![image_version_id], |row| {
+            Ok(EnhancementStack {
+                stack_id: row.get(0)?,
+                project_id: row.get(1)?,
+                source_image_version_id: row.get(2)?,
+                operation_ids_json: row.get(3)?,
+                branched_from_version_id: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Insert (or replace) an `EnhancementPreview` row. P4 calls this
+    /// from the preview runner.
+    pub fn upsert_enhancement_preview(&self, row: &EnhancementPreview) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO enhancement_previews
+                (preview_id, project_id, source_image_version_id,
+                 operation_id, artifact_id, parameters_json, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(NULLIF(?8, ''), datetime('now')))",
+            params![
+                row.preview_id,
+                row.project_id,
+                row.source_image_version_id,
+                row.operation_id,
+                row.artifact_id,
+                row.parameters_json,
+                row.status,
+                row.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// List the `EnhancementPreview` rows for an Image Version's
+    /// `operation_id`, newest first. P4 surfaces previews for the
+    /// currently-selected operation.
+    pub fn list_enhancement_previews_for_operation(
+        &self,
+        operation_id: &str,
+    ) -> Result<Vec<EnhancementPreview>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT preview_id, project_id, source_image_version_id,
+                    operation_id, artifact_id, parameters_json, status, created_at
+             FROM enhancement_previews WHERE operation_id = ?1
+             ORDER BY created_at DESC, preview_id DESC",
+        )?;
+        let rows = stmt.query_map(params![operation_id], |row| {
+            Ok(EnhancementPreview {
+                preview_id: row.get(0)?,
+                project_id: row.get(1)?,
+                source_image_version_id: row.get(2)?,
+                operation_id: row.get(3)?,
+                artifact_id: row.get(4)?,
+                parameters_json: row.get(5)?,
+                status: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     // ─── CR-05 P4 slice 3 — PreviewRun CRUD (preview-before-commit) ────────
     //
     // Persists the result of running a stage handler on a
@@ -1405,6 +1961,48 @@ fn not_found_if_missing(e: rusqlite::Error, what: &str, id: &str) -> DomainStore
     }
 }
 
+/// CR-06 P1 — shared row mapper for the `ai_operations` table.
+/// Used by `get_ai_operation` and `list_ai_operations_for_stage`.
+/// Centralized so any future column add lands in one place.
+fn ai_operation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiOperation> {
+    let deterministic_int: i32 = row.get(10)?;
+    let safety_str: String = row.get(11)?;
+    let safety: AiSafetyClassification = match safety_str.as_str() {
+        "deterministic" => AiSafetyClassification::Deterministic,
+        "perceptual" => AiSafetyClassification::Perceptual,
+        "generative" => AiSafetyClassification::Generative,
+        // Defensive default: unknown safety string maps to
+        // Deterministic. The CHECK constraint on the column
+        // prevents this in practice, but a future migration
+        // that drops the constraint would still degrade safely.
+        _ => AiSafetyClassification::Deterministic,
+    };
+    Ok(AiOperation {
+        operation_id: row.get(0)?,
+        stage_run_id: row.get(1)?,
+        model_id: row.get(2)?,
+        model_version: row.get(3)?,
+        model_hash: row.get(4)?,
+        runtime: row.get(5)?,
+        backend: row.get(6)?,
+        precision: row.get(7)?,
+        parameters_json: row.get(8)?,
+        seed: row.get(9)?,
+        // Keep the legacy boolean in sync with the safety
+        // classification. A row written by older code (or a
+        // hand-edited DB) might disagree; the safety class is
+        // authoritative for new code.
+        deterministic: deterministic_int != 0 && safety == AiSafetyClassification::Deterministic,
+        safety_classification: safety,
+        experimental: row.get::<_, i32>(12)? != 0,
+        input_artifact_id: row.get(13)?,
+        output_artifact_id: row.get(14)?,
+        engine_version: row.get(15)?,
+        tile_configuration: row.get(16)?,
+        resource_metrics: row.get(17)?,
+    })
+}
+
 /// Enums are stored as their serde string token (e.g. "deep_sky", "NEW").
 fn enum_str<T: serde::Serialize>(v: &T) -> Result<String> {
     Ok(serde_json::to_string(v)?.trim_matches('"').to_string())
@@ -1467,14 +2065,17 @@ mod tests {
     #[test]
     fn migrations_apply_once_and_are_idempotent() {
         let s = store();
-        // CR-05 P4 slice 3 — migration v4 added the `preview_runs`
-        // table. Bump the expected version; the assertion still
-        // proves the runner applies migrations exactly once and
-        // re-running it on a fresh store does not double-apply.
-        assert_eq!(s.schema_version(), 4);
+        // CR-06 P1 — migration v5 added the AI Enhancement Studio
+        // tables (ai_operations, image_analyses, image_regions,
+        // ai_recommendations, ai_masks, enhancement_stacks,
+        // enhancement_previews). Bump the expected version; the
+        // assertion still proves the runner applies migrations
+        // exactly once and re-running it on a fresh store does
+        // not double-apply.
+        assert_eq!(s.schema_version(), 5);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 4);
+        assert_eq!(s2.schema_version(), 5);
     }
 
     #[test]

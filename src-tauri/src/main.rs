@@ -15,6 +15,7 @@ use astroforge_core::session::SessionStore;
 use serde::Serialize;
 use tauri::{Manager, State};
 
+mod commands_ai_enhancement;
 mod commands_ai_models;
 mod commands_image_versions;
 mod commands_pipeline_plan;
@@ -657,6 +658,20 @@ fn main() {
             // CR-05 R3 — image-version timeline for the Compare
             // workspace. Derived from the durable event log.
             commands_image_versions::image_version_list,
+            // CR-06 P1 — AI Enhancement Studio data model +
+            // provenance + safety classification shells.
+            // Substantive behavior lands in P2–P6; P1 only
+            // exposes the IPC surface so the TS wrapper
+            // types and the project-lifecycle reset hook
+            // can land alongside the schema migration.
+            commands_ai_enhancement::ai_operation_get,
+            commands_ai_enhancement::ai_operation_list_for_stage,
+            commands_ai_enhancement::image_analysis_latest,
+            commands_ai_enhancement::image_region_list,
+            commands_ai_enhancement::ai_recommendation_list_for_version,
+            commands_ai_enhancement::ai_mask_list,
+            commands_ai_enhancement::enhancement_stack_list_for_source,
+            commands_ai_enhancement::enhancement_preview_list_for_operation,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

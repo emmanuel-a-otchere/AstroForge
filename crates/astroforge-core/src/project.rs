@@ -349,7 +349,11 @@ mod tests {
         // CR-05 P4 slice 3 — migration v4 (preview_runs) bumped the
         // schema version; the assertion still proves the version is
         // recorded correctly across project reopen.
-        assert_eq!(reopened.store.schema_version(), 4);
+        // CR-06 P1 — schema_version() bumped to 5 by the AI
+        // Enhancement Studio migration (ai_operations,
+        // image_analyses, image_regions, ai_recommendations,
+        // ai_masks, enhancement_stacks, enhancement_previews).
+        assert_eq!(reopened.store.schema_version(), 5);
 
         // Tampered manifest is rejected.
         let mut bad = reopened.manifest.clone();

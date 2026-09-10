@@ -505,6 +505,12 @@ pub enum PipelinePlanStatus {
 
 /// CR-02 §15 — AI provenance. Deterministic is the default; stochastic /
 /// generative operations are explicitly labeled and seed-recorded.
+///
+/// CR-06 P1 — extended with a three-way `safety_classification` enum
+/// (Deterministic / Perceptual / Generative) per CR-06 §16. The
+/// `deterministic: bool` field is retained for backward compatibility
+/// with callers that already check it; new code should branch on
+/// `safety_classification` instead.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiOperation {
     pub operation_id: String,
@@ -517,10 +523,201 @@ pub struct AiOperation {
     pub precision: Option<String>,
     pub parameters_json: Option<String>,
     pub seed: Option<u64>,
+    /// Legacy CR-02 boolean. Prefer `safety_classification` for
+    /// any new code path. The two are kept in sync at write time:
+    /// `deterministic == (safety == Deterministic)`.
     pub deterministic: bool,
+    /// CR-06 §16 — the safety classification surfaced to the
+    /// user. Defaults to `Deterministic` when the field is
+    /// missing on a pre-CR-06 row.
+    #[serde(default)]
+    pub safety_classification: AiSafetyClassification,
     pub experimental: bool,
     pub input_artifact_id: Option<String>,
     pub output_artifact_id: Option<String>,
+    /// CR-06 §21 — engine version that produced this operation
+    /// (e.g. `astroforge-ai-0.1.0`). Useful when a model ships
+    /// new runtime behaviour.
+    #[serde(default)]
+    pub engine_version: Option<String>,
+    /// CR-06 §21 — JSON blob describing the tile configuration
+    /// (size, overlap, blending mode). `None` for non-tiled
+    /// operations.
+    #[serde(default)]
+    pub tile_configuration: Option<String>,
+    /// CR-06 §21 — JSON blob of resource metrics (peak memory,
+    /// wall time, gpu vs cpu time). `None` if the engine did
+    /// not record them.
+    #[serde(default)]
+    pub resource_metrics: Option<String>,
+}
+
+/// CR-06 §16 — three-way safety classification. Every AI operation
+/// carries one of these and the UI must surface it (never hide the
+/// classification per ADR-06.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AiSafetyClassification {
+    /// Class A — deterministic. Output is reproducible from input
+    /// + parameters. Examples: classical denoise, segmentation,
+    ///   conventional deconvolution, masking.
+    #[default]
+    Deterministic,
+    /// Class B — learned / perceptual. Model-based reconstruction
+    /// that may infer detail. Examples: super-resolution, learned
+    /// sharpening, learned restoration.
+    Perceptual,
+    /// Class C — generative. May synthesize information not
+    /// directly present in the source. Opt-in only per ADR-06.3.
+    Generative,
+}
+
+impl AiSafetyClassification {
+    /// Render the classification as a UI-friendly label.
+    pub fn as_label(self) -> &'static str {
+        match self {
+            AiSafetyClassification::Deterministic => "Deterministic",
+            AiSafetyClassification::Perceptual => "Perceptual",
+            AiSafetyClassification::Generative => "Generative",
+        }
+    }
+
+    /// Whether this classification requires the user-visible
+    /// "perceptual enhancement" disclosure banner (CR-06 §17).
+    pub fn requires_disclosure(self) -> bool {
+        matches!(
+            self,
+            AiSafetyClassification::Perceptual | AiSafetyClassification::Generative
+        )
+    }
+}
+
+/// CR-06 §26 — structured observations produced by the image-
+/// analysis engine. Rows are written once per analysis run; the
+/// payload is a JSON blob conforming to the report shape in P2.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageAnalysis {
+    pub analysis_id: String,
+    pub project_id: String,
+    pub image_version_id: String,
+    /// CR-06 §5.1 — the `ImageIntelligenceProfile` JSON shape
+    /// (observations, evidence, confidence). Stored as TEXT so
+    /// the schema does not pin a single shape; P2 defines the
+    /// deserialization contract.
+    pub profile_json: String,
+    pub created_at: String,
+}
+
+/// CR-06 §26 — semantic regions detected on an Image Version.
+/// Used for region-aware enhancement (P5).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageRegionKind {
+    Stars,
+    StarField,
+    Nebula,
+    Galaxy,
+    GlobularCluster,
+    OpenCluster,
+    PlanetaryLunar,
+    BrightCore,
+    FaintStructures,
+    DustRegions,
+    EmissionRegions,
+    Background,
+    UserMask,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageRegion {
+    pub region_id: String,
+    pub image_version_id: String,
+    pub kind: ImageRegionKind,
+    /// Optional human-readable label (e.g. "M42 core").
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Source provenance: `auto` (segmentation), `parametric`,
+    /// `user`. CR-06 §12.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Pixel-space mask. JSON blob of mask points / shapes so
+    /// the schema does not pin a single mask encoding; P5
+    /// defines the encoding contract.
+    #[serde(default)]
+    pub mask_json: Option<String>,
+    pub created_at: String,
+}
+
+/// CR-06 §26 — AI recommendation row. P3 defines the
+/// `recommendation_json` shape; P1 only persists the row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRecommendation {
+    pub recommendation_id: String,
+    pub project_id: String,
+    pub image_version_id: String,
+    /// Operation the recommendation points at
+    /// (`denoise`, `deconv`, `star_reduce`, `sr`, `inpaint`, …).
+    pub operation: String,
+    /// Free-form rationale (CR-06 §7 sequencing rationale).
+    pub rationale: Option<String>,
+    /// 0.0–1.0 confidence score.
+    pub confidence: f32,
+    /// Risk level surfaced in the UI.
+    pub risk_level: String,
+    /// JSON blob holding evidence + model candidates + resource
+    /// estimates (per CR-06 §27). P3 defines the shape.
+    pub payload_json: String,
+    pub created_at: String,
+}
+
+/// CR-06 §26 — AI mask row. P5 writes these.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiMask {
+    pub mask_id: String,
+    pub project_id: String,
+    pub image_version_id: String,
+    /// Mask provenance: `auto` / `parametric` / `user` /
+    /// `composite`. CR-06 §12.
+    pub provenance: String,
+    /// Parent mask ids when this is a composite (JSON array of
+    /// strings). Empty for the leaf kinds.
+    #[serde(default)]
+    pub parents_json: Option<String>,
+    /// Mask encoding (JSON blob; P5 defines the encoding).
+    pub mask_json: String,
+    pub created_at: String,
+}
+
+/// CR-06 §22 — ordered list of AI operations applied on top of
+/// an Image Version. P4 writes these.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhancementStack {
+    pub stack_id: String,
+    pub project_id: String,
+    pub source_image_version_id: String,
+    /// JSON array of operation ids in execution order. P4
+    /// defines the operation-id shape.
+    pub operation_ids_json: String,
+    /// Optional branched-from version id when the stack is a
+    /// branch (CR-06 §24).
+    #[serde(default)]
+    pub branched_from_version_id: Option<String>,
+    pub created_at: String,
+}
+
+/// CR-06 §26 — temporary preview artifact reference. P4 writes
+/// these. Rows are not Image Versions (they are not surfaced as
+/// user-meaningful versions).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhancementPreview {
+    pub preview_id: String,
+    pub project_id: String,
+    pub source_image_version_id: String,
+    pub operation_id: String,
+    pub artifact_id: Option<String>,
+    pub parameters_json: String,
+    pub status: String,
+    pub created_at: String,
 }
 
 /// CR-02 — what left AstroForge. Deleting an Export never affects
@@ -627,9 +824,13 @@ mod tests {
             parameters_json: None,
             seed: None,
             deterministic: true,
+            safety_classification: AiSafetyClassification::Deterministic,
             experimental: false,
             input_artifact_id: None,
             output_artifact_id: None,
+            engine_version: None,
+            tile_configuration: None,
+            resource_metrics: None,
         };
         let json = serde_json::to_string(&op).expect("serialize");
         let back: AiOperation = serde_json::from_str(&json).expect("deserialize");

@@ -118,6 +118,25 @@ export const pipelineRunListStages = (runId: string): Promise<StageRunSummary[]>
 export const pipelineRunFindInterrupted = (): Promise<PipelineRunSummary[]> =>
   invoke("pipeline_run_find_interrupted");
 
+// ─── CR-05 R2 — Project overview IPC ───────────────────────────────────────
+//
+// Truthful checklist state for the §8 Overview. The five booleans
+// (imported / analyzed / processed / versioned / exported) are
+// derived from the durable event log and project tables; the
+// frontend no longer hardcodes them as `pending`.
+
+export interface ProjectOverview {
+  project_id: string;
+  imported: boolean;
+  analyzed: boolean;
+  processed: boolean;
+  versioned: boolean;
+  exported: boolean;
+}
+
+export const projectOverview = (projectId: string): Promise<ProjectOverview> =>
+  invoke("project_overview", { projectId });
+
 // ─── CR-05 P1 — PipelinePlan commands (additive) ─────────────────────────
 //
 // PipelinePlan is the user-facing, human-readable processing workflow

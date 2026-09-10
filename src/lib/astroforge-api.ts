@@ -137,6 +137,35 @@ export interface ProjectOverview {
 export const projectOverview = (projectId: string): Promise<ProjectOverview> =>
   invoke("project_overview", { projectId });
 
+// ─── CR-05 R3 — Image version listing IPC ──────────────────────────────────
+//
+// Real version timeline for the Compare workspace. Derived from
+// the durable event log (`VersionCreated` events) plus any
+// payload fields. The previous `versionStore.load` path used a
+// hard-coded placeholder timeline; this slice replaces that with
+// a Tauri command that returns the real state.
+
+export interface ImageVersion {
+  version_id: string;
+  project_id: string;
+  label: string;
+  sequence: number;
+  primary_artifact_id: string;
+  source_version_id: string | null;
+  created_at: string;
+  hidden: boolean;
+}
+
+export interface ImageVersionListResponse {
+  project_id: string;
+  versions: ImageVersion[];
+}
+
+export const imageVersionList = (
+  projectId: string,
+): Promise<ImageVersionListResponse> =>
+  invoke("image_version_list", { projectId });
+
 // ─── CR-05 P1 — PipelinePlan commands (additive) ─────────────────────────
 //
 // PipelinePlan is the user-facing, human-readable processing workflow

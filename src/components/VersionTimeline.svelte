@@ -1,19 +1,22 @@
 <!--
   CR-03 P5 — version timeline strip.
 
-  Horizontal timeline of image versions for the active project.
-  Each card shows: label (v1/v2/v3), title, source pill, status
-  pill, created_at. Selected version is highlighted.
+  R3 update: the timeline now reads from the durable
+  `image_version_list` IPC (via `versionStore`) instead of the
+  removed placeholder data layer. The IPC returns
+  `ImageVersion` records with `label`, `sequence`,
+  `primary_artifact_id`, `created_at`, and `hidden`. The card
+  renders these fields directly — no fake titles, no fake
+  source pills. Status is always "in review" (a future
+  promote-to-final action ships when the AI ops Rust migration
+  lands).
 
   Layout:
     - Single-row horizontal scroll on desktop
     - Vertical stack on narrow viewports
 -->
 <script lang="ts">
-  import {
-    versionStore,
-    type ImageVersion,
-  } from "../state/versions";
+  import { versionStore, type ImageVersion } from "../state/versions";
 
   let {
     onSelect,
@@ -22,49 +25,59 @@
   let selected = $state<string | null>(null);
 
   function selectVersion(v: ImageVersion) {
-    selected = v.id;
+    selected = v.version_id;
     onSelect?.(v);
+  }
+
+  function formatDate(iso: string): string {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch {
+      return iso;
+    }
   }
 </script>
 
 {#if $versionStore.versions.length === 0}
-  <p class="empty font-body">No image versions yet.</p>
+  <p class="empty font-body">
+    No image versions yet. A version appears in the timeline
+    when the project records a `VersionCreated` event.
+  </p>
 {:else}
   <ol class="timeline" aria-label="Image version timeline">
-    {#each $versionStore.versions as version (version.id)}
-      <li class="version-card" data-status={version.status}>
+    {#each $versionStore.versions as version (version.version_id)}
+      <li class="version-card" data-status="in_review">
         <button
           type="button"
           class="version-button"
-          data-active={selected === version.id}
+          data-active={selected === version.version_id}
           onclick={() => selectVersion(version)}
-          aria-label="Select {version.label}: {version.title}"
+          aria-label="Select {version.label}"
         >
           <div class="version-header">
             <span class="version-label font-label">{version.label}</span>
-            <span class="status-pill" data-status={version.status}>
-              {version.status.replace("_", " ")}
+            <span class="status-pill" data-status="in_review">
+              in review
             </span>
           </div>
-          <h3 class="version-title font-display">{version.title}</h3>
           <p class="version-meta font-body">
-            {new Date(version.created_at).toLocaleDateString(undefined, {
-              year: "numeric",
-              month: "short",
-              day: "numeric",
-            })}
+            {formatDate(version.created_at)}
           </p>
           <p class="version-source font-body">
-            {#if version.source.kind === "pipeline_run"}
-              From pipeline run
-            {:else if version.source.kind === "ai_recommendation"}
-              From AI recommendation
+            Sequence #{version.sequence}
+            {#if version.primary_artifact_id}
+              · artifact {version.primary_artifact_id}
             {:else}
-              Manual edit
+              · no artifact yet
             {/if}
           </p>
         </button>
-        {#if version.parent_version_id}
+        {#if version.source_version_id}
           <span class="material-symbols-outlined lineage" aria-hidden="true">
             arrow_back
           </span>
@@ -87,7 +100,7 @@
 
   .version-card {
     position: relative;
-    flex: 0 0 220px;
+    flex: 0 0 240px;
   }
 
   .version-button {
@@ -135,26 +148,9 @@
     letter-spacing: 0.05em;
   }
 
-  .status-pill[data-status="final"] {
-    background: rgba(111, 191, 115, 0.2);
-    color: #6fbf73;
-  }
-
   .status-pill[data-status="in_review"] {
     background: rgba(33, 150, 243, 0.2);
     color: #64b5f6;
-  }
-
-  .status-pill[data-status="exported"] {
-    background: rgba(255, 179, 0, 0.2);
-    color: #ffb300;
-  }
-
-  .version-title {
-    margin: 0;
-    font-size: 0.95rem;
-    font-weight: 600;
-    line-height: 1.2;
   }
 
   .version-meta {
@@ -167,7 +163,6 @@
     font-size: 0.75rem;
     color: var(--on-surface-variant);
     margin: 0;
-    font-style: italic;
   }
 
   .lineage {

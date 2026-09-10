@@ -109,15 +109,15 @@ impl From<&StageRunRecord> for StageRunSummary {
     }
 }
 
-fn lock_err<E: std::fmt::Display>(e: E) -> String {
-    format!("mutex poisoned: {e}")
+pub(crate) fn lock_err<E: std::fmt::Display>(e: E) -> String {
+    format!("lock poisoned: {e}")
 }
 
 fn project_err_to_string(e: ProjectError) -> String {
     e.to_string()
 }
 
-fn store_err_to_string(e: DomainStoreError) -> String {
+pub(crate) fn store_err_to_string(e: DomainStoreError) -> String {
     e.to_string()
 }
 

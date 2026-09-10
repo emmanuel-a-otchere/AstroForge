@@ -1,45 +1,36 @@
 // CR-03 P5 — image version + AI recommendation data model.
 //
 // Typed shape for image versions, AI recommendations, and the
-// version timeline. The CR-02.6 IPC scaffold ships projects +
-// pipeline runs; image versions + AI operations land in a future
-// Rust migration. P5 ships the frontend model + a typed
-// placeholder data layer so the workspace UIs (Overview timeline,
-// Enhance recommendations, Compare picker, Export picker) can be
-// reviewed end-to-end before the backend lands.
+// version timeline. P5 shipped deterministic placeholders; R3
+// replaces the placeholder timeline with a real Tauri-backed
+// load (`imageVersionList`) so the Compare workspace renders
+// durable state instead of fake data.
+//
+// The Recommendation shape stays placeholder for now; the AI
+// ops Rust migration is on a separate tranche and not R3 scope.
 
 import { writable, derived } from "svelte/store";
+import { imageVersionList, type ImageVersion } from "../lib/astroforge-api";
 
 // ─── Image Version ──────────────────────────────────────────────────────
 
-/** Status of a single image version. */
+/** Status of a single image version. R3 note: status is
+ *  intentionally separate from the durable `ImageVersion`
+ *  shape returned by the IPC — the IPC owns metadata, the
+ *  Svelte store derives a status from `sequence` (any version
+ *  is "in_review" until the user promotes it; the promote
+ *  action is a future tranche). */
 export type VersionStatus =
   | "draft"
   | "in_review"
   | "final"
   | "exported";
 
-/** A single image version of the project's working image. Versions
- *  form a lineage; each version has zero or one parent. */
-export interface ImageVersion {
-  id: string;
-  project_id: string;
-  /** 1-indexed human-readable label, e.g. "v1", "v2", "v3". */
-  label: string;
-  /** Optional human-friendly title from AI or user. */
-  title: string;
-  /** What produced this version: a pipeline run, a manual edit,
-   *  or an accepted AI recommendation. */
-  source:
-    | { kind: "pipeline_run"; run_id: string }
-    | { kind: "manual" }
-    | { kind: "ai_recommendation"; recommendation_id: string };
-  /** Parent version id when this version supersedes another. */
-  parent_version_id: string | null;
-  status: VersionStatus;
-  created_at: string; // ISO-8601
-  notes: string;
-}
+/** Re-export the IPC's `ImageVersion` as the canonical Svelte
+ *  side. The two shapes are intentionally aligned — the
+ *  previous interface (id, label, source, parent_version_id,
+ *  status, notes) is replaced by the durable schema. */
+export type { ImageVersion };
 
 /** The version timeline is sorted by created_at ascending. */
 export type VersionTimeline = readonly ImageVersion[];
@@ -101,18 +92,21 @@ const internal = writable<VersionState>(initial);
 export const versionStore = {
   subscribe: internal.subscribe,
 
-  /** Load (placeholder) versions + recommendations for a project.
-   *  P5 ships deterministic placeholders; P5a replaces with real
-   *  IPC when the Rust migration lands. */
-  load(project_id: string): void {
+  /** Load the real version timeline + recommendations for a
+   *  project. R3: the version list comes from the durable
+   *  event log via `image_version_list`. Recommendations
+   *  remain an empty list for now (the AI ops Rust migration
+   *  is on a separate tranche). On any IPC error the timeline
+   *  is empty and the error is recorded so the Compare
+   *  workspace can render a clear notice. */
+  async load(project_id: string): Promise<void> {
     internal.update((s) => ({ ...s, project_id, loading: true, error: null }));
     try {
-      const versions = placeholderVersions(project_id);
-      const recommendations = placeholderRecommendations(project_id, versions);
+      const response = await imageVersionList(project_id);
       internal.set({
         project_id,
-        versions,
-        recommendations,
+        versions: response.versions,
+        recommendations: [],
         loading: false,
         error: null,
       });
@@ -158,105 +152,3 @@ export const pendingRecommendations = derived(
   internal,
   ($s) => $s.recommendations.filter((r) => r.status === "pending"),
 );
-
-// ─── Placeholder data (P5 only; replaced in P5a) ────────────────────────
-
-function placeholderVersions(project_id: string): ImageVersion[] {
-  const base = "2026-09-06T12:00:00Z";
-  return [
-    {
-      id: `${project_id}-v1`,
-      project_id,
-      label: "v1",
-      title: "Stacked integration",
-      source: { kind: "pipeline_run", run_id: "run-001" },
-      parent_version_id: null,
-      status: "in_review",
-      created_at: base,
-      notes: "First integration of 60 light frames at 120s exposure.",
-    },
-    {
-      id: `${project_id}-v2`,
-      project_id,
-      label: "v2",
-      title: "Stretched + star reduction",
-      source: { kind: "ai_recommendation", recommendation_id: "rec-001" },
-      parent_version_id: `${project_id}-v1`,
-      status: "in_review",
-      created_at: "2026-09-06T13:30:00Z",
-      notes: "Asinh stretch with star-reduction applied per AI recommendation.",
-    },
-    {
-      id: `${project_id}-v3`,
-      project_id,
-      label: "v3",
-      title: "Color balanced",
-      source: { kind: "ai_recommendation", recommendation_id: "rec-002" },
-      parent_version_id: `${project_id}-v2`,
-      status: "final",
-      created_at: "2026-09-06T14:15:00Z",
-      notes: "SCNR green + per-channel background neutralization.",
-    },
-  ];
-}
-
-function placeholderRecommendations(
-  project_id: string,
-  versions: readonly ImageVersion[],
-): AiRecommendation[] {
-  if (versions.length === 0) return [];
-  const latest = versions[versions.length - 1];
-  return [
-    {
-      id: "rec-001",
-      project_id,
-      version_id: latest.id,
-      kind: "star_reduction",
-      title: "Reduce star bloat in highlights",
-      description:
-        "Compress stars tighter in the highlights to recover nebula detail behind bright field stars.",
-      rationale:
-        "Detected 12 stars with peak luma above the 95th-percentile threshold; the surrounding nebulosity is being washed out.",
-      parameter_patch: {
-        star_reduction_amount: 0.35,
-        luma_threshold: 0.85,
-      },
-      status: "accepted",
-      created_at: "2026-09-06T13:00:00Z",
-    },
-    {
-      id: "rec-002",
-      project_id,
-      version_id: latest.id,
-      kind: "color_balance",
-      title: "Neutralize green cast in background",
-      description:
-        "Pull the green channel down to match red/blue, restoring a neutral sky background.",
-      rationale:
-        "Background pixels show a +5% green offset typical of an uncalibrated OSC sensor; SCNR green will correct without affecting emission-line regions.",
-      parameter_patch: {
-        scnr_amount: 0.5,
-        scnr_target: "green",
-      },
-      status: "pending",
-      created_at: "2026-09-06T13:45:00Z",
-    },
-    {
-      id: "rec-003",
-      project_id,
-      version_id: latest.id,
-      kind: "tone_adjustment",
-      title: "Shrink highlights on the trapezium core",
-      description:
-        "Use a luminance mask to recover detail in the brightest 0.5% of pixels without affecting midtones.",
-      rationale:
-        "Central trapezium region is clipping in R/G/B; a targeted HDR compression restores the four-star separation.",
-      parameter_patch: {
-        highlights_recovery: 0.6,
-        mask_radius: 12,
-      },
-      status: "pending",
-      created_at: "2026-09-06T14:00:00Z",
-    },
-  ];
-}

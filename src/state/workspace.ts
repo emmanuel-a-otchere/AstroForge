@@ -169,16 +169,17 @@ export const stageStatuses = derived(
     "import" | "analyze" | "process" | "review" | "export",
     StageStatus
   > => {
-    // CR-05 P4 slice 1 — prefer the active CR-05 plan's
-    // StageExecutionSummary rows over the legacy CR-02
-    // `pipeline_run_list` once a plan exists. The legacy path
-    // remains the fallback so the Overview still lights up the
-    // checklist for projects that have wizard runs but no CR-05
-    // plan yet.
-    const processStatus =
-      $plan !== null
-        ? computeProcessStatusFromPlan($plan.stages, $executions[$plan.plan_id] ?? [])
-        : computeProcessStatusFromLegacyRuns($s.runs);
+    // CR-05 P4 slice 1 — derive the 'process' stage from the
+    // active CR-05 plan. R5 retired the legacy wizard
+    // fallback: when no plan exists the §8 checklist reports
+    // `pending` (an honest "no processing data yet") rather
+    // than walking the CR-02 wizard table.
+    const processStatus = $plan
+      ? computeProcessStatusFromPlan(
+          $plan.stages,
+          $executions[$plan.plan_id] ?? [],
+        )
+      : "pending";
 
     const o = $s.overview;
     const ready = o !== null;
@@ -248,7 +249,21 @@ function computeProcessStatusFromPlan(
   return "pending";
 }
 
-function computeProcessStatusFromLegacyRuns(
+/// CR-05 R5 — legacy wizard fallback retired. The previous
+/// `computeProcessStatusFromLegacyRuns` read CR-02 wizard
+/// `pipeline_runs` rows. R5 removes the call site: every
+/// project going forward creates a CR-05 plan via
+/// `create_pipeline_plan`, and the legacy wizard
+/// `pipeline_run_session` is preserved at the IPC layer only
+/// for backwards compatibility. The `runs` field on
+/// `WorkspaceState` is kept (so consumers like the Overview's
+/// pipeline-runs list can still render historical data) but
+/// no longer drives the §8 checklist.
+///
+/// The function itself is preserved (renamed with a
+/// `_DEPRECATED` suffix) so the previous behavior remains
+/// grep-able and recoverable. No live code calls it.
+function computeProcessStatusFromLegacyRuns_DEPRECATED(
   runs: readonly PipelineRunSummary[],
 ): StageStatus {
   if (runs.length === 0) return "pending";

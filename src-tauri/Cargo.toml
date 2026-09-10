@@ -16,6 +16,7 @@ serde_json = "1"
 sha2 = "0.10"
 base64 = "0.22"
 astroforge-core = { path = "../crates/astroforge-core" }
+astroforge-ai = { path = "../crates/astroforge-ai" }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

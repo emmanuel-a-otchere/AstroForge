@@ -30,6 +30,13 @@
   import EnhanceWorkspace from "./components/EnhanceWorkspace.svelte";
   import CompareWorkspace from "./components/CompareWorkspace.svelte";
   import ExportWorkspace from "./components/ExportWorkspace.svelte";
+  // CR-05 R1 — application-level destinations that previously
+  // rendered a generic placeholder route. Each ships with real
+  // content in this slice (Recipes, AI Models, Settings, Help).
+  import RecipesScreen from "./components/RecipesScreen.svelte";
+  import AiModelsScreen from "./components/AiModelsScreen.svelte";
+  import SettingsScreen from "./components/SettingsScreen.svelte";
+  import HelpScreen from "./components/HelpScreen.svelte";
   import { applicationNavTarget, studioViewport } from "./state/application";
   import { projectContext } from "./state/project-context";
   import { workspaceState } from "./state/workspace";
@@ -178,13 +185,21 @@
     <HomeScreen />
   {:else if $applicationNavTarget === "projects"}
     <ProjectsScreen onAction={handleProjectAction} />
+  {:else if $applicationNavTarget === "recipes"}
+    <RecipesScreen />
+  {:else if $applicationNavTarget === "ai-models"}
+    <AiModelsScreen />
+  {:else if $applicationNavTarget === "settings"}
+    <SettingsScreen />
+  {:else if $applicationNavTarget === "help"}
+    <HelpScreen />
   {:else}
     <section class="placeholder-screen font-body" aria-live="polite">
-      <p>This screen is a placeholder in CR-03 P4b.</p>
+      <p>This destination is not implemented.</p>
       <p class="placeholder-hint">
-        Available application screens in P4b: Home, Projects. Studio overlay
-        is active when a project is open. Other screens (Recipes, AI
-        Models, Settings, Help) ship in later phases.
+        Application screens in this build: Home, Projects, Recipes, AI
+        Models, Settings, Help. The Studio overlay is active when a
+        project is open.
       </p>
     </section>
   {/if}

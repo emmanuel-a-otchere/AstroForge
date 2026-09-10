@@ -17,9 +17,17 @@
 // recent CR-05 plan's `StageExecutionSummary` rows so the
 // `stageExecutions` store is warm the moment a project opens,
 // without waiting for the user to navigate to Process.
+//
+// CR-05 R2 — `import / analyze / review / export` checklist
+// states are no longer hard-coded `pending`. They come from
+// `projectOverview(projectId)` (the `project_overview` Tauri
+// command) which derives the booleans from the durable event
+// log + per-table fallbacks. The previous derivation in this
+// file is preserved for the `process` stage, which still uses
+// the CR-05 plan/legacy-run path.
 
-import { derived, writable } from "svelte/store";
-import type { PipelineRunSummary, ProjectSummary } from "../lib/astroforge-api";
+import { derived, get, writable } from "svelte/store";
+import type { PipelineRunSummary, ProjectSummary, ProjectOverview } from "../lib/astroforge-api";
 import type { StageExecutionSummary } from "../lib/astroforge-api";
 import * as api from "../lib/astroforge-api";
 import { activePlan, stageExecutions } from "../lib/pipeline-plan-store";
@@ -32,6 +40,15 @@ interface WorkspaceState {
   runs: PipelineRunSummary[];
   loading: boolean;
   error: string | null;
+  /**
+   * R2: server-derived overview booleans. `null` while the IPC
+   * call is in flight or when running outside Tauri (browser
+   * dev mode). When `null`, the Overview shows the existing
+   * CR-05 P4 fallback so the checklist still works.
+   */
+  overview: ProjectOverview | null;
+  overviewLoading: boolean;
+  overviewError: string | null;
 }
 
 const initial: WorkspaceState = {
@@ -39,6 +56,9 @@ const initial: WorkspaceState = {
   runs: [],
   loading: false,
   error: null,
+  overview: null,
+  overviewLoading: false,
+  overviewError: null,
 };
 
 const internal = writable<WorkspaceState>(initial);
@@ -50,9 +70,10 @@ export const workspaceState = {
     internal.update((s) => ({ ...s, project, loading: true, error: null }));
     try {
       const runs = await api.pipelineRunList(project.project_id);
-      internal.set({ project, runs, loading: false, error: null });
+      internal.set({ ...initial, project, runs, loading: false, error: null });
     } catch (e) {
       internal.set({
+        ...initial,
         project,
         runs: [],
         loading: false,
@@ -65,6 +86,15 @@ export const workspaceState = {
     // breaks if this fails). Fire-and-forget so `load` does
     // not block the store transition.
     void refreshMostRecentPlanStageExecutions(project.project_id);
+    // CR-05 R2 — load the truthful project overview.
+    void refreshProjectOverview(project.project_id);
+  },
+  /** R2: refresh just the project overview (used after a
+   *  successful apply, export, or analysis event). */
+  async refreshOverview(): Promise<void> {
+    const current = get(internal);
+    if (!current.project) return;
+    await refreshProjectOverview(current.project.project_id);
   },
   reset() {
     internal.set(initial);
@@ -94,10 +124,45 @@ async function refreshMostRecentPlanStageExecutions(
   }
 }
 
-/** Status for each stage of the §8 checklist. P4 derives the
- *  'process' stage from the most recent pipeline run. Import /
- *  Analyze / Review / Export are still placeholders pending P5
- *  + a real source-asset event log. */
+/// CR-05 R2 — fetch the truthful project overview. On success,
+/// the five checklist booleans are stored on `workspaceState`.
+/// On failure (Tauri unavailable in browser dev, project
+/// removed, etc.) the failure is recorded but the existing
+/// `process` derivation still works — the Overview renders
+/// the server-derived booleans when present and the CR-05 P4
+/// fallback otherwise.
+async function refreshProjectOverview(projectId: string): Promise<void> {
+  internal.update((s) => ({ ...s, overviewLoading: true, overviewError: null }));
+  try {
+    const overview = await api.projectOverview(projectId);
+    internal.update((s) => ({
+      ...s,
+      overview,
+      overviewLoading: false,
+      overviewError: null,
+    }));
+  } catch (e) {
+    internal.update((s) => ({
+      ...s,
+      overview: null,
+      overviewLoading: false,
+      overviewError: e instanceof Error ? e.message : String(e),
+    }));
+  }
+}
+
+/** Status for each stage of the §8 checklist. R2 derivation:
+ *  - `import` → `overview.imported` (any source asset on the
+ *    project's sessions, OR a `SourceImported` event)
+ *  - `analyze` → `overview.analyzed` (`AnalysisCompleted` event)
+ *  - `process` → unchanged from CR-05 P4 (CR-05 plan/legacy runs)
+ *  - `review` → `overview.versioned` (`VersionCreated` event)
+ *  - `export` → `overview.exported` (`ExportCreated` event)
+ *
+ *  When the overview is not yet loaded (loading or errored),
+ *  the derivation falls back to `pending` so the checklist
+ *  doesn't show a false "complete" on a fresh project before
+ *  the IPC resolves. */
 export const stageStatuses = derived(
   [internal, activePlan, stageExecutions],
   ([$s, $plan, $executions]): Record<
@@ -114,12 +179,15 @@ export const stageStatuses = derived(
       $plan !== null
         ? computeProcessStatusFromPlan($plan.stages, $executions[$plan.plan_id] ?? [])
         : computeProcessStatusFromLegacyRuns($s.runs);
+
+    const o = $s.overview;
+    const ready = o !== null;
     return {
-      import: "pending",
-      analyze: "pending",
+      import: ready && o!.imported ? "complete" : "pending",
+      analyze: ready && o!.analyzed ? "complete" : "pending",
       process: processStatus,
-      review: "pending",
-      export: "pending",
+      review: ready && o!.versioned ? "complete" : "pending",
+      export: ready && o!.exported ? "complete" : "pending",
     };
   },
 );

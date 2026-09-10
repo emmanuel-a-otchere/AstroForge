@@ -14,7 +14,7 @@
 -->
 <script lang="ts">
   import { activeProject } from "../state/project-context";
-  import { stageStatuses } from "../state/workspace";
+  import { stageStatuses, workspaceState } from "../state/workspace";
   import VersionTimeline from "./VersionTimeline.svelte";
 
   interface ChecklistStage {
@@ -50,15 +50,56 @@
       description: "At least one image version exported.",
     },
   ];
+
+  // R2 — surface the server-derived overview booleans. When the
+  // IPC layer is unavailable (browser dev mode) or still
+  // resolving, the checklist keeps the existing CR-05 P4
+  // "pending" fallback so the Overview never lies.
+  $: overview = $workspaceState.overview;
+  $: overviewLoading = $workspaceState.overviewLoading;
+  $: overviewError = $workspaceState.overviewError;
+
+  function detailFor(id: ChecklistStage["id"]): string {
+    if (!overview) {
+      return "Awaiting project state…";
+    }
+    if (overviewLoading) {
+      return "Loading…";
+    }
+    if (overviewError) {
+      return "Overview unavailable: " + overviewError;
+    }
+    switch (id) {
+      case "import":
+        return overview.imported
+          ? "Source assets registered on the project."
+          : "No source assets yet. Import a folder to begin.";
+      case "analyze":
+        return overview.analyzed
+          ? "Session analysis complete."
+          : "No analysis event recorded yet.";
+      case "review":
+        return overview.versioned
+          ? "A final image version is recorded."
+          : "No image version recorded yet.";
+      case "export":
+        return overview.exported
+          ? "An export event is recorded."
+          : "No export recorded yet.";
+      case "process":
+        // process status comes from the runner; the row below
+        // already shows the existing icon. No extra detail here.
+        return "";
+    }
+  }
 </script>
 
 <section class="overview" aria-labelledby="overview-title">
   <header class="overview-header">
     <h1 id="overview-title" class="font-display">Project Overview</h1>
     <p class="overview-subtitle font-body">
-      Track where the project is in the pipeline. P3 ships the
-      checklist; P4 wires real stage status; P5 wires the image
-      version timeline and AI recommendations.
+      Track where the project is in the pipeline. Status is derived from
+      the durable project store (event log + per-table fallbacks).
     </p>
   </header>
 
@@ -79,6 +120,9 @@
         <div class="step-body">
           <h2 class="step-title font-display">{stage.label}</h2>
           <p class="step-description font-body">{stage.description}</p>
+          <p class="step-detail font-body" data-stage={stage.id}>
+            {detailFor(stage.id)}
+          </p>
         </div>
         <div class="step-state" aria-label="Status: {$stageStatuses[stage.id]}">
           {#if $stageStatuses[stage.id] === "complete"}
@@ -101,10 +145,19 @@
 
   <footer class="overview-footer">
     <p class="hint font-body">
-      The Overview reflects the latest pipeline run and image version.
-      Real-time stage status lights up in P4 alongside the Process
-      workspace.
+      The Overview reflects the durable project state. The "process" stage
+      tracks the active CR-05 plan; the other four stages track the project
+      event log. A manual refresh re-queries the durable state.
     </p>
+    <button
+      type="button"
+      class="refresh-cta font-body"
+      onclick={() => workspaceState.refreshOverview()}
+      disabled={overviewLoading}
+    >
+      <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+      Refresh overview
+    </button>
   </footer>
 
   <section class="timeline-section" aria-labelledby="timeline-title">

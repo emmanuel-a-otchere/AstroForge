@@ -651,6 +651,8 @@ fn main() {
             commands_project::pipeline_run_get,
             commands_project::pipeline_run_list_stages,
             commands_project::pipeline_run_find_interrupted,
+            // CR-05 R2 — truthful project-level checklist state.
+            commands_project::project_overview,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

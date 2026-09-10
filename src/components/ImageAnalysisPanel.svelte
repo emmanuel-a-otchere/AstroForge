@@ -25,7 +25,8 @@
   visible.
 -->
 <script lang="ts">
-  import { aiEnhancementStore } from "../state/ai-enhancement";
+  import { aiEnhancementStore, generateRecommendationsFor } from "../state/ai-enhancement";
+  import RecommendationList from "./RecommendationList.svelte";
 
   interface ObservationJson {
     name: string;
@@ -67,6 +68,21 @@
   }
 
   $: report = $aiEnhancementStore.analysis as ImageAnalysisJson | null;
+  $: imageVersionId = report?.image_version_id ?? "";
+
+  async function onGenerateRecommendations(): Promise<void> {
+    if (!imageVersionId) return;
+    try {
+      await generateRecommendationsFor({
+        project_id: "",
+        image_version_id: imageVersionId,
+      });
+    } catch (err) {
+      // The store records the error; the rail renders it
+      // inline via the existing error state.
+      console.error("generateRecommendationsFor failed", err);
+    }
+  }
 </script>
 
 <section class="image-analysis-panel" aria-label="Image analysis">
@@ -127,12 +143,18 @@
     </table>
 
     <aside class="rail">
-      <h4>Recommendations</h4>
-      <p class="placeholder">
-        Land in P3 — the recommendation engine translates
-        these observations into a ranked list of
-        enhancements with rationale + resource estimates.
-      </p>
+      <div class="rail-header">
+        <h4>Recommendations</h4>
+        <button
+          type="button"
+          class="generate-button"
+          on:click={onGenerateRecommendations}
+          disabled={!imageVersionId || $aiEnhancementStore.loading}
+        >
+          Generate
+        </button>
+      </div>
+      <RecommendationList />
     </aside>
   {/if}
 </section>
@@ -245,6 +267,27 @@
   }
   .rail h4 {
     margin: 0 0 var(--sp-xs) 0;
+  }
+  .rail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-sm);
+    margin: 0 0 var(--sp-xs) 0;
+  }
+  .generate-button {
+    padding: var(--sp-xs) var(--sp-sm);
+    background: var(--primary);
+    color: var(--on-primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .generate-button:disabled {
+    background: var(--surface-container-high);
+    color: var(--on-surface-variant);
+    cursor: not-allowed;
   }
   .placeholder {
     margin: 0;

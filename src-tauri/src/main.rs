@@ -676,6 +676,10 @@ fn main() {
             // analyzer over the supplied pixel buffer and
             // persists the report to `image_analyses`.
             commands_ai_enhancement::analyze_image,
+            // CR-06 P3 — recommendation engine. Reads the
+            // latest analysis, runs the rules, persists
+            // `ai_recommendations`, and returns the report.
+            commands_ai_enhancement::generate_ai_recommendations,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

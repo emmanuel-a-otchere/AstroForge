@@ -229,6 +229,21 @@ export const analyzeImage = (
   request: AnalyzeImageRequest,
 ): Promise<unknown> => invoke("analyze_image", { request });
 
+export interface GenerateRecommendationsRequest {
+  project_id: string;
+  image_version_id: string;
+}
+
+export interface GenerateRecommendationsResponse {
+  report_json: string;
+  recommendations: { items: unknown[] };
+}
+
+export const generateAiRecommendations = (
+  request: GenerateRecommendationsRequest,
+): Promise<GenerateRecommendationsResponse> =>
+  invoke("generate_ai_recommendations", { request }) as Promise<GenerateRecommendationsResponse>;
+
 export const aiOperationGet = (
   operationId: string,
 ): Promise<AiOperationJson | null> =>

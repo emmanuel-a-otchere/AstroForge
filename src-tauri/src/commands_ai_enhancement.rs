@@ -25,6 +25,7 @@ use crate::commands_project::lock_err;
 use crate::domain_store::DomainStore;
 use crate::image::F32Image;
 use crate::image_analysis;
+use astroforge_ai::recommendations as ai_recommendations;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -273,4 +274,98 @@ fn new_id_suffix() -> String {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
     format!("{ns:x}")
+}
+
+/// CR-06 P3 — request payload for `generate_ai_recommendations`.
+/// The frontend supplies the Image Version id; the command
+/// reads the latest `image_analyses` row for that version,
+/// runs the recommendation engine, persists the resulting
+/// `AiRecommendation` rows, and returns the full report as
+/// JSON for the Studio panel.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenerateRecommendationsRequest {
+    pub project_id: String,
+    pub image_version_id: String,
+}
+
+/// CR-06 P3 — response: the engine output as JSON, plus the
+/// list of persisted `AiRecommendation` rows. The frontend
+/// renders the report directly; the list is the same data
+/// surfaced via `ai_recommendation_list_for_version`, so
+/// callers can also read it back through that command on a
+/// later refresh.
+#[derive(Debug, Clone, Serialize)]
+pub struct GenerateRecommendationsResponse {
+    pub report_json: String,
+    pub recommendations: AiEnhancementListResponse<serde_json::Value>,
+}
+
+/// CR-06 P3 — run the recommendation engine over the
+/// latest `image_analyses` row for an Image Version,
+/// persist the resulting `AiRecommendation` rows, and
+/// return the report.
+///
+/// The engine is deterministic for a given analysis, so
+/// re-running on the same input is idempotent
+/// (`INSERT OR REPLACE` keeps the row count stable).
+/// When no analysis exists for the Image Version, the
+/// command returns an empty report rather than an error
+/// — the UI surfaces "Analyze the image first" in that
+/// state and the recommendation rail stays empty until
+/// the user runs `analyze_image`.
+#[tauri::command]
+pub fn generate_ai_recommendations(
+    request: GenerateRecommendationsRequest,
+) -> Result<GenerateRecommendationsResponse, String> {
+    let GenerateRecommendationsRequest {
+        project_id,
+        image_version_id,
+    } = request;
+    let project_id = if project_id.is_empty() {
+        // Older callers may not supply a project id; the
+        // engine needs a non-empty value to use in the
+        // recommendation row's `project_id` column. Fall
+        // back to a placeholder so the row still persists
+        // — the UI never renders this string.
+        "unscoped".to_string()
+    } else {
+        project_id
+    };
+    let report_json = with_store(|s| {
+        let analysis_row = s
+            .latest_image_analysis_for_version(&image_version_id)
+            .map_err(|e| e.to_string())?;
+        let Some(row) = analysis_row else {
+            return Ok(String::new());
+        };
+        let report = crate::image_analysis::report::ImageAnalysisReport::from_json(&row.profile_json)
+            .map_err(|e| format!("analysis profile malformed: {e}"))?;
+        let engine_report = ai_recommendations::analyze(&report, &project_id);
+        let out_json = engine_report.to_json().map_err(|e| e.to_string())?;
+        let rows = ai_recommendations::flatten_for_store(&engine_report);
+        for r in &rows {
+            s.upsert_ai_recommendation(r).map_err(|e| e.to_string())?;
+        }
+        Ok(out_json)
+    })?;
+    if report_json.is_empty() {
+        return Ok(GenerateRecommendationsResponse {
+            report_json: String::new(),
+            recommendations: AiEnhancementListResponse { items: vec![] },
+        });
+    }
+    let stored = with_store(|s| {
+        let rows = s
+            .list_ai_recommendations_for_version(&image_version_id)
+            .map_err(|e| e.to_string())?;
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })?;
+    Ok(GenerateRecommendationsResponse {
+        report_json,
+        recommendations: stored,
+    })
 }

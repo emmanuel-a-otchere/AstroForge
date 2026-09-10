@@ -69,6 +69,23 @@
   let resourceError: string | null = null;
   let resourceLoading = false;
 
+  // R7 — presentational-only actions surface a clear, dismissable
+  // notice instead of `console.info` stubs. The two recovery
+  // actions (`adjustProcessing`, `contactSupport`) and the
+  // timeline-row click handler are placeholders for follow-up
+  // tranches (P6.1c, P6.3); the notice makes the gap visible
+  // rather than hiding it behind silent no-ops.
+  type NoticeKind = "adjustProcessing" | "contactSupport" | "timelineSelect";
+  let notice: { kind: NoticeKind; message: string } | null = null;
+
+  function showNotice(kind: NoticeKind, message: string) {
+    notice = { kind, message };
+  }
+
+  function dismissNotice() {
+    notice = null;
+  }
+
   // CR-05 P5 slice 4 (§27) — aggregate metrics for the Expert DAG view.
   // Refreshed whenever the active plan changes or a new stage completes.
   let processingMetrics: ProcessingMetricsDto | null = null;
@@ -156,18 +173,24 @@
   }
 
   function handleAdjustProcessing() {
-    // P6.1c — opens a tuning dialog wired to the recommendation
-    // engine. For now this is a placeholder so the button doesn't
-    // appear dead.
-    console.info(
-      "[ProcessingControls] adjustProcessing clicked — wiring in P6.1c",
+    // R7 — P6.1c: opens a tuning dialog wired to the
+    // recommendation engine. The follow-up tranche isn't
+    // landed yet; surface a clear notice rather than a
+    // silent no-op so the user knows the action is a
+    // placeholder.
+    showNotice(
+      "adjustProcessing",
+      "Adjust processing lands in the P6.1c follow-up tranche. The recovery panel's Retry and Skip actions are live today.",
     );
   }
 
   function handleContactSupport() {
-    // P6.1c — opens the support bundle flow (CR-07 territory).
-    console.info(
-      "[ProcessingControls] contactSupport clicked — wiring in P6.1c",
+    // R7 — P6.1c: opens the support bundle flow (CR-07
+    // territory). Surface a clear notice rather than a
+    // silent no-op.
+    showNotice(
+      "contactSupport",
+      "Support bundle flow lands in the P6.1c follow-up tranche. The recovery panel's Cancel action remains available.",
     );
   }
 
@@ -647,6 +670,30 @@
        internally (renders nothing). -->
   <StageCard metrics={processingMetrics} />
 
+  <!-- R7 — dismissable notice for presentational actions
+       (Adjust processing, Contact support, timeline reveal).
+       Rendered above the timeline so the user sees the gap
+       right after clicking. -->
+  {#if notice}
+    <aside
+      class="followup-notice font-body"
+      role="status"
+      aria-live="polite"
+      data-kind={notice.kind}
+    >
+      <span class="material-symbols-outlined" aria-hidden="true">info</span>
+      <p>{notice.message}</p>
+      <button
+        type="button"
+        class="dismiss"
+        on:click={dismissNotice}
+        aria-label="Dismiss notice"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
+    </aside>
+  {/if}
+
   <!-- CR-05 P6 slice 3 (§25) — per-stage processing timeline.
        Click a row to reveal the corresponding Image Version (the
        actual reveal wiring is downstream of P6.3; the panel
@@ -656,15 +703,15 @@
     <ProcessingTimeline
       events={processingTimeline?.events ?? []}
       onSelect={(versionId) => {
-        // §25 reproducibility invariant: clicking a timeline row
-        // reveals the Image Version it produced. The actual reveal
-        // (likely ImageViewer.focus(versionId) or a CR-02 §10
-        // branch-and-compare UI) lands downstream of P6.3 — for
-        // now we surface the version id so the user can correlate
-        // the click with the panel.
-        console.info(
-          "[ProcessingControls] timeline event selected",
-          versionId,
+        // R7 — P6.3: clicking a timeline row reveals the
+        // corresponding Image Version. The actual reveal
+        // wiring (ImageViewer.focus(versionId) or a branch-
+        // and-compare UI) lands downstream of P6.3. For now
+        // we surface a clear notice with the version id so
+        // the user can correlate the click with the panel.
+        showNotice(
+          "timelineSelect",
+          `Reveal for image version ${versionId} lands in the P6.3 follow-up tranche. The version id is now logged for reference.`,
         );
       }}
     />
@@ -1032,5 +1079,45 @@
     padding: var(--sp-xs) var(--sp-sm);
     border-radius: var(--radius-sm);
     font-size: 0.85rem;
+  }
+
+  /* R7 — follow-up notice. Same shape as the memory warning so
+     users learn one visual idiom for "informational, not a
+     failure". */
+  .followup-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-sm);
+    margin: 0;
+    color: var(--on-surface);
+    background: var(--surface-container-high);
+    border-left: 3px solid var(--primary);
+    padding: var(--sp-sm) var(--sp-md);
+    border-radius: var(--radius-md);
+  }
+
+  .followup-notice .material-symbols-outlined {
+    color: var(--primary);
+    flex: 0 0 auto;
+  }
+
+  .followup-notice p {
+    flex: 1 1 auto;
+    margin: 0;
+    font-size: 0.85rem;
+  }
+
+  .followup-notice .dismiss {
+    background: transparent;
+    border: none;
+    color: var(--on-surface-variant);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  .followup-notice .dismiss:hover {
+    background: var(--surface-container);
+    color: var(--on-surface);
   }
 </style>

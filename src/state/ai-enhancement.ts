@@ -22,10 +22,12 @@ import {
   aiMaskList,
   aiOperationListForStage,
   aiRecommendationListForVersion,
+  analyzeImage,
   enhancementPreviewListForOperation,
   enhancementStackListForSource,
   imageAnalysisLatest,
   imageRegionList,
+  type AnalyzeImageRequest,
 } from "../lib/astroforge-api";
 
 /**
@@ -165,6 +167,40 @@ export async function loadAiEnhancementFor(
 /** Reset the store back to its initial empty state. */
 export function resetAiEnhancement(): void {
   aiEnhancementStore.set(initial);
+}
+
+/**
+ * CR-06 P2 — run the analyzer over a pixel buffer and
+ * refresh the stored report. The pixel buffer is
+ * expected in `[0, 1]` row-major order. The function
+ * returns the persisted analysis id; the report JSON is
+ * also written to the store's `analysis` field.
+ */
+export async function analyzeImageVersion(
+  request: AnalyzeImageRequest,
+): Promise<string> {
+  aiEnhancementStore.update((s) => ({ ...s, loading: true, error: null }));
+  try {
+    const response = (await analyzeImage(request)) as {
+      analysis_id: string;
+      profile_json: string;
+    };
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      analysis: JSON.parse(response.profile_json),
+      loading: false,
+      error: null,
+    }));
+    return response.analysis_id;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      loading: false,
+      error: msg,
+    }));
+    throw e;
+  }
 }
 
 /**

@@ -181,13 +181,62 @@ export const imageVersionList = (
 // payload contracts. Consumers in P3+ will narrow these to
 // concrete types once the contracts land.
 
+export interface AnalyzeImageRequest {
+  imageVersionId: string;
+  width: number;
+  height: number;
+  channels: number;
+  /// Row-major pixel data in [0, 1] float values. The Rust
+  /// side reconstructs an `F32Image` from the dimensions +
+  /// data and runs the analyzer on it. P4 wires the
+  /// real read-artifact-and-analyze flow; P2 takes the
+  /// pixels over IPC so the analyzer is testable
+  /// end-to-end without a Tauri runtime.
+  pixels: number[];
+}
+
+export interface AiOperationJson {
+  operation_id: string;
+  stage_run_id: string;
+  model_id: string;
+  model_version: string;
+  model_hash?: string | null;
+  runtime?: string | null;
+  backend?: string | null;
+  precision?: string | null;
+  parameters_json?: string | null;
+  seed?: number | null;
+  deterministic: boolean;
+  safety_classification:
+    | "deterministic"
+    | "perceptual"
+    | "generative";
+  experimental: boolean;
+  input_artifact_id?: string | null;
+  output_artifact_id?: string | null;
+  engine_version?: string | null;
+  tile_configuration?: string | null;
+  resource_metrics?: string | null;
+}
+
+export interface AiOperationRecord extends AiOperationJson {
+  /// CR-06 P1 — round-trip the safety-classification
+  /// string in the same form as the IPC wire shape so
+  /// consumers can branch on it directly.
+}
+
+export const analyzeImage = (
+  request: AnalyzeImageRequest,
+): Promise<unknown> => invoke("analyze_image", { request });
+
 export const aiOperationGet = (
   operationId: string,
-): Promise<unknown> => invoke("ai_operation_get", { operationId });
+): Promise<AiOperationJson | null> =>
+  invoke("ai_operation_get", { operationId }) as Promise<AiOperationJson | null>;
 
 export const aiOperationListForStage = (
   stageRunId: string,
-): Promise<{ items: unknown[] }> =>
+): Promise<{ items: AiOperationJson[] }> =>
   invoke("ai_operation_list_for_stage", { stageRunId });
 
 export const imageAnalysisLatest = (

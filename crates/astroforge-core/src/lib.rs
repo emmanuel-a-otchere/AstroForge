@@ -23,6 +23,7 @@ pub mod export;
 pub mod fits;
 pub mod gallery;
 pub mod image;
+pub mod image_analysis;
 pub mod import_scan;
 pub mod ingest;
 pub mod mvp_pipeline;

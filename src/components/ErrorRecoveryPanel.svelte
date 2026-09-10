@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
    * CR-05 P6.1 — §28 Error and Recovery UX.
+   * CR-05 P6.1b — §9 Retry + Skip wiring.
    *
    * Renders the four-question template from CR-05 §28:
    *   1. What happened?       → header + `what_happened` body
@@ -8,16 +9,20 @@
    *   3. What can AstroForge do next? → suggested actions
    *   4. What can the user do?         → same actions, re-stated
    *
-   * Buttons emit semantic events via `on:retryOptimized`,
-   * `on:retry`, `on:adjustProcessing`, `on:skipStage`, `on:cancel`,
-   * `on:contactSupport`. Consumers (ProcessingControls) decide what
-   * each action means at runtime — the panel itself is dumb.
+   * Buttons dispatch semantic Svelte events via `createEventDispatcher`
+   * (retryOptimized / retry / adjustProcessing / skipStage / cancel /
+   * contactSupport). The parent (ProcessingControls) decides what
+   * each action means at runtime — for P6.1b, retryOptimized / retry
+   * call `retryStage()`, skipStage calls `skipStage()`, and cancel
+   * uses the existing cancel handle. The other two (adjustProcessing
+   * / contactSupport) remain presentational until P6.1c.
    *
    * Honest disclosure: the panel never re-derives or edits the
    * error message. The Rust runner (P6.1) populates `StageError`
    * with classification logic; this component is the presentational
    * mirror.
    */
+  import { createEventDispatcher } from "svelte";
   import type { StageErrorDto, SuggestedActionDto } from "../lib/astroforge-api";
 
   export let error: StageErrorDto;
@@ -25,28 +30,34 @@
    *  Falls back to the first word of `what_happened`. */
   export let stageLabel: string | null = null;
 
+  const dispatch = createEventDispatcher<{
+    retryOptimized: SuggestedActionDto;
+    retry: SuggestedActionDto;
+    adjustProcessing: SuggestedActionDto;
+    skipStage: SuggestedActionDto;
+    cancel: SuggestedActionDto;
+    contactSupport: SuggestedActionDto;
+  }>();
+
   function dispatchAction(action: SuggestedActionDto) {
     switch (action.kind) {
       case "retry_optimized":
-        // The actual retry with smaller tiles is implemented in a
-        // future slice (P6.1b). For now we surface the click so the
-        // UI knows the user picked it.
-        dispatchEvent(new CustomEvent("retryOptimized", { detail: action }));
+        dispatch("retryOptimized", action);
         break;
       case "retry":
-        dispatchEvent(new CustomEvent("retry", { detail: action }));
+        dispatch("retry", action);
         break;
       case "adjust_processing":
-        dispatchEvent(new CustomEvent("adjustProcessing", { detail: action }));
+        dispatch("adjustProcessing", action);
         break;
       case "skip_stage":
-        dispatchEvent(new CustomEvent("skipStage", { detail: action }));
+        dispatch("skipStage", action);
         break;
       case "cancel":
-        dispatchEvent(new CustomEvent("cancel", { detail: action }));
+        dispatch("cancel", action);
         break;
       case "contact_support":
-        dispatchEvent(new CustomEvent("contactSupport", { detail: action }));
+        dispatch("contactSupport", action);
         break;
     }
   }

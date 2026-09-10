@@ -621,3 +621,45 @@ export const getProcessingTimeline = (
   planId: string,
 ): Promise<ProcessingTimelineDto> =>
   invoke("get_processing_timeline", { planId });
+
+// ─── CR-05 P6 slice 1b (§9 Retry + Skip) ───────────────────────────
+
+/** §9 — UI-side retry variant. Mirrors the Rust `RetryKind`.
+ *  Today `optimized` and `as_is` produce the same runner behaviour;
+ *  the distinction is preserved at the IPC boundary for traceability
+ *  and so a future PR can wire real differentiation. */
+export type RetryKind = "optimized" | "as_is";
+
+/** §9 — UI payload for `retry_stage` / `skip_stage`. Mirrors
+ *  src-tauri::StageExecutionDto. */
+export interface StageExecutionDto {
+  stage_execution_id: string;
+  plan_id: string;
+  stage_id: string;
+  attempt: number;
+  status: string;
+  output_artifact_id: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  error_json: string | null;
+}
+
+/** §9 — `retry_stage(plan_id, stage_id, kind)`.
+ *  Re-dispatches a single stage that previously failed.
+ *  Returns the new exec row (attempt = prev + 1). */
+export const retryStage = (
+  planId: string,
+  stageId: string,
+  kind: RetryKind,
+): Promise<StageExecutionDto> =>
+  invoke("retry_stage", { planId, stageId, kind });
+
+/** §9 — `skip_stage(plan_id, stage_id)`.
+ *  Marks a stage's latest exec row as `skipped` and flips the
+ *  plan back to `Ready` so the user can Resume. Refuses on
+ *  required stages. */
+export const skipStage = (
+  planId: string,
+  stageId: string,
+): Promise<StageExecutionDto> =>
+  invoke("skip_stage", { planId, stageId });

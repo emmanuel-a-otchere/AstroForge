@@ -31,6 +31,9 @@
     getProcessingMetrics,
     getProcessingTimeline,
     readPreviewArtifact,
+    cancelPipelinePlan,
+    retryStage,
+    skipStage,
     stageExecutionBudget,
     type ExecutionBackend,
     type ExecutionBudget,
@@ -107,6 +110,75 @@
     } finally {
       processingTimelineLoading = false;
     }
+  }
+
+  // CR-05 P6.1b (§9) — ErrorRecoveryPanel action handlers. Each
+  // action triggers a backend call and refreshes the metrics
+  // + timeline so the UI reflects the new state. AdjustProcessing
+  // and ContactSupport remain presentational for now (no backend
+  // wiring yet — they'll land in P6.1c with the recommendation
+  // engine's tuning affordances).
+
+  /** Stage id of the currently-failed stage (from metrics). Used
+   *  as the target for retry_stage / skip_stage. */
+  $: failedStageId = processingMetrics?.latest_stage_id ?? null;
+
+  async function handleRetryOptimized() {
+    if (!failedStageId) return;
+    try {
+      await retryStage(planId, failedStageId, "optimized");
+      // Refresh so the recovery panel disappears (on success)
+      // or stays with the new error (on retry-failure).
+      await Promise.all([loadProcessingMetrics(), loadProcessingTimeline()]);
+    } catch (err) {
+      console.warn("[ProcessingControls] retryStage failed", err);
+    }
+  }
+
+  async function handleRetryAsIs() {
+    if (!failedStageId) return;
+    try {
+      await retryStage(planId, failedStageId, "as_is");
+      await Promise.all([loadProcessingMetrics(), loadProcessingTimeline()]);
+    } catch (err) {
+      console.warn("[ProcessingControls] retryStage (as_is) failed", err);
+    }
+  }
+
+  async function handleSkipStage() {
+    if (!failedStageId) return;
+    try {
+      await skipStage(planId, failedStageId);
+      await Promise.all([loadProcessingMetrics(), loadProcessingTimeline()]);
+    } catch (err) {
+      console.warn("[ProcessingControls] skipStage failed", err);
+    }
+  }
+
+  function handleAdjustProcessing() {
+    // P6.1c — opens a tuning dialog wired to the recommendation
+    // engine. For now this is a placeholder so the button doesn't
+    // appear dead.
+    console.info(
+      "[ProcessingControls] adjustProcessing clicked — wiring in P6.1c",
+    );
+  }
+
+  function handleContactSupport() {
+    // P6.1c — opens the support bundle flow (CR-07 territory).
+    console.info(
+      "[ProcessingControls] contactSupport clicked — wiring in P6.1c",
+    );
+  }
+
+  function handleCancel() {
+    // Cancel the whole plan via the existing cancel command. The
+    // cancel handle is owned by the backend (PipelinePlanState);
+    // the IPC flips the same atomic flag the runner checks
+    // between stages.
+    cancelPipelinePlan(planId).catch((err: unknown) => {
+      console.warn("[ProcessingControls] cancelPipelinePlan failed", err);
+    });
   }
 
   async function loadResourceSnapshot() {
@@ -561,6 +633,12 @@
     <ErrorRecoveryPanel
       error={processingMetrics.latest_stage_error}
       stageLabel={processingMetrics.latest_stage_type ?? null}
+      on:retryOptimized={handleRetryOptimized}
+      on:retry={handleRetryAsIs}
+      on:skipStage={handleSkipStage}
+      on:cancel={handleCancel}
+      on:adjustProcessing={handleAdjustProcessing}
+      on:contactSupport={handleContactSupport}
     />
   {/if}
 

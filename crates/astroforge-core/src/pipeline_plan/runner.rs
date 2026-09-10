@@ -57,6 +57,16 @@ pub enum RunnerError {
     NotStartable { current: PipelinePlanStatus },
     #[error("plan is not in a resumable state (current: {current:?})")]
     NotResumable { current: PipelinePlanStatus },
+    /// CR-05 P6.1b (§9 Retry) — the plan isn't in a state that can
+    /// accept per-stage retry/skip. Today: only `Failed`. Future
+    /// PRs may widen this to `Cancelled` and `Paused` after the
+    /// runner gains partial-restart semantics.
+    #[error("plan is not retryable (current: {current:?})")]
+    NotRetryable { current: PipelinePlanStatus },
+    /// CR-05 P6.1b (§9) — the named stage isn't on the plan, or
+    /// has no failed execution to retry / no skippable execution.
+    #[error("stage not retryable: {0}")]
+    StageNotRetryable(String),
     #[error("stage execution failed: {0}")]
     StageFailed(String),
     #[error("store error: {0}")]
@@ -73,6 +83,26 @@ pub enum RunOutcome {
     /// the plan's persisted status is `Paused` and the next stage
     /// remains unprocessed.
     Paused,
+}
+
+/// CR-05 P6.1b (§9 Retry) — variant of a per-stage retry.
+///
+/// Today `Optimized` and `AsIs` produce identical behaviour at
+/// the runner level — the §22 budget derivation is already
+/// failure-aware and re-runs of the same stage get a fresh
+/// budget either way. The distinction is preserved at the IPC
+/// boundary so §28's panel can show *which* retry the user
+/// chose and so a future PR can wire real differentiation (e.g.
+/// `Optimized` could request a smaller tile size, `AsIs` could
+/// reuse the same parameters verbatim).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryKind {
+    /// §28 `RetryOptimized` — re-run with the runner's best-effort
+    /// budget reduction. Today's runner already does this on
+    /// every retry; the kind is recorded for traceability.
+    Optimized,
+    /// §28 `Retry` — re-run with the same parameters verbatim.
+    AsIs,
 }
 
 /// CR-05 P2 slice 1 — a single checkpoint after a completed stage.
@@ -284,8 +314,16 @@ impl PipelineRunner {
 
             // CR-05 P2 — per-stage execution row.
             let started_at_unix_ms = now_unix_ms();
-            let stage_execution_id =
-                format!("exec_{}_{}_{}", plan_id, stage.stage_id, started_at_unix_ms);
+            // CR-05 P6.1b — include `attempt` in the exec id so retries
+            // can never collide with the prior failed row when two
+            // timestamps happen to land in the same millisecond. A
+            // flaky test surfaced this race: with no `attempt` in the
+            // id and same-ms start times, INSERT OR REPLACE silently
+            // clobbered the failed row, making retry look like a no-op.
+            let stage_execution_id = format!(
+                "exec_{}_{}_a{}_{}",
+                plan_id, stage.stage_id, 1, started_at_unix_ms
+            );
             let mut exec = StageExecution {
                 stage_execution_id: stage_execution_id.clone(),
                 plan_id: plan_id.into(),
@@ -443,6 +481,251 @@ impl PipelineRunner {
                 .update_plan_status(plan_id, PipelinePlanStatus::Completed)?;
             Ok(RunOutcome::Completed)
         }
+    }
+
+    /// CR-05 P6.1b (§9 Retry) — re-dispatch a single stage.
+    ///
+    /// Inserts a new `StageExecution` row with `attempt = prev + 1`,
+    /// runs the handler via the same dispatch path that
+    /// `run_loop` uses, and updates the row with the outcome.
+    /// On success, the plan flips from `Failed` to `Ready` so the
+    /// existing Resume button (`runner.resume`) takes over the
+    /// remaining stages. On failure, the plan stays `Failed` and
+    /// the new exec row carries the structured §28 error.
+    ///
+    /// `kind` is the suggested-action kind from §28. Today
+    /// `Optimized` and `AsIs` produce the same behaviour — the
+    /// runner already derives a fresh §22 budget per attempt
+    /// (smaller after each failure isn't required by the spec).
+    /// The kind is recorded on the new exec row for traceability
+    /// so the UI can show *which* retry variant the user chose.
+    pub fn retry_stage(
+        &self,
+        plan_id: &str,
+        stage_id: &str,
+        kind: RetryKind,
+    ) -> Result<StageExecution, RunnerError> {
+        let plan = self.store.load_plan(plan_id).map_err(|e| match e {
+            PipelinePlanStoreError::NotFound(_) => RunnerError::PlanNotFound(plan_id.into()),
+            other => RunnerError::Store(other),
+        })?;
+
+        // Per §9 + the ErrorRecoveryPanel UX, retry only makes sense
+        // after a failure. Allowing it from `Ready` would re-run a
+        // completed stage and produce a duplicate Image Version;
+        // the right tool for that is §9's `Re-run` operation (P6.1c).
+        if plan.status != PipelinePlanStatus::Failed {
+            return Err(RunnerError::NotRetryable {
+                current: plan.status,
+            });
+        }
+
+        let stage = plan
+            .stages
+            .iter()
+            .find(|s| s.stage_id == stage_id)
+            .ok_or_else(|| RunnerError::StageNotRetryable(stage_id.into()))?
+            .clone();
+
+        // Find the prior execution for this stage. We retry from
+        // the latest failed exec (or, if none failed but the user
+        // is retrying from a partial state, the latest exec of any
+        // status). Attempt = max(prior.attempt) + 1, defaulting to 1.
+        let prior_attempt = self
+            .store
+            .list_stage_executions_for_plan(plan_id)
+            .ok()
+            .and_then(|execs| {
+                execs
+                    .iter()
+                    .filter(|e| e.stage_id == stage_id)
+                    .map(|e| e.attempt)
+                    .max()
+            })
+            .unwrap_or(0);
+
+        let new_attempt = prior_attempt.saturating_add(1);
+
+        let started_at_unix_ms = now_unix_ms();
+        // CR-05 P6.1b — include `attempt` in the exec id so retries
+        // can never collide with the prior failed row when two
+        // timestamps happen to land in the same millisecond. A flaky
+        // test surfaced this race: with no `attempt` in the id and
+        // same-ms start times, INSERT OR REPLACE silently clobbered
+        // the failed row, making retry look like a no-op. Mirrors
+        // `run_loop`'s format.
+        let stage_execution_id = format!(
+            "exec_{}_{}_a{}_{}",
+            plan_id, stage.stage_id, new_attempt, started_at_unix_ms
+        );
+
+        let mut exec = StageExecution {
+            stage_execution_id: stage_execution_id.clone(),
+            plan_id: plan_id.into(),
+            stage_id: stage.stage_id.clone(),
+            attempt: new_attempt,
+            status: "running".into(),
+            input_version_id: None,
+            output_artifact_id: None,
+            parameters_json: stage.parameters_json.clone(),
+            parameters_hash: None,
+            started_at: Some(format!("unix_ms:{}", started_at_unix_ms)),
+            completed_at: None,
+            resource_usage_json: None,
+            error_json: None,
+            metric_snapshot_json: None,
+            ai_label_json: None,
+        };
+
+        // §23 — derive the AI boundary label from stage_type at
+        // insertion time. Mirrors `run_loop` so the StageCard
+        // can render the badge on a retried stage.
+        let ai_label = crate::ai_boundary::AiBoundaryLabel::for_stage_type(&stage.stage_type);
+        exec.ai_label_json = serde_json::to_string(&ai_label).ok();
+
+        // Record the user's chosen retry kind for traceability.
+        // Today the runner doesn't branch on kind, but §28 asks
+        // the panel to surface which variant the user picked.
+        // We stash it in parameters_json as a side-channel since
+        // StageExecution has no dedicated field for it. P6.1c may
+        // promote this to a structured column.
+        let kind_label = match kind {
+            RetryKind::Optimized => "retry_optimized",
+            RetryKind::AsIs => "retry_as_is",
+        };
+        // Don't clobber an existing parameters_json — only append
+        // a `_retry_kind` marker so the row still round-trips with
+        // the original parameters intact.
+        let params_json = exec
+            .parameters_json
+            .clone()
+            .map(|p| format!(r#"{{"parameters":{p},"_retry_kind":"{kind_label}"}}"#))
+            .unwrap_or_else(|| format!(r#"{{"_retry_kind":"{kind_label}"}}"#));
+        exec.parameters_json = Some(params_json);
+
+        // Dispatch via the same handler-registry path the loop uses.
+        // Failures propagate as RunnerError::StageFailed; success
+        // populates the row and flips the plan status.
+        let dispatch_result = dispatch_stage_via_registry(self, &stage, &exec);
+        match dispatch_result {
+            Ok(output) => {
+                exec.status = "completed".into();
+                exec.completed_at = Some(format!("unix_ms:{}", now_unix_ms()));
+                // P5 s2 — record the per-stage execution budget.
+                let budget = self.stage_budget_for(&stage);
+                if let Ok(json) = serde_json::to_string(&budget) {
+                    exec.resource_usage_json = Some(json);
+                }
+                // P3 s1 — compute and persist deterministic metrics.
+                if let Some(image) = output.image.as_ref() {
+                    let snapshot = crate::quality::compute_metrics(image);
+                    if let Ok(json) = snapshot.to_json() {
+                        exec.metric_snapshot_json = Some(json);
+                    }
+                    // P3 s2 — feed the recommendation engine.
+                    if let Some(engine) = self.engine.as_ref() {
+                        let recs = engine.evaluate(&exec, &snapshot);
+                        let _ = self.store.insert_recommendations(&recs);
+                    }
+                }
+                self.store.insert_stage_execution(&exec)?;
+                // Successful retry → plan goes back to Ready so the
+                // user can Resume to continue remaining stages. This
+                // matches the §9 UX: "Retry failed stages" then
+                // "Resume from the latest valid checkpoint".
+                self.store
+                    .update_plan_status(plan_id, PipelinePlanStatus::Ready)?;
+                Ok(exec)
+            }
+            Err(msg) => {
+                exec.status = "failed".into();
+                let prior_stage_count = self
+                    .store
+                    .list_stage_executions_for_plan(plan_id)
+                    .map(|execs| execs.iter().filter(|e| e.status == "completed").count() as u32)
+                    .unwrap_or(0);
+                let structured = crate::stage_error::StageError::from_failure(
+                    &stage.stage_type,
+                    prior_stage_count,
+                    &msg,
+                );
+                exec.error_json = serde_json::to_string(&structured).ok();
+                exec.completed_at = Some(format!("unix_ms:{}", now_unix_ms()));
+                self.store.insert_stage_execution(&exec)?;
+                // Plan stays Failed — the user can retry again or
+                // skip the stage.
+                self.store
+                    .update_plan_status(plan_id, PipelinePlanStatus::Failed)?;
+                Err(RunnerError::StageFailed(msg))
+            }
+        }
+    }
+
+    /// CR-05 P6.1b (§9 Skip) — mark a stage as skipped.
+    ///
+    /// Sets the latest `StageExecution` for the named stage to
+    /// `skipped` and flips the plan to `Ready` so the user can
+    /// Resume to continue with the next stage. No handler is
+    /// called — skip is a deliberate user choice to bypass the
+    /// stage entirely.
+    ///
+    /// Per §9, skip is only safe for `required: false` stages.
+    /// Refusing to skip a required stage prevents the user from
+    /// accidentally producing a malformed pipeline. The UI surfaces
+    /// this via the `SkipStage` button being disabled in the
+    /// `ErrorRecoveryPanel` for required stages.
+    pub fn skip_stage(&self, plan_id: &str, stage_id: &str) -> Result<StageExecution, RunnerError> {
+        let plan = self.store.load_plan(plan_id).map_err(|e| match e {
+            PipelinePlanStoreError::NotFound(_) => RunnerError::PlanNotFound(plan_id.into()),
+            other => RunnerError::Store(other),
+        })?;
+
+        if plan.status != PipelinePlanStatus::Failed {
+            return Err(RunnerError::NotRetryable {
+                current: plan.status,
+            });
+        }
+
+        let stage = plan
+            .stages
+            .iter()
+            .find(|s| s.stage_id == stage_id)
+            .ok_or_else(|| RunnerError::StageNotRetryable(stage_id.into()))?
+            .clone();
+
+        // §9 — skip only for optional stages. Required stages
+        // shouldn't be skipped because the pipeline relies on them
+        // (e.g. calibration before registration).
+        if stage.required {
+            return Err(RunnerError::StageNotRetryable(format!(
+                "{stage_id} is required and cannot be skipped"
+            )));
+        }
+
+        let execs = self.store.list_stage_executions_for_plan(plan_id)?;
+        let latest = execs
+            .iter()
+            .filter(|e| e.stage_id == stage_id)
+            .max_by_key(|e| e.attempt)
+            .ok_or_else(|| RunnerError::StageNotRetryable(stage_id.into()))?
+            .clone();
+
+        // We need to update the row in place. The store has
+        // `insert_stage_execution` (upsert); use it to overwrite
+        // the latest attempt's status.
+        let mut updated = latest;
+        updated.status = "skipped".into();
+        updated.completed_at = Some(format!("unix_ms:{}", now_unix_ms()));
+        // Skip is a deliberate choice — clear any prior error so
+        // the recovery panel disappears and the timeline shows the
+        // row as `skipped` not `failed`.
+        updated.error_json = None;
+        self.store.insert_stage_execution(&updated)?;
+
+        // Plan → Ready. User can Resume to run the next stage.
+        self.store
+            .update_plan_status(plan_id, PipelinePlanStatus::Ready)?;
+        Ok(updated)
     }
 
     /// CR-05 P2 slice 1 — append a checkpoint row to the stage_runs
@@ -1228,5 +1511,211 @@ mod tests {
             Some("astroforge_denoise_v1")
         );
         assert_eq!(denoise_label.seed, Some(0));
+    }
+
+    /// CR-05 P6.1b (§9 Retry) — retry a failed stage, plan flips to Ready.
+    ///
+    /// Setup: register FailingHandler on `stack`. The plan runs
+    /// through calibrate/debayer/etc. (all no-op via the empty
+    /// default registry), then fails on stack. `retry_stage` on
+    /// the failing stage produces attempt=2 status=completed and
+    /// flips the plan back to Ready (so Resume picks up).
+    #[test]
+    fn retry_stage_replaces_failed_row_with_completed_attempt_two() {
+        use crate::domain_store::DomainStore;
+        use crate::pipeline_plan::dispatch::{FailingHandler, HandlerRegistry};
+        use std::path::PathBuf;
+
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let plan_id = plan_in_store(&store);
+
+        // The plan has stage_ids of the form `stage_<hash>_<idx>`.
+        // Find the actual id for the stack stage.
+        let plan = store.load_plan(&plan_id).unwrap();
+        let stack_stage = plan
+            .stages
+            .iter()
+            .find(|s| s.stage_type == "stack")
+            .expect("deep_sky_osc_balanced includes a stack stage");
+        let stack_id = stack_stage.stage_id.clone();
+
+        // Replace the registry so stack fails on first call, succeeds
+        // on second. The FailingHandler toggles via an Arc<AtomicBool>.
+        let fails_first = Arc::new(AtomicBool::new(true));
+        let handler = FailingHandler {
+            fails_first: fails_first.clone(),
+        };
+        let mut registry = HandlerRegistry::new();
+        registry.insert(
+            "stack",
+            Arc::new(handler) as Arc<dyn crate::pipeline_plan::dispatch::StageHandler>,
+        );
+        let domain_store = Arc::new(DomainStore::new(&PathBuf::from(":memory:")).unwrap());
+        let runner =
+            PipelineRunner::with_handlers(store.clone(), Arc::new(registry), Some(domain_store));
+
+        // First start — fails on stack.
+        let _ = runner.start(&plan_id);
+        let loaded = store.load_plan(&plan_id).unwrap();
+        assert_eq!(loaded.status, PipelinePlanStatus::Failed);
+
+        // Retry stage.
+        let exec = runner
+            .retry_stage(&plan_id, &stack_id, RetryKind::AsIs)
+            .expect("retry should succeed on second attempt");
+        assert_eq!(exec.attempt, 2);
+        assert_eq!(exec.status, "completed");
+
+        // Plan → Ready (Resume button works).
+        let loaded = store.load_plan(&plan_id).unwrap();
+        assert_eq!(loaded.status, PipelinePlanStatus::Ready);
+
+        // Two stage_executions rows now: attempt=1 failed,
+        // attempt=2 completed.
+        let execs = store.list_stage_executions_for_plan(&plan_id).unwrap();
+        let stack_execs: Vec<_> = execs.iter().filter(|e| e.stage_id == stack_id).collect();
+        assert_eq!(stack_execs.len(), 2);
+        assert_eq!(stack_execs[0].attempt, 1);
+        assert_eq!(stack_execs[0].status, "failed");
+        assert_eq!(stack_execs[1].attempt, 2);
+        assert_eq!(stack_execs[1].status, "completed");
+    }
+
+    /// CR-05 P6.1b — retry on a non-Failed plan is refused.
+    #[test]
+    fn retry_stage_refuses_when_plan_not_failed() {
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let plan_id = plan_in_store(&store);
+        let runner = PipelineRunner::new(store.clone());
+
+        // Plan is in `Draft` after creation, not `Failed`. Any
+        // stage_id is fine — the gate fires before stage lookup.
+        let result = runner.retry_stage(&plan_id, "stage_anything", RetryKind::Optimized);
+        assert!(matches!(result, Err(RunnerError::NotRetryable { .. })));
+    }
+
+    /// CR-05 P6.1b — retry on an unknown stage_id is refused.
+    #[test]
+    fn retry_stage_refuses_unknown_stage() {
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let plan_id = plan_in_store(&store);
+        let runner = PipelineRunner::new(store.clone());
+        // Force Failed so the not-retryable check passes; the stage
+        // lookup is the second gate.
+        store
+            .update_plan_status(&plan_id, PipelinePlanStatus::Failed)
+            .unwrap();
+        let result = runner.retry_stage(&plan_id, "stage_nonexistent", RetryKind::AsIs);
+        assert!(matches!(result, Err(RunnerError::StageNotRetryable(_))));
+    }
+
+    /// CR-05 P6.1b (§9 Skip) — mark an optional stage as skipped.
+    ///
+    /// Setup: register FailingHandler on `denoise` (optional). The
+    /// plan runs through every prior stage successfully, then
+    /// fails on denoise — so denoise has a failed exec row and
+    /// the plan is `Failed`. `skip_stage("denoise")` then marks
+    /// that row as `skipped` and flips the plan back to `Ready`.
+    #[test]
+    fn skip_stage_marks_optional_stage_and_flips_plan_to_ready() {
+        use crate::domain_store::DomainStore;
+        use crate::pipeline_plan::dispatch::{FailingHandler, HandlerRegistry};
+        use std::path::PathBuf;
+
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let plan_id = plan_in_store(&store);
+
+        // The plan has stage_ids of the form `stage_<hash>_<idx>`.
+        let plan = store.load_plan(&plan_id).unwrap();
+        let denoise_stage = plan
+            .stages
+            .iter()
+            .find(|s| s.stage_type == "denoise")
+            .expect("deep_sky_osc_balanced includes a denoise stage");
+        let denoise_id = denoise_stage.stage_id.clone();
+        let stack_stage = plan
+            .stages
+            .iter()
+            .find(|s| s.stage_type == "stack")
+            .expect("deep_sky_osc_balanced includes a stack stage");
+        let stack_id = stack_stage.stage_id.clone();
+
+        // Always-fail handler registered under denoise.
+        let fails = Arc::new(AtomicBool::new(true));
+        let handler = FailingHandler { fails_first: fails };
+        let mut registry = HandlerRegistry::new();
+        registry.insert(
+            "denoise",
+            Arc::new(handler) as Arc<dyn crate::pipeline_plan::dispatch::StageHandler>,
+        );
+        let domain_store = Arc::new(DomainStore::new(&PathBuf::from(":memory:")).unwrap());
+        let runner =
+            PipelineRunner::with_handlers(store.clone(), Arc::new(registry), Some(domain_store));
+
+        // Run — every prior stage completes, denoise fails.
+        let _ = runner.start(&plan_id);
+        let loaded = store.load_plan(&plan_id).unwrap();
+        assert_eq!(loaded.status, PipelinePlanStatus::Failed);
+
+        // Skip denoise.
+        let exec = runner
+            .skip_stage(&plan_id, &denoise_id)
+            .expect("optional skip should succeed");
+        assert_eq!(exec.status, "skipped");
+        assert!(exec.error_json.is_none(), "skip clears prior error");
+
+        let loaded = store.load_plan(&plan_id).unwrap();
+        assert_eq!(loaded.status, PipelinePlanStatus::Ready);
+
+        // Keep stack_id referenced so the variable isn't dead code.
+        let _ = stack_id;
+    }
+
+    /// CR-05 P6.1b — skip on a required stage is refused (§9).
+    #[test]
+    fn skip_stage_refuses_required_stage() {
+        use crate::domain_store::DomainStore;
+        use crate::pipeline_plan::dispatch::{FailingHandler, HandlerRegistry};
+        use std::path::PathBuf;
+
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let plan_id = plan_in_store(&store);
+
+        let plan = store.load_plan(&plan_id).unwrap();
+        let stack_stage = plan
+            .stages
+            .iter()
+            .find(|s| s.stage_type == "stack")
+            .expect("deep_sky_osc_balanced includes a stack stage");
+        let stack_id = stack_stage.stage_id.clone();
+
+        // Always-fail on stack.
+        let fails = Arc::new(AtomicBool::new(true));
+        let handler = FailingHandler { fails_first: fails };
+        let mut registry = HandlerRegistry::new();
+        registry.insert(
+            "stack",
+            Arc::new(handler) as Arc<dyn crate::pipeline_plan::dispatch::StageHandler>,
+        );
+        let domain_store = Arc::new(DomainStore::new(&PathBuf::from(":memory:")).unwrap());
+        let runner =
+            PipelineRunner::with_handlers(store.clone(), Arc::new(registry), Some(domain_store));
+
+        let _ = runner.start(&plan_id);
+
+        // Stack is required → skip refused.
+        let result = runner.skip_stage(&plan_id, &stack_id);
+        assert!(matches!(result, Err(RunnerError::StageNotRetryable(_))));
+    }
+
+    /// CR-05 P6.1b — skip refects when plan isn't Failed.
+    #[test]
+    fn skip_stage_refuses_when_plan_not_failed() {
+        let store = Arc::new(PipelinePlanStore::in_memory().unwrap());
+        let plan_id = plan_in_store(&store);
+        let runner = PipelineRunner::new(store.clone());
+
+        let result = runner.skip_stage(&plan_id, "stage_anything");
+        assert!(matches!(result, Err(RunnerError::NotRetryable { .. })));
     }
 }

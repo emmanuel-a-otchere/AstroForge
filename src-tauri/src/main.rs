@@ -16,6 +16,7 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 mod commands_ai_models;
+mod commands_image_versions;
 mod commands_pipeline_plan;
 mod commands_preview;
 mod commands_project;
@@ -653,6 +654,9 @@ fn main() {
             commands_project::pipeline_run_find_interrupted,
             // CR-05 R2 — truthful project-level checklist state.
             commands_project::project_overview,
+            // CR-05 R3 — image-version timeline for the Compare
+            // workspace. Derived from the durable event log.
+            commands_image_versions::image_version_list,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

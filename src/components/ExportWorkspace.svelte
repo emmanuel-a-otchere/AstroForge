@@ -47,7 +47,7 @@
   // Default to the latest version once the store loads.
   $effect(() => {
     if (selectedVersionId === null && $latestVersion) {
-      selectedVersionId = $latestVersion.id;
+      selectedVersionId = $latestVersion.version_id;
     }
   });
 </script>
@@ -75,22 +75,29 @@
           Version
         </h2>
         <ul class="version-list">
-          {#each $versionStore.versions as v (v.id)}
+          {#each $versionStore.versions as v (v.version_id)}
             <li>
-              <label class="version-row" data-active={selectedVersionId === v.id}>
+              <label class="version-row" data-active={selectedVersionId === v.version_id}>
                 <input
                   type="radio"
                   name="export-version"
-                  value={v.id}
+                  value={v.version_id}
                   bind:group={selectedVersionId}
                   class="version-radio"
                 />
                 <div class="version-info">
                   <span class="version-label font-label">{v.label}</span>
-                  <span class="version-title font-display">{v.title}</span>
+                  <span class="version-title font-display">
+                    Sequence #{v.sequence}
+                  </span>
                   <span class="version-meta font-body">
-                    {v.status.replace("_", " ")} ·
+                    in review ·
                     {new Date(v.created_at).toLocaleDateString()}
+                    {#if v.primary_artifact_id}
+                      · {v.primary_artifact_id}
+                    {:else}
+                      · no artifact yet
+                    {/if}
                   </span>
                 </div>
               </label>

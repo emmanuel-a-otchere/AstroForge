@@ -28,6 +28,7 @@ import { projectContext } from "./project-context";
 import { studioViewport } from "./application";
 import { workspaceState } from "./workspace";
 import { versionStore } from "./versions";
+import { resetAiEnhancement } from "./ai-enhancement";
 import {
   activePlan,
   lastError,
@@ -82,6 +83,11 @@ export function closeProject(): void {
   studioViewport.closeProject();
   workspaceState.reset();
   versionStore.reset();
+  // CR-06 P1 — reset the AI Enhancement Studio store so
+  // reopening a project (or a different one) starts from a
+  // clean slate. Per-image-version data lands in P2+ via
+  // `loadAiEnhancementFor` when the user navigates to Enhance.
+  resetAiEnhancement();
   resetPipelinePlanStore();
 }
 

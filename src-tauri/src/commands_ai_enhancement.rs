@@ -14,10 +14,18 @@
 //!   rows yet
 //! - no error path beyond the store-error → string conversion
 //!   (mirrors `commands_project::project_overview`)
+//!
+//! CR-06 P2 — `analyze_image` runs the analyzer over the
+//! supplied pixels and persists the resulting report to the
+//! `image_analyses` table. The command returns the JSON
+//! profile so the frontend can render the observations
+//! without a second IPC round-trip.
 
 use crate::commands_project::lock_err;
 use crate::domain_store::DomainStore;
-use serde::Serialize;
+use crate::image::F32Image;
+use crate::image_analysis;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
@@ -164,3 +172,105 @@ pub fn enhancement_preview_list_for_operation(
 /// future Rust version that warns on bare imports.
 #[allow(dead_code)]
 fn _state_marker(_s: State<'_, ()>) {}
+
+/// CR-06 P2 — request payload for `analyze_image`. Mirrors
+/// the TypeScript `AnalyzeImageRequest` shape. The pixels
+/// are passed as a flat `Vec<f64>` in row-major order so
+/// the JSON wire format stays compact.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AnalyzeImageRequest {
+    pub image_version_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub pixels: Vec<f64>,
+}
+
+/// CR-06 P2 — response: the persisted report as JSON. The
+/// frontend re-parses this for the Zone C intelligence
+/// panel.
+#[derive(Debug, Clone, Serialize)]
+pub struct AnalyzeImageResponse {
+    pub analysis_id: String,
+    pub profile_json: String,
+}
+
+/// CR-06 P2 — run the analyzer over the supplied pixels,
+/// persist the report to the `image_analyses` table, and
+/// return the analysis id + profile JSON.
+///
+/// The pixels are expected to be in `[0, 1]` (the
+/// calibration pipeline output range). Out-of-range
+/// values are clamped so the analyzer stays robust to
+/// pre-multiplied inputs.
+#[tauri::command]
+pub fn analyze_image(request: AnalyzeImageRequest) -> Result<AnalyzeImageResponse, String> {
+    let AnalyzeImageRequest {
+        image_version_id,
+        width,
+        height,
+        channels,
+        pixels,
+    } = request;
+    let width = width as usize;
+    let height = height as usize;
+    let channels = channels as usize;
+    let expected = width * height * channels;
+    if pixels.len() != expected {
+        return Err(format!(
+            "pixel count mismatch: got {}, expected {} ({}×{}×{})",
+            pixels.len(),
+            expected,
+            width,
+            height,
+            channels
+        ));
+    }
+    // Build the `F32Image` from the flat pixel buffer.
+    // We clamp each value to `[0, 1]` to defend against
+    // out-of-range inputs (multiplied FITS, log-scaled
+    // previews, etc.) that would otherwise blow up the
+    // sigma-clipping thresholds downstream.
+    let mut img = F32Image::new(width, height, channels);
+    for (i, v) in pixels.iter().enumerate() {
+        let clamped = v.clamp(0.0, 1.0) as f32;
+        let c = i / (width * height);
+        let rem = i % (width * height);
+        let y = rem / width;
+        let x = rem % width;
+        img[(c, y, x)] = clamped;
+    }
+    // Run the analyzer.
+    let report = image_analysis::report::analyze(&img, &image_version_id);
+    let profile_json = report.to_json().map_err(|e| e.to_string())?;
+    let analysis_id = format!("ana_{}", new_id_suffix());
+    // Persist the report.
+    with_store(|s| {
+        s.upsert_image_analysis(&crate::domain::ImageAnalysis {
+            analysis_id: analysis_id.clone(),
+            project_id: String::new(),
+            image_version_id: image_version_id.clone(),
+            profile_json: profile_json.clone(),
+            created_at: report.created_at.clone(),
+        })
+        .map_err(|e| e.to_string())
+    })?;
+    Ok(AnalyzeImageResponse {
+        analysis_id,
+        profile_json,
+    })
+}
+
+/// Cheap unique-id suffix for the analysis row. `instant`
+/// nanoseconds modulo `usize::MAX` is fine for client-side
+/// row ids; uniqueness is guaranteed by the SQLite
+/// `INSERT OR REPLACE` semantics if a collision ever
+/// occurred.
+fn new_id_suffix() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    format!("{ns:x}")
+}

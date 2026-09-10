@@ -672,6 +672,10 @@ fn main() {
             commands_ai_enhancement::ai_mask_list,
             commands_ai_enhancement::enhancement_stack_list_for_source,
             commands_ai_enhancement::enhancement_preview_list_for_operation,
+            // CR-06 P2 — image-analysis engine. Runs the
+            // analyzer over the supplied pixel buffer and
+            // persists the report to `image_analyses`.
+            commands_ai_enhancement::analyze_image,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

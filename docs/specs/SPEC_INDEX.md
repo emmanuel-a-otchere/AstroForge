@@ -10,6 +10,8 @@ truth for the project's behavior, architecture, and feature set.
 |---|---|---|---|
 | **1.1.0** | [AstroForge_Spec_v1.1.0.md](./AstroForge_Spec_v1.1.0.md) | ✅ Active | 2026-08-30 |
 
+> **CR-06 proposed 2026-09-10:** AI Enhancement Studio & Intelligent Image Revamp. Status: Proposed. Target: AstroForge v1.0. Depends on CR-01–CR-05. Enables CR-07+ etc. See [../CR-06-AI-ENHANCEMENT-STUDIO.md](../CR-06-AI-ENHANCEMENT-STUDIO.md). The spec is not yet bumped — CR-06 will warrant a 1.2.0 (or 2.0.0) version when its phases land; the proposal is filed alongside the 1.1.0 spec so cross-references resolve.
+
 ## Historical Specifications
 
 | Version | File | Status | Date | Notes |

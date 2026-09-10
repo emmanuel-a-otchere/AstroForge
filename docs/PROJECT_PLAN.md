@@ -500,6 +500,39 @@ are optimized. StableSR is available as an experimental opt-in plugin.
 
 ---
 
+## Phase 5 — AI Enhancement Studio (CR-06)
+
+CR-06 establishes AI enhancement as a first-class Studio rather than
+a button. It builds directly on the processing spine from CR-05
+(CR-05 produces a processed Image Version; CR-06 understands it and
+recommends an enhancement sequence). CR-06 introduces the
+`image_analysis`, `image_region`, `ai_recommendation`, `ai_operation`,
+`ai_model_reference`, `ai_mask`, `enhancement_stack`, and
+`enhancement_preview` entities, plus a region-aware enhancement
+workflow and the safety classification (Deterministic / Perceptual /
+Generative).
+
+The full spec is at [../CR-06-AI-ENHANCEMENT-STUDIO.md](../CR-06-AI-ENHANCEMENT-STUDIO.md)
+and the execution plan at
+[plans/2026-09-10-cr06-ai-enhancement-studio/PLAN.md](plans/2026-09-10-cr06-ai-enhancement-studio/PLAN.md).
+
+### Milestones (preview — finalized in PLAN.md)
+
+| Phase | Focus | Approx. tasks |
+|---|---|---|
+| P1 | Data model + provenance + AI classification framework | ~10 |
+| P2 | Image analysis engine (astronomical structures, characteristics, defects) | ~12 |
+| P3 | Recommendation engine (Observation → Evidence → Confidence → Recommendation) | ~10 |
+| P4 | AI enhancement operations (denoise, deconv, star refine/reduce, SR, inpainting) | ~15 |
+| P5 | Region-aware masks (auto, parametric, user, composite) | ~10 |
+| P6 | Quality gates + enhancement stack reordering + branching | ~10 |
+| P7 | Audit, DoD test, and CR-06 acceptance sign-off | ~5 |
+
+GitHub issues will be filed as each phase starts so cross-references
+follow the same pattern as CR-05's P1.5 milestones.
+
+---
+
 ## Open Decision Points
 
 These are spec open items (§17) that gate specific tasks. They should be
@@ -531,3 +564,5 @@ resolved early to avoid blocking.
 | 2026-09-01 | Phase 0 marked done; Phase 1 core algorithms marked done; focal length + object type auto-detection added (P1-M1-T7) | AstroForge |
 | 2026-09-01 | Added Phase 1.5 — Guided Processing Train per CR AF-CR-2026-09-01-IMG-PIPELINE: 8 milestones, 43 tasks covering state machine, live preview, wizard/forge UI, AI service layer, 10-stage train, non-destructive editing, smart-telescope awareness | AstroForge |
 | 2026-09-02 | Cross-linked all 51 Phase 1.5 tasks to issues #137–#187 (previously tracked as commit-message-only) | AstroForge |
+| 2026-09-10 | CR-05 P1–P7 shipped across PRs #282–#291; M8 audit (docs/M8_AUDIT.md) recorded remaining DoD/visual evidence gaps; UI workflow audit (docs/UI_WORKFLOW_AUDIT.md) produced R1–R7, all landed via PRs #287–#291 | AstroForge |
+| 2026-09-10 | Added Phase 5 — CR-06 AI Enhancement Studio & Intelligent Image Revamp. Phases split into the same pattern as CR-05: P1 data model + provenance, P2 image analysis, P3 recommendations, P4 enhancement operations, P5 region/mask system, P6 quality gates, P7 audit. Detailed execution plan at docs/plans/2026-09-10-cr06-ai-enhancement-studio/PLAN.md. | AstroForge |

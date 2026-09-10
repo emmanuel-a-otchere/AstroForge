@@ -38,9 +38,10 @@
   import SettingsScreen from "./components/SettingsScreen.svelte";
   import HelpScreen from "./components/HelpScreen.svelte";
   import { applicationNavTarget, studioViewport } from "./state/application";
-  import { projectContext } from "./state/project-context";
-  import { workspaceState } from "./state/workspace";
-  import { versionStore } from "./state/versions";
+  import {
+    closeProject as lifecycleCloseProject,
+    openProject as lifecycleOpenProject,
+  } from "./state/project-lifecycle";
   import { dialogOpen as dialogOpenStore, deleteDialogOpen as deleteDialogOpenStore } from "./state/dialog-state";
   import { useKeyboardShortcuts } from "./state/keyboard-shortcuts";
   import { projectsStore } from "./state/projects";
@@ -102,14 +103,12 @@
       return;
     }
     if (action === "open" && project) {
-      // Opening a project enters Studio context.
-      projectContext.open(project);
-      studioViewport.openProject({
-        project_id: project.project_id,
-        name: project.name,
-      });
-      void workspaceState.load(project);
-      versionStore.load(project.project_id);
+      // R4: the lifecycle module is the single source of
+      // truth for the open transition. It resets every
+      // project-scoped store before loading the new
+      // project's data so stale state can't leak between
+      // projects.
+      void lifecycleOpenProject(project);
       return;
     }
   }

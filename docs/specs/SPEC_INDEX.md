@@ -16,7 +16,13 @@ truth for the project's behavior, architecture, and feature set.
 |---|---|---|---|---|
 | 1.0.0 | *(attachment, not on disk)* | 📦 Superseded | 2026-08-30 | Original draft; superseded by 1.1.0 |
 
-## CR-05 — Intelligent Processing Workspace & Adaptive Pipeline Execution
+## CR-05 follow-up audit
+
+The current CR-05 UI and application workflow is audited in
+[UI_WORKFLOW_AUDIT.md](../UI_WORKFLOW_AUDIT.md). That audit supersedes the
+older 2026-09-05 tranche snapshot for evaluating current screen and menu
+integration.
+
 
 - **Status:** Implemented through P6; P7 verification and audit in progress
 - **Location:** [CR-05](../CR-05-INTELLIGENT-PROCESSING.md)

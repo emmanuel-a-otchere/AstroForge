@@ -19,23 +19,18 @@
   and a "swap" button lets the user flip them.
 -->
 <script lang="ts">
-  import { onMount } from "svelte";
   import WorkspaceScreen from "./WorkspaceScreen.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
-  import { activeProject } from "../state/project-context";
 
   let aId = $state<string | null>(null);
   let bId = $state<string | null>(null);
 
-  // R3: when the project changes, refresh the timeline from
-  // the real IPC. R2 already calls workspaceState.load from
-  // App.svelte's open path; here we mirror that for the
-  // version list specifically.
-  $effect(() => {
-    const project = $activeProject;
-    if (!project) return;
-    void versionStore.load(project.project_id);
-  });
+  // R4: the project lifecycle module loads the version
+  // timeline on project open. The remaining reactive
+  // subscription below is a safety net for the case where
+  // the active project changes without going through the
+  // lifecycle (e.g. during the close transition while the
+  // pipeline plan store resets).
 
   // R3: when the timeline arrives, default A to the earliest
   // and B to the latest. This is the only "magic" the picker

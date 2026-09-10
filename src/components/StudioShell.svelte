@@ -14,7 +14,7 @@
     STUDIO_NAV_ITEMS,
     type StudioView,
   } from "../state/application";
-  import { projectContext } from "../state/project-context";
+  import { closeProject as lifecycleCloseProject } from "../state/project-lifecycle";
   import SaveIndicator from "./SaveIndicator.svelte";
   import type { Snippet } from "svelte";
 
@@ -49,9 +49,12 @@
     studioViewport.setView(view);
   }
 
+  // R4: the lifecycle module is the single source of truth for
+  // the close transition. It resets every project-scoped
+  // store (workspace, versions, plan store) so reopening
+  // starts from a clean slate.
   function closeProject() {
-    studioViewport.closeProject();
-    projectContext.close();
+    lifecycleCloseProject();
   }
 </script>
 

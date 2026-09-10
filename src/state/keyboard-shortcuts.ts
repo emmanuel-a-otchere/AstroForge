@@ -20,7 +20,8 @@ import { onMount } from "svelte";
 import { get } from "svelte/store";
 import { studioViewport, type StudioView } from "./application";
 import { applicationNavTarget } from "./application";
-import { projectContext } from "./project-context";
+import { hasOpenProject, projectContext } from "./project-context";
+import { closeProject as lifecycleCloseProject } from "./project-lifecycle";
 import { dialogOpen, deleteDialogOpen } from "./dialog-state";
 
 interface ShortcutCallbacks {
@@ -56,9 +57,10 @@ export function useKeyboardShortcuts(callbacks: ShortcutCallbacks) {
       if (event.key === "Escape") {
         if (get(dialogOpen)) return; // dialogs handle their own Escape
         if (get(deleteDialogOpen)) return; // ditto
-        if (get(projectContext) !== null) {
-          projectContext.close();
-          studioViewport.closeProject();
+        if (get(hasOpenProject)) {
+          // R4: route through the lifecycle so the close
+          // transition resets every project-scoped store.
+          lifecycleCloseProject();
         }
         return;
       }
@@ -84,7 +86,10 @@ export function useKeyboardShortcuts(callbacks: ShortcutCallbacks) {
           return;
         case "s":
           event.preventDefault();
-          if (get(projectContext) !== null) {
+          if (get(hasOpenProject)) {
+            // Mark the project as saved. The lifecycle isn't
+            // required here because the project is staying
+            // open — we just want the dirty bit to flip.
             projectContext.markDirty(false);
           }
           return;
@@ -94,7 +99,7 @@ export function useKeyboardShortcuts(callbacks: ShortcutCallbacks) {
         case "4":
         case "5":
         case "6": {
-          if (get(projectContext) === null) return;
+          if (!get(hasOpenProject)) return;
           const idx = Number.parseInt(event.key, 10) - 1;
           const view = STUDIO_TABS[idx];
           if (view) {

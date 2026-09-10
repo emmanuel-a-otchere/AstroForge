@@ -16,7 +16,11 @@ truth for the project's behavior, architecture, and feature set.
 |---|---|---|---|---|
 | 1.0.0 | *(attachment, not on disk)* | 📦 Superseded | 2026-08-30 | Original draft; superseded by 1.1.0 |
 
-## Related Documents
+## CR-05 — Intelligent Processing Workspace & Adaptive Pipeline Execution
+
+- **Status:** Implemented through P6; P7 verification and audit in progress
+- **Location:** [CR-05](../CR-05-INTELLIGENT-PROCESSING.md)
+- **Plan:** [CR-05 implementation plan](../plans/2026-09-07-cr05-intelligent-processing/PLAN.md)
 
 | Document | Location | Purpose |
 |---|---|---|

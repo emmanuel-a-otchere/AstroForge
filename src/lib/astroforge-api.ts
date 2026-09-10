@@ -663,3 +663,28 @@ export const skipStage = (
   stageId: string,
 ): Promise<StageExecutionDto> =>
   invoke("skip_stage", { planId, stageId });
+
+// ─── CR-05 R1 — AI model catalog IPC ────────────────────────────────────────
+//
+// Read-only wrapper around the `ai_model_list` Tauri command. Surfaces the
+// canonical AI model list (denoise, super-resolution, de-jpeg, star
+// segmentation, cloud score, color calibration, trail inpainting) to the
+// application-level AI Models screen. No download flow is exposed in this
+// slice; `installed` always returns `false` and a follow-up tranche wires
+// the actual install path.
+
+export interface AiModelInfo {
+  name: string;
+  version: string;
+  stage: string;
+  license: string;
+  size_bytes: number;
+  input_channels: number;
+  input_tile_size: number;
+  output_channels: number;
+  scale_factor: number;
+  installed: boolean;
+}
+
+export const aiModelList = (): Promise<AiModelInfo[]> =>
+  invoke("ai_model_list");

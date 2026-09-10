@@ -3,11 +3,11 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use astroforge_core::domain_store::DomainStore;
 use astroforge_core::fits;
 use astroforge_core::gallery::{GalleryItemUpdate, GalleryStore};
 use astroforge_core::ingest::{self, FrameInfo};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig, PipelineResult, Verbosity};
-use astroforge_core::domain_store::DomainStore;
 use astroforge_core::project::ProjectManager;
 use astroforge_core::recipe::Recipe;
 use astroforge_core::recipe_store::{RecipeStore, RecipeSummary, RecipeVersion};
@@ -15,6 +15,7 @@ use astroforge_core::session::SessionStore;
 use serde::Serialize;
 use tauri::{Manager, State};
 
+mod commands_ai_models;
 mod commands_pipeline_plan;
 mod commands_preview;
 mod commands_project;
@@ -49,7 +50,9 @@ impl<E: std::fmt::Display> From<E> for CommandError {
 // blanket impl above so we don't have to reimplement per-error-type.
 
 #[tauri::command]
-fn gallery_list(state: State<'_, GalleryState>) -> Result<Vec<astroforge_core::gallery::GalleryItem>, CommandError> {
+fn gallery_list(
+    state: State<'_, GalleryState>,
+) -> Result<Vec<astroforge_core::gallery::GalleryItem>, CommandError> {
     let store = state.0.lock().expect("gallery store mutex poisoned");
     store.list().map_err(Into::into)
 }
@@ -351,7 +354,9 @@ fn recipe_save(
     // compute the next version based on (name, target_type). For PR-A
     // we always compute here so the Svelte side can be naive.
     let profile_id = RecipeStore::profile_id_for(&recipe.name, &recipe.target_type);
-    let next_version = store.next_version_for(&profile_id).map_err(CommandError::from)?;
+    let next_version = store
+        .next_version_for(&profile_id)
+        .map_err(CommandError::from)?;
     let mut owned = recipe;
     if owned.version == 0 {
         owned.version = next_version;
@@ -448,7 +453,11 @@ fn export_multi_format(args: MultiExportArgs) -> Result<Vec<String>, CommandErro
     // If the buffer is the wrong length, the reshape fails with a clear
     // error string rather than a panic.
     let arr = Array3::from_shape_vec(
-        (args.channels as usize, args.height as usize, args.width as usize),
+        (
+            args.channels as usize,
+            args.height as usize,
+            args.width as usize,
+        ),
         args.pixels,
     )
     .map_err(|e| CommandError {
@@ -520,8 +529,9 @@ fn main() {
 
             // CR-05 P1 — PipelinePlan store (additive; P1 only).
             let pipeline_plans_db = pipeline_plans_db_path(&app.handle())?;
-            let pipeline_plans_store = astroforge_core::pipeline_plans_store::PipelinePlanStore::new(&pipeline_plans_db)
-                .map_err(|e| format!("failed to open pipeline plans store: {e}"))?;
+            let pipeline_plans_store =
+                astroforge_core::pipeline_plans_store::PipelinePlanStore::new(&pipeline_plans_db)
+                    .map_err(|e| format!("failed to open pipeline plans store: {e}"))?;
 
             // CR-05 P2.6 — the Stack handler needs the DomainStore so
             // it can list source assets for the session. We open a
@@ -544,15 +554,21 @@ fn main() {
                     let mut reg = astroforge_core::pipeline_plan::dispatch::HandlerRegistry::new();
                     reg.insert(
                         "calibrate",
-                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::CalibrateHandler),
+                        std::sync::Arc::new(
+                            astroforge_core::pipeline_plan::dispatch::CalibrateHandler,
+                        ),
                     );
                     reg.insert(
                         "debayer",
-                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::DebayerHandler),
+                        std::sync::Arc::new(
+                            astroforge_core::pipeline_plan::dispatch::DebayerHandler,
+                        ),
                     );
                     reg.insert(
                         "register",
-                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::RegisterHandler),
+                        std::sync::Arc::new(
+                            astroforge_core::pipeline_plan::dispatch::RegisterHandler,
+                        ),
                     );
                     reg.insert(
                         "stack",
@@ -560,19 +576,27 @@ fn main() {
                     );
                     reg.insert(
                         "background",
-                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::BackgroundHandler),
+                        std::sync::Arc::new(
+                            astroforge_core::pipeline_plan::dispatch::BackgroundHandler,
+                        ),
                     );
                     reg.insert(
                         "stretch",
-                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::StretchHandler),
+                        std::sync::Arc::new(
+                            astroforge_core::pipeline_plan::dispatch::StretchHandler,
+                        ),
                     );
                     reg.insert(
                         "denoise",
-                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::DenoiseHandler),
+                        std::sync::Arc::new(
+                            astroforge_core::pipeline_plan::dispatch::DenoiseHandler,
+                        ),
                     );
                     reg.insert(
                         "export",
-                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::ExportHandler),
+                        std::sync::Arc::new(
+                            astroforge_core::pipeline_plan::dispatch::ExportHandler,
+                        ),
                     );
                     reg
                 }),
@@ -610,6 +634,9 @@ fn main() {
             recipe_get,
             recipe_get_head,
             recipe_save,
+            // CR-05 R1 — read-only AI model catalog (Recipes/AI
+            // Models/Settings/Help application-level surfaces).
+            commands_ai_models::ai_model_list,
             export_multi_format,
             // CR-02.6 — project / pipeline-run commands (additive).
             commands_project::project_list,

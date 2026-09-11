@@ -27,7 +27,17 @@ truth for the project's behavior, architecture, and feature set.
 | 1.1.0 | [AstroForge_Spec_v1.1.0.md](./AstroForge_Spec_v1.1.0.md) | 📦 Superseded | 2026-08-30 | Active until CR-06 landed; superseded by 1.2.0 |
 | 1.0.0 | *(attachment, not on disk)* | 📦 Superseded | 2026-08-30 | Original draft; superseded by 1.1.0 |
 
-## Related Documents
+## CR-05 follow-up audit
+
+The current CR-05 UI and application workflow is audited in
+[UI_WORKFLOW_AUDIT.md](../UI_WORKFLOW_AUDIT.md). That audit supersedes the
+older 2026-09-05 tranche snapshot for evaluating current screen and menu
+integration.
+
+
+- **Status:** Implemented through P6; P7 verification and audit in progress
+- **Location:** [CR-05](../CR-05-INTELLIGENT-PROCESSING.md)
+- **Plan:** [CR-05 implementation plan](../plans/2026-09-07-cr05-intelligent-processing/PLAN.md)
 
 | Document | Location | Purpose |
 |---|---|---|

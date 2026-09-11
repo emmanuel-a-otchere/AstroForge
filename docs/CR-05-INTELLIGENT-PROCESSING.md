@@ -1,10 +1,19 @@
 CR-05 — Intelligent Processing Workspace & Adaptive Pipeline Execution
 
-Status: Proposed
+Status: Implemented through P6 (PRs #271..#285); P7 audit (#286) landed
 Target: AstroForge v1.0
 Priority: Critical
 Depends on: CR-01, CR-02, CR-03, CR-04
 Enables: CR-06, CR-07, CR-08, CR-09, CR-13, CR-14, CR-15, CR-21, CR-23
+
+> **Implementation note (2026-09-11):** The CR-05 programme shipped
+> P1–P6 behind PRs #271–#285 (Sep 2026). The P7 audit + verification
+> boundary landed behind PR #286 (`docs/M8_AUDIT.md` + repo
+> `CHANGELOG.md`). The remaining gaps (visual-regression corpus +
+> full fixture-backed DoD harness) are recorded as explicit
+> follow-up in the M8 audit rather than claimed as complete. See
+> `docs/plans/2026-09-07-cr05-intelligent-processing/PLAN.md` for
+> the tranche plan.
 
 ⸻
 

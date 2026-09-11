@@ -1,7 +1,7 @@
 # CR-02 Implementation Plan — Project, Session & Artifact Architecture
 
 **Date:** 2026-09-06
-**Source CR:** [CR-02 — Project, Session & Artifact Architecture](../../CR-02-PROJECT-SESSION-ARTIFACT-ARCHITECTURE.md) (Status: Proposed, Priority: Critical / Foundational)
+**Source CR:** [CR-02 — Project, Session & Artifact Architecture](../../CR-02-PROJECT-SESSION-ARTIFACT-ARCHITECTURE.md) (Status: Implemented, Priority: Critical / Foundational)
 **Strategy:** CR-02 §41 — phased migration, no big-bang rewrite. Each phase is one PR-sized tranche.
 
 ## Current state (as of bd1c059)

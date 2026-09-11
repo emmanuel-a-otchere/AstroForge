@@ -1,10 +1,19 @@
 CR-02 — Project, Session & Artifact Architecture
 
-Status: Proposed
+Status: Implemented (PRs #234, #235, #236, #237, #238, #239)
 Target: AstroForge v1.0
 Priority: Critical / Foundational
 Depends on: CR-01 — Product & UX Foundation
 Enables: CR-03 onward, particularly the Studio shell, processing workspace, AI enhancement, recipes, comparison, recovery, and standalone execution.
+
+> **Implementation note (2026-09-11):** All six CR-02 slices
+> (CR-02.1..02.6) shipped behind PRs #234–#239 in the CR-02 tranche
+> (Aug–Sep 2026). The canonical domain model + SQLite persistence +
+> content-addressed artifact store + project lifecycle +
+> pipeline-run/crash-recovery + Tauri UI scaffold all landed on
+> `main`. The next slice (this one) updates this header to reflect
+> reality. See `docs/plans/2026-09-06-cr02-domain-model/PLAN.md`
+> for the tranche plan and `CHANGELOG.md` for per-slice entries.
 
 CR-02 establishes the persistent domain model of AstroForge. The key decision is that AstroForge must not treat a folder of images as the application state. A folder is merely an input source.
 

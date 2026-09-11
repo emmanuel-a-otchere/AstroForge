@@ -1,10 +1,24 @@
 CR-06 — AI Enhancement Studio & Intelligent Image Revamp
 
-Status: Proposed
-Target: AstroForge v1.0
+Status: Shipped P1–P7 (PRs #292–#299); spec bump 1.1.0 → 1.2.0
+Target: AstroForge v1.2.0
 Priority: Critical
 Depends on: CR-01, CR-02, CR-03, CR-04, CR-05
 Enables: CR-07, CR-08, CR-09, CR-13, CR-14, CR-15, CR-16, CR-17, CR-19, CR-21, CR-23
+
+> **Implementation note (2026-09-11):** All seven CR-06 slices
+> shipped in the AI Enhancement Studio tranche (P1 data model +
+> provenance + safety classification, P2 image analysis, P3
+> recommendation engine, P4 enhancement operations + stack +
+> Studio shell, P5 region-aware masks, P6 quality gates +
+> branching UX polish, P7 audit + §40 DoD test + spec bump)
+> behind PRs #292–#299. The M9 audit records 34 of 39 §35
+> criteria shipped, 5 partial (Zone B canvas + real ONNX
+> inference), 0 missing — concentrated in CR-07 / P5.1 territory
+> rather than CR-06 itself. Spec bumped from 1.1.0 to 1.2.0
+> (backward-compatible minor). See
+> `docs/plans/2026-09-10-cr06-ai-enhancement-studio/PLAN.md` and
+> `docs/M9_AUDIT.md`.
 
 ⸻
 

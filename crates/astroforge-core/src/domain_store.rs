@@ -12,9 +12,10 @@
 
 use crate::domain::{
     AiMask, AiOperation, AiRecommendation, AiSafetyClassification, Artifact, ArtifactCategory,
-    EnhancementPreview, EnhancementStack, ImageAnalysis, ImageRegion, ImageVersion, PipelineRun,
-    PipelineRunStatus, PreviewRun, Project, ProjectEvent, ProjectEventKind, ProjectStatus, Session,
-    SourceAsset, StageRunRecord, Target, DOMAIN_SCHEMA_VERSION,
+    EnhancementPreview, EnhancementStack, ImageAnalysis, ImageRegion, ImageRegionKind,
+    ImageVersion, PipelineRun, PipelineRunStatus, PreviewRun, Project, ProjectEvent,
+    ProjectEventKind, ProjectStatus, Session, SourceAsset, StageRunRecord, Target,
+    DOMAIN_SCHEMA_VERSION,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
@@ -1476,6 +1477,32 @@ impl DomainStore {
             Ok(None)
         }
     }
+    /// CR-06 P7 — fetch a single `ImageRegion` row by id. Mirrors
+    /// the `get_ai_mask` helper added in P5.
+    pub fn get_image_region(&self, region_id: &str) -> Result<Option<ImageRegion>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT region_id, image_version_id, kind, label, source, mask_json, created_at
+             FROM image_regions WHERE region_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![region_id])?;
+        if let Some(row) = rows.next()? {
+            let kind_str: String = row.get(2)?;
+            let kind: ImageRegionKind =
+                serde_json::from_str(&format!("\"{kind_str}\"")).unwrap_or(ImageRegionKind::Stars);
+            Ok(Some(ImageRegion {
+                region_id: row.get(0)?,
+                image_version_id: row.get(1)?,
+                kind,
+                label: row.get(3)?,
+                source: row.get(4)?,
+                mask_json: row.get(5)?,
+                created_at: row.get(6)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
 
     /// Insert (or replace) an `EnhancementStack` row. P4 calls this
     /// once per stack creation.
@@ -1607,6 +1634,31 @@ impl DomainStore {
             out.push(r?);
         }
         Ok(out)
+    }
+    /// CR-06 P7 — fetch a single `EnhancementPreview` row by id.
+    /// Mirrors the `get_ai_mask` helper added in P5.
+    pub fn get_enhancement_preview(&self, preview_id: &str) -> Result<Option<EnhancementPreview>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT preview_id, project_id, source_image_version_id,
+                    operation_id, artifact_id, parameters_json, status, created_at
+             FROM enhancement_previews WHERE preview_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![preview_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(EnhancementPreview {
+                preview_id: row.get(0)?,
+                project_id: row.get(1)?,
+                source_image_version_id: row.get(2)?,
+                operation_id: row.get(3)?,
+                artifact_id: row.get(4)?,
+                parameters_json: row.get(5)?,
+                status: row.get(6)?,
+                created_at: row.get(7)?,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     // ─── CR-05 P4 slice 3 — PreviewRun CRUD (preview-before-commit) ────────

@@ -486,6 +486,61 @@ export const composeMask = (
 ): Promise<{ mask: AiMaskJson }> =>
   invoke("compose_mask", { request }) as Promise<{ mask: AiMaskJson }>;
 
+// CR-06 P6 — quality gate report. The orchestrator
+// runs the ten §37 checks against the (source,
+// result) pixel pair and returns the verdict +
+// per-gate findings. P6 wires the engine end-to-end
+// with the apply round; the verdict drives the
+// QualityGatePanel surface.
+
+export type QualityVerdict = "ok" | "info" | "warning" | "failure";
+export type Severity = "ok" | "info" | "warning" | "failure";
+export type GateId =
+  | "clipping"
+  | "noise_amplification"
+  | "star_artifacts"
+  | "halos"
+  | "ringing"
+  | "false_structures"
+  | "color_shifts"
+  | "edge_artifacts"
+  | "segmentation_leakage"
+  | "excessive_smoothing";
+
+export interface GateFindingJson {
+  gate: GateId;
+  severity: Severity;
+  message: string;
+  score: number;
+  recommendation?: string | null;
+}
+
+export interface QualityGateReportJson {
+  verdict: QualityVerdict;
+  findings: GateFindingJson[];
+  source_image_version_id: string;
+  result_image_version_id: string;
+  operation_id: string;
+}
+
+export interface RunAiQualityReportRequest {
+  source_image_version_id: string;
+  result_image_version_id: string;
+  operation_id: string;
+  width: number;
+  height: number;
+  channels: number;
+  source_pixels: number[];
+  result_pixels: number[];
+}
+
+export const runAiQualityReport = (
+  request: RunAiQualityReportRequest,
+): Promise<{ verdict: QualityVerdict; report: QualityGateReportJson }> =>
+  invoke("run_ai_quality_report", {
+    request,
+  }) as Promise<{ verdict: QualityVerdict; report: QualityGateReportJson }>;
+
 export const aiOperationGet = (
   operationId: string,
 ): Promise<AiOperationJson | null> =>

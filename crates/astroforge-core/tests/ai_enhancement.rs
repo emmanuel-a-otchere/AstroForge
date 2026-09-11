@@ -640,3 +640,116 @@ fn ai_mask_list_orders_by_created_at() {
     assert_eq!(list[0].mask_id, "msk_1");
     assert_eq!(list[1].mask_id, "msk_2");
 }
+
+// CR-06 P6 — quality gate report runs against
+// synthetic inputs. Identical source + result = all
+// Ok; a deliberately-bad result triggers Failure.
+#[test]
+fn quality_gate_passes_on_identical_input() {
+    use astroforge_core::quality_gates::report::{run, QualityVerdict};
+    use astroforge_core::quality_gates::GateThresholds;
+    use ndarray::Array3;
+
+    let src = Array3::<f32>::from_elem((1, 8, 8), 0.5);
+    let res = Array3::<f32>::from_elem((1, 8, 8), 0.5);
+    let src_img = astroforge_core::image::F32Image::from(src);
+    let res_img = astroforge_core::image::F32Image::from(res);
+    let t = GateThresholds::default();
+    let report = run(
+        &src_img,
+        &res_img,
+        &t,
+        "src_v".into(),
+        "res_v".into(),
+        "test_op".into(),
+    );
+    assert_eq!(report.verdict, QualityVerdict::Ok);
+}
+
+#[test]
+fn quality_gate_fails_on_pushed_rails() {
+    use astroforge_core::quality_gates::report::{run, QualityVerdict};
+    use astroforge_core::quality_gates::GateThresholds;
+    use ndarray::Array3;
+
+    let src = Array3::<f32>::from_elem((1, 8, 8), 0.5);
+    let res = Array3::<f32>::from_elem((1, 8, 8), 1.0);
+    let src_img = astroforge_core::image::F32Image::from(src);
+    let res_img = astroforge_core::image::F32Image::from(res);
+    let t = GateThresholds::default();
+    let report = run(
+        &src_img,
+        &res_img,
+        &t,
+        "src_v".into(),
+        "res_v".into(),
+        "test_op".into(),
+    );
+    assert_eq!(report.verdict, QualityVerdict::Failure);
+    // The clipping finding is the one that
+    // triggered the failure.
+    let clipping = report
+        .findings
+        .iter()
+        .find(|f| matches!(f.gate, astroforge_core::quality_gates::GateId::Clipping))
+        .expect("clipping finding");
+    assert!(matches!(
+        clipping.severity,
+        astroforge_core::quality_gates::Severity::Failure
+    ));
+}
+
+#[test]
+fn quality_gate_warning_on_flattened_result() {
+    use astroforge_core::quality_gates::report::{run, QualityVerdict};
+    use astroforge_core::quality_gates::GateThresholds;
+    use ndarray::Array3;
+
+    // Noisy source → flat result triggers
+    // excessive smoothing.
+    let mut src = Array3::<f32>::zeros((1, 8, 8));
+    for y in 0..8 {
+        for x in 0..8 {
+            src[(0, y, x)] = ((x + y * 8) as f32) / 64.0;
+        }
+    }
+    let res = Array3::<f32>::from_elem((1, 8, 8), 0.5);
+    let src_img = astroforge_core::image::F32Image::from(src);
+    let res_img = astroforge_core::image::F32Image::from(res);
+    let t = GateThresholds::default();
+    let report = run(
+        &src_img,
+        &res_img,
+        &t,
+        "src_v".into(),
+        "res_v".into(),
+        "smoothing_op".into(),
+    );
+    assert!(matches!(
+        report.verdict,
+        QualityVerdict::Warning | QualityVerdict::Failure
+    ));
+}
+
+#[test]
+fn quality_gate_returns_ten_findings() {
+    use astroforge_core::quality_gates::report::{count_by_severity, run};
+    use astroforge_core::quality_gates::GateThresholds;
+    use ndarray::Array3;
+
+    let src = Array3::<f32>::from_elem((1, 4, 4), 0.5);
+    let res = Array3::<f32>::from_elem((1, 4, 4), 0.5);
+    let src_img = astroforge_core::image::F32Image::from(src);
+    let res_img = astroforge_core::image::F32Image::from(res);
+    let t = GateThresholds::default();
+    let report = run(
+        &src_img,
+        &res_img,
+        &t,
+        "src".into(),
+        "res".into(),
+        "op".into(),
+    );
+    let (ok, info, warn, fail) = count_by_severity(&report.findings);
+    assert_eq!(ok + info + warn + fail, 10);
+}

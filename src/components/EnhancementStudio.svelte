@@ -46,6 +46,7 @@
   } from "../state/ai-enhancement";
   import EnhancementOperationCard from "./EnhancementOperationCard.svelte";
   import MaskEditor from "./MaskEditor.svelte";
+  import QualityGatePanel from "./QualityGatePanel.svelte";
   import type {
     EnhancementStackJson,
     OperationRegistryEntryJson,
@@ -384,6 +385,14 @@
         build flows. Painting (brush / polygon) ships
         in a future slice. -->
       <MaskEditor />
+      <!-- CR-06 P6 — quality gate panel. Lives below
+        the Mask Editor in Zone C; the panel surfaces
+        the §37 verdict + per-gate findings. The
+        user can run the gate manually against the
+        current image; the apply round will populate
+        this automatically once real ONNX inference
+        produces a distinct result. -->
+      <QualityGatePanel />
     {/if}
     {#if $aiEnhancementStore.error}
       <p class="error">{$aiEnhancementStore.error}</p>

@@ -45,6 +45,7 @@ pub mod processing_metrics;
 pub mod processing_timeline;
 pub mod project;
 pub mod quality;
+pub mod quality_gates;
 pub mod recipe;
 pub mod recipe_store;
 pub mod recommendation;

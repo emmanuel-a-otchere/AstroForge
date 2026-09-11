@@ -18,6 +18,7 @@ use tauri::{Manager, State};
 mod commands_ai_enhancement;
 mod commands_ai_models;
 mod commands_image_versions;
+mod commands_import;
 mod commands_pipeline_plan;
 mod commands_preview;
 mod commands_project;
@@ -717,6 +718,15 @@ fn main() {
             // from `enhancement_apply_operation` once
             // the dispatcher is swapped (P5.1).
             commands_ai_enhancement::run_ai_quality_report,
+            // CR-04 P8 — Import Understanding IPC surface.
+            // Wires P3..P7 into the import wizard; the UI
+            // (P9) reads these commands to render the
+            // Understanding panel + ambiguity dialog.
+            commands_import::import_analyse_session,
+            commands_import::import_get_understanding,
+            commands_import::import_confirm,
+            commands_import::import_override_classification,
+            commands_import::import_set_materialised,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

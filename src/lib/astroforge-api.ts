@@ -1151,3 +1151,138 @@ export interface AiModelInfo {
 
 export const aiModelList = (): Promise<AiModelInfo[]> =>
   invoke("ai_model_list");
+
+// ─── CR-04 P8 — Import Understanding IPC ────────────────────────────────
+//
+// Wires P3..P7 (frame classification, target detection, session grouping,
+// capture analysis, narrowband detection) into the import wizard. The UI
+// (P9) reads these wrappers to render the Understanding panel + the
+// ambiguity dialog (per CR-04 §13).
+
+export type ImportState =
+  | "created"
+  | "scanned"
+  | "understanding"
+  | "ambiguous"
+  | "confirmed"
+  | "materialised";
+
+export type CaptureKind = "deep_sky" | "planetary_lunar" | "ambiguous";
+
+export type NarrowbandComposition =
+  | "none"
+  | "mono"
+  | "hoo"
+  | "sho"
+  | "lrgb"
+  | "hoo_or_sho";
+
+export interface CaptureObservationJson {
+  signal: string;
+  value: string;
+  weight: number;
+  confidence: number;
+  favours: CaptureKind;
+}
+
+export interface CaptureClassificationJson {
+  kind: CaptureKind;
+  confidence: number;
+  observations: CaptureObservationJson[];
+  ambiguous: boolean;
+}
+
+export interface NarrowbandObservationJson {
+  signal: string;
+  value: string;
+  weight: number;
+  confidence: number;
+  resolves_to: string | null;
+}
+
+export interface ChannelGroupJson {
+  channel: string;
+  asset_ids: string[];
+}
+
+export interface NarrowbandAnalysisJson {
+  channels: ChannelGroupJson[];
+  composition_suggestion: NarrowbandComposition;
+  confidence: number;
+  observations: NarrowbandObservationJson[];
+}
+
+export interface SessionAnalysisJson {
+  classifications: Array<{
+    kind: string;
+    confidence: number;
+    observations: Array<{
+      signal: string;
+      value: string;
+      weight: number;
+      confidence: number;
+    }>;
+  }>;
+  capture: CaptureClassificationJson;
+  narrowband: NarrowbandAnalysisJson;
+  aggregate_confidence: number;
+}
+
+export interface SessionClassificationJson {
+  session_id: string;
+  import_state: ImportState;
+  capture_kind: CaptureKind | null;
+  narrowband_composition: NarrowbandComposition | null;
+  classification_confidence: number | null;
+  classification_metadata: string | null;
+}
+
+export interface ImportAnalysisResultJson {
+  session_id: string;
+  analysis: SessionAnalysisJson;
+  classification: SessionClassificationJson;
+}
+
+export interface AssetMetadataInputJson {
+  path: string;
+  metadata: Record<string, unknown>;
+}
+
+export const importAnalyseSession = (
+  projectId: string,
+  sessionId: string,
+  assets: AssetMetadataInputJson[],
+  targetName: string | null,
+): Promise<ImportAnalysisResultJson> =>
+  invoke("import_analyse_session", {
+    projectId,
+    sessionId,
+    assets,
+    targetName,
+  });
+
+export const importGetUnderstanding = (
+  sessionId: string,
+): Promise<SessionClassificationJson | null> =>
+  invoke("import_get_understanding", { sessionId });
+
+export const importConfirm = (
+  sessionId: string,
+): Promise<SessionClassificationJson> =>
+  invoke("import_confirm", { sessionId });
+
+export const importOverrideClassification = (
+  sessionId: string,
+  captureKind: CaptureKind | null,
+  narrowbandComposition: NarrowbandComposition | null,
+): Promise<SessionClassificationJson> =>
+  invoke("import_override_classification", {
+    sessionId,
+    captureKind,
+    narrowbandComposition,
+  });
+
+export const importSetMaterialised = (
+  sessionId: string,
+): Promise<SessionClassificationJson> =>
+  invoke("import_set_materialised", { sessionId });

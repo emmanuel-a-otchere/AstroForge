@@ -694,6 +694,19 @@ fn main() {
             commands_ai_enhancement::operations_registry_list,
             commands_ai_enhancement::image_version_list_for_project,
             commands_ai_enhancement::image_version_get,
+            // CR-06 P5 — region-aware masks. The mask
+            // engine is pure logic in
+            // `astroforge-core::masks`; the create /
+            // update / compose commands persist the
+            // resulting rows. `build_auto_mask` runs the
+            // auto-segmentation on the supplied pixels
+            // and returns the encoded raster.
+            commands_ai_enhancement::create_ai_mask,
+            commands_ai_enhancement::update_ai_mask,
+            commands_ai_enhancement::ai_mask_get,
+            commands_ai_enhancement::ai_mask_list_for_version,
+            commands_ai_enhancement::build_auto_mask,
+            commands_ai_enhancement::compose_mask,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

@@ -533,3 +533,110 @@ fn preview_status_round_trip_via_json() {
     // Unknown falls back to pending (defensive).
     assert_eq!(parse_status("unknown_thing"), PreviewStatus::Pending);
 }
+
+// CR-06 P5 — mask encoding round-trip via the JSON
+// shape. The wire shape carries the version + the
+// `kind` enum + the pixel raster; a future schema
+// bump branches on the version.
+#[test]
+fn mask_encoding_round_trip_preserves_pixels() {
+    use astroforge_core::masks::encoding::{from_json, round_trip, to_json};
+    use astroforge_core::masks::{Mask, MaskKind};
+    let original = Mask::from_pixels(2, 2, MaskKind::User, "brush".into(), &[0.1, 0.2, 0.3, 0.4]);
+    let restored = round_trip(&original).expect("round trip");
+    assert_eq!(restored, original);
+    let raw = to_json(&original).expect("to_json");
+    let parsed = from_json(&raw).expect("from_json");
+    assert_eq!(parsed, original);
+}
+
+// CR-06 P5 — boolean composition semantics. Union
+// takes max, intersect takes min, difference
+// subtracts with a zero clamp.
+#[test]
+fn mask_composite_union_intersect_difference() {
+    use astroforge_core::masks::composite::{apply, CompositeOp};
+    use astroforge_core::masks::Mask;
+    let a = Mask::from_pixels(
+        2,
+        2,
+        astroforge_core::masks::MaskKind::Auto,
+        "a".into(),
+        &[0.2, 0.4, 0.6, 0.8],
+    );
+    let b = Mask::from_pixels(
+        2,
+        2,
+        astroforge_core::masks::MaskKind::Auto,
+        "b".into(),
+        &[0.5, 0.3, 0.7, 0.1],
+    );
+    let union = apply(&a, &b, CompositeOp::Union).unwrap();
+    assert_eq!(union.pixels, vec![0.5, 0.4, 0.7, 0.8]);
+    let intersect = apply(&a, &b, CompositeOp::Intersect).unwrap();
+    assert_eq!(intersect.pixels, vec![0.2, 0.3, 0.6, 0.1]);
+    // Difference uses approximate equality to tolerate
+    // f32 rounding.
+    let diff = apply(&a, &b, CompositeOp::Difference).unwrap();
+    let expected = [0.0, 0.1, 0.0, 0.7];
+    for (got, want) in diff.pixels.iter().zip(expected.iter()) {
+        assert!((got - want).abs() < 1e-6, "got {got} want {want}");
+    }
+}
+
+// CR-06 P5 — `AiMask` row CRUD. `get_ai_mask` was
+// added by P5; the test pins the round-trip + the
+// `update_ai_mask` flow.
+#[test]
+fn ai_mask_get_round_trip() {
+    let s = store();
+    let row = AiMask {
+        mask_id: "msk_1".into(),
+        project_id: "p1".into(),
+        image_version_id: "ver_1".into(),
+        provenance: "auto:stars".into(),
+        parents_json: None,
+        mask_json: r#"{"version":1,"width":1,"height":1,"kind":"auto","provenance":"auto:stars","encoding":"row_major_f32","pixels":[0.5]}"#.into(),
+        created_at: "2026-01-01 00:00:00 UTC".into(),
+    };
+    s.upsert_ai_mask(&row).expect("upsert");
+    let fetched = s.get_ai_mask("msk_1").unwrap().expect("present");
+    assert_eq!(fetched.mask_id, "msk_1");
+    assert_eq!(fetched.provenance, "auto:stars");
+}
+
+#[test]
+fn ai_mask_get_unknown_returns_none() {
+    let s = store();
+    let fetched = s.get_ai_mask("msk_missing").unwrap();
+    assert!(fetched.is_none());
+}
+
+#[test]
+fn ai_mask_list_orders_by_created_at() {
+    let s = store();
+    let r1 = AiMask {
+        mask_id: "msk_1".into(),
+        project_id: "p1".into(),
+        image_version_id: "ver_1".into(),
+        provenance: "auto:stars".into(),
+        parents_json: None,
+        mask_json: "{}".into(),
+        created_at: "2026-01-01 00:00:00 UTC".into(),
+    };
+    let r2 = AiMask {
+        mask_id: "msk_2".into(),
+        project_id: "p1".into(),
+        image_version_id: "ver_1".into(),
+        provenance: "user:brush".into(),
+        parents_json: None,
+        mask_json: "{}".into(),
+        created_at: "2026-01-02 00:00:00 UTC".into(),
+    };
+    s.upsert_ai_mask(&r1).unwrap();
+    s.upsert_ai_mask(&r2).unwrap();
+    let list = s.list_ai_masks("ver_1").unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].mask_id, "msk_1");
+    assert_eq!(list[1].mask_id, "msk_2");
+}

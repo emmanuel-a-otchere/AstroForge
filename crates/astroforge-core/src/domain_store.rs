@@ -1451,6 +1451,32 @@ impl DomainStore {
         Ok(out)
     }
 
+    /// CR-06 P5 — fetch a single `AiMask` row by id. The
+    /// `update_ai_mask` + `compose_mask` commands use
+    /// this to read the current row before mutating.
+    pub fn get_ai_mask(&self, mask_id: &str) -> Result<Option<AiMask>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT mask_id, project_id, image_version_id, provenance,
+                    parents_json, mask_json, created_at
+             FROM ai_masks WHERE mask_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![mask_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(AiMask {
+                mask_id: row.get(0)?,
+                project_id: row.get(1)?,
+                image_version_id: row.get(2)?,
+                provenance: row.get(3)?,
+                parents_json: row.get(4)?,
+                mask_json: row.get(5)?,
+                created_at: row.get(6)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Insert (or replace) an `EnhancementStack` row. P4 calls this
     /// once per stack creation.
     pub fn upsert_enhancement_stack(&self, row: &EnhancementStack) -> Result<()> {

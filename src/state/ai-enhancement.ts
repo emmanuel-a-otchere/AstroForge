@@ -23,13 +23,26 @@ import {
   aiOperationListForStage,
   aiRecommendationListForVersion,
   analyzeImage,
+  enhancementApplyOperation,
+  enhancementOperationsList,
   enhancementPreviewListForOperation,
+  enhancementStackApplyMutation,
+  enhancementStackBranch,
+  enhancementStackCreate,
+  enhancementStackGet,
   enhancementStackListForSource,
   generateAiRecommendations,
   imageAnalysisLatest,
   imageRegionList,
+  imageVersionListForProject,
   type AnalyzeImageRequest,
+  type ApplyAiOperationRequest,
+  type BranchEnhancementStackRequest,
+  type CreateEnhancementStackRequest,
+  type EnhancementStackJson,
   type GenerateRecommendationsRequest,
+  type OperationRegistryEntryJson,
+  type StackMutation as StackMutationJson,
 } from "../lib/astroforge-api";
 
 /**
@@ -72,7 +85,7 @@ export function safetyRequiresDisclosure(c: AiSafetyClassification): boolean {
   return c === "perceptual" || c === "generative";
 }
 
-/** Per-image-version AI Enhancement Studio state. */
+/// Per-image-version AI Enhancement Studio state. */
 export interface AiEnhancementState {
   analysis: unknown | null;
   regions: unknown[];
@@ -90,6 +103,18 @@ export interface AiEnhancementState {
   masks: unknown[];
   stacks: unknown[];
   previews: unknown[];
+  /// CR-06 P4 — the active enhancement stack record
+  /// (the typed view: ordered operations + lineage).
+  /// Distinct from `stacks` (the persisted rows), the
+  /// active stack is what the Studio panel mutates via
+  /// `applyStackMutation` and applies via `applyOperation`.
+  activeStack: EnhancementStackJson | null;
+  /// CR-06 P4 — the canonical operations registry. The
+  /// Studio panel renders the operation picker from this
+  /// list (eleven operations across cleanup / denoise /
+  /// restoration / star / detail / upscale / inpaint /
+  /// background categories).
+  operationsRegistry: OperationRegistryEntryJson[];
   loading: boolean;
   error: string | null;
 }
@@ -102,6 +127,8 @@ const initial: AiEnhancementState = {
   masks: [],
   stacks: [],
   previews: [],
+  activeStack: null,
+  operationsRegistry: [],
   loading: false,
   error: null,
 };
@@ -133,6 +160,8 @@ export async function loadAiEnhancementFor(
     masks: [],
     stacks: [],
     previews: [],
+    activeStack: null,
+    operationsRegistry: [],
     error: null,
   };
   let firstError: string | null = null;
@@ -162,6 +191,15 @@ export async function loadAiEnhancementFor(
   if (Array.isArray(recs)) update.recommendations = recs;
   const masks = await safeCall("ai_mask_list", () => aiMaskList(imageVersionId));
   if (Array.isArray(masks)) update.masks = masks;
+  // CR-06 P4 — fetch the canonical operations registry
+  // alongside the per-version lists. The Studio panel
+  // renders the operation picker from this list, so
+  // loading it eagerly (per project, not per image
+  // version) keeps the picker interactive.
+  const ops = await safeCall("enhancement_operations_list", () =>
+    enhancementOperationsList(),
+  );
+  if (Array.isArray(ops)) update.operationsRegistry = ops;
   const stacks = await safeCall("enhancement_stack_list_for_source", () =>
     enhancementStackListForSource(imageVersionId),
   );
@@ -292,4 +330,180 @@ export async function generateRecommendationsFor(
 // synchronous read of the current state.
 export function snapshotAiEnhancement(): AiEnhancementState {
   return get(aiEnhancementStore);
+}
+
+/**
+ * CR-06 P4 — create an enhancement stack from an initial
+ * operation list. The Studio panel calls this once per
+ * image version (after the user accepts the engine's
+ * recommendation list). The new stack is stored as the
+ * `activeStack` so subsequent `applyStackMutation` /
+ * `applyOperation` calls operate on it.
+ */
+export async function createEnhancementStack(
+  request: CreateEnhancementStackRequest,
+): Promise<EnhancementStackJson> {
+  aiEnhancementStore.update((s) => ({ ...s, loading: true, error: null }));
+  try {
+    const response = await enhancementStackCreate(request);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      activeStack: response.stack,
+      loading: false,
+      error: null,
+    }));
+    return response.stack;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      loading: false,
+      error: msg,
+    }));
+    throw e;
+  }
+}
+
+/**
+ * CR-06 P4 — load a stack by id (the user clicks a
+ * previous branch in the Studio panel). The fetched
+ * record becomes the `activeStack`.
+ */
+export async function loadEnhancementStack(
+  stackId: string,
+): Promise<EnhancementStackJson | null> {
+  aiEnhancementStore.update((s) => ({ ...s, loading: true, error: null }));
+  try {
+    const stack = await enhancementStackGet(stackId);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      activeStack: stack,
+      loading: false,
+      error: null,
+    }));
+    return stack;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      loading: false,
+      error: msg,
+    }));
+    throw e;
+  }
+}
+
+/**
+ * CR-06 P4 — apply a `StackMutation` (reorder, set
+ * enabled, remove, mark needs preview, append) to the
+ * active stack. The Tauri command persists the updated
+ * stack; the helper refreshes the local `activeStack` so
+ * the UI re-renders with the new state.
+ */
+export async function applyStackMutation(
+  stackId: string,
+  mutation: StackMutationJson,
+): Promise<EnhancementStackJson | null> {
+  aiEnhancementStore.update((s) => ({ ...s, loading: true, error: null }));
+  try {
+    const stack = await enhancementStackApplyMutation(stackId, mutation);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      activeStack: stack,
+      loading: false,
+      error: null,
+    }));
+    return stack;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      loading: false,
+      error: msg,
+    }));
+    throw e;
+  }
+}
+
+/**
+ * CR-06 P4 — branch the active stack at the given
+ * cutoff. Returns the new stack record (with a fresh
+ * `source_image_version_id` the caller supplies — the
+ * branch round typically creates the new Image Version
+ * via `applyOperation` first, then branches the stack).
+ */
+export async function branchEnhancementStack(
+  request: BranchEnhancementStackRequest,
+): Promise<EnhancementStackJson> {
+  aiEnhancementStore.update((s) => ({ ...s, loading: true, error: null }));
+  try {
+    const stack = await enhancementStackBranch(request);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      activeStack: stack,
+      loading: false,
+      error: null,
+    }));
+    return stack;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      loading: false,
+      error: msg,
+    }));
+    throw e;
+  }
+}
+
+/**
+ * CR-06 P4 — apply a single AI operation to the source
+ * Image Version. The Tauri command runs the dispatcher
+ * (P4 passthrough; P5 will swap in real ONNX
+ * inference), persists a fresh Image Version row + an
+ * `AiOperation` provenance row, and returns the new
+ * version id.
+ */
+export async function applyOperation(
+  request: ApplyAiOperationRequest,
+): Promise<{ versionId: string }> {
+  aiEnhancementStore.update((s) => ({ ...s, loading: true, error: null }));
+  try {
+    const response = await enhancementApplyOperation(request);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      loading: false,
+      error: null,
+    }));
+    return { versionId: response.image_version.version_id };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      loading: false,
+      error: msg,
+    }));
+    throw e;
+  }
+}
+
+/**
+ * CR-06 P4 — list the Image Versions for a project,
+ * sequence-asc. The Studio panel uses this to render
+ * the version timeline (parent of Zone A in §13).
+ */
+export async function listImageVersions(
+  projectId: string,
+): Promise<unknown[]> {
+  try {
+    const response = await imageVersionListForProject(projectId);
+    return Array.isArray(response?.items) ? response.items : [];
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      error: msg,
+    }));
+    return [];
+  }
 }

@@ -244,6 +244,162 @@ export const generateAiRecommendations = (
 ): Promise<GenerateRecommendationsResponse> =>
   invoke("generate_ai_recommendations", { request }) as Promise<GenerateRecommendationsResponse>;
 
+// CR-06 P4 — enhancement stack + apply round + image
+// version tracking. The Tauri commands land alongside
+// `analyze_image` and `generate_ai_recommendations` in
+// `commands_ai_enhancement`.
+
+export interface StackOperationJson {
+  operation_id: string;
+  recommendation_id: string | null;
+  parameters_json: string;
+  enabled: boolean;
+  needs_preview?: boolean;
+}
+
+export interface EnhancementStackJson {
+  stack_id: string;
+  project_id: string;
+  source_image_version_id: string;
+  operations: StackOperationJson[];
+  branched_from_version_id: string | null;
+  created_at: string;
+}
+
+export interface CreateEnhancementStackRequest {
+  project_id: string;
+  source_image_version_id: string;
+  operations: StackOperationJson[];
+}
+
+export const enhancementStackCreate = (
+  request: CreateEnhancementStackRequest,
+): Promise<{ stack: EnhancementStackJson }> =>
+  invoke("enhancement_stack_create", { request }) as Promise<{
+    stack: EnhancementStackJson;
+  }>;
+
+export const enhancementStackGet = (
+  stackId: string,
+): Promise<EnhancementStackJson | null> =>
+  invoke("enhancement_stack_get", { stackId }) as Promise<
+    EnhancementStackJson | null
+  >;
+
+export type StackMutation =
+  | { Reorder: { operation_id: string; new_index: number } }
+  | { SetEnabled: { operation_id: string; enabled: boolean } }
+  | { Remove: { operation_id: string } }
+  | { MarkNeedsPreview: { operation_id: string } }
+  | { Append: StackOperationJson };
+
+export const enhancementStackApplyMutation = (
+  stackId: string,
+  mutation: StackMutation,
+): Promise<EnhancementStackJson> =>
+  invoke("enhancement_stack_apply_mutation", {
+    stackId,
+    mutation,
+  }) as Promise<EnhancementStackJson>;
+
+export interface BranchEnhancementStackRequest {
+  source_stack_id: string;
+  cutoff: number;
+  new_image_version_id: string;
+}
+
+export const enhancementStackBranch = (
+  request: BranchEnhancementStackRequest,
+): Promise<EnhancementStackJson> =>
+  invoke("enhancement_stack_branch", { request }) as Promise<
+    EnhancementStackJson
+  >;
+
+export type SafetyClassification =
+  | "deterministic"
+  | "perceptual"
+  | "generative";
+
+export type OperationCategory =
+  | "cleanup"
+  | "denoise"
+  | "restoration"
+  | "star"
+  | "detail"
+  | "upscale"
+  | "inpaint"
+  | "background";
+
+export interface OperationRegistryEntryJson {
+  operation_id: string;
+  display_name: string;
+  category: OperationCategory;
+  safety_classification: SafetyClassification;
+  description: string;
+  default_parameters_json: string;
+  requires_region: boolean;
+}
+
+export const enhancementOperationsList = (): Promise<
+  OperationRegistryEntryJson[]
+> =>
+  invoke("enhancement_operations_list") as Promise<
+    OperationRegistryEntryJson[]
+  >;
+
+export const operationsRegistryList = (): Promise<
+  OperationRegistryEntryJson[]
+> =>
+  invoke("operations_registry_list") as Promise<
+    OperationRegistryEntryJson[]
+  >;
+
+export interface ApplyAiOperationRequest {
+  project_id: string;
+  source_image_version_id: string;
+  operation_id: string;
+  parameters_json: string;
+  preview_id?: string | null;
+}
+
+export interface ApplyAiOperationResponse {
+  image_version: ImageVersionJson;
+  outcome: { operation_id: string; result_image_version_id: string };
+  operation_row: { operation_id: string };
+}
+
+export const enhancementApplyOperation = (
+  request: ApplyAiOperationRequest,
+): Promise<ApplyAiOperationResponse> =>
+  invoke("enhancement_apply_operation", { request }) as Promise<
+    ApplyAiOperationResponse
+  >;
+
+export interface ImageVersionJson {
+  version_id: string;
+  project_id: string;
+  label: string;
+  sequence: number;
+  primary_artifact_id: string;
+  source_version_id: string | null;
+  created_at: string;
+  hidden: boolean;
+}
+
+export const imageVersionListForProject = (
+  projectId: string,
+): Promise<{ items: ImageVersionJson[] }> =>
+  invoke("image_version_list_for_project", {
+    projectId,
+  }) as Promise<{ items: ImageVersionJson[] }>;
+
+export const imageVersionGet = (
+  versionId: string,
+): Promise<ImageVersionJson | null> =>
+  invoke("image_version_get", { versionId }) as Promise<
+    ImageVersionJson | null
+  >;
+
 export const aiOperationGet = (
   operationId: string,
 ): Promise<AiOperationJson | null> =>

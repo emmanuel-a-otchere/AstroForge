@@ -680,6 +680,20 @@ fn main() {
             // latest analysis, runs the rules, persists
             // `ai_recommendations`, and returns the report.
             commands_ai_enhancement::generate_ai_recommendations,
+            // CR-06 P4 — enhancement stack + apply round +
+            // image-version tracking. The stack engine is
+            // pure logic in `astroforge-core::enhancement`;
+            // the apply round creates a fresh Image
+            // Version per CR-06 §4 / §22.
+            commands_ai_enhancement::enhancement_stack_create,
+            commands_ai_enhancement::enhancement_stack_get,
+            commands_ai_enhancement::enhancement_stack_apply_mutation,
+            commands_ai_enhancement::enhancement_stack_branch,
+            commands_ai_enhancement::enhancement_apply_operation,
+            commands_ai_enhancement::enhancement_operations_list,
+            commands_ai_enhancement::operations_registry_list,
+            commands_ai_enhancement::image_version_list_for_project,
+            commands_ai_enhancement::image_version_get,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

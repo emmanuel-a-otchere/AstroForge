@@ -27,6 +27,7 @@ pub mod image;
 pub mod image_analysis;
 pub mod import_scan;
 pub mod ingest;
+pub mod masks;
 pub mod mvp_pipeline;
 pub mod narrowband;
 pub mod orchestrator;

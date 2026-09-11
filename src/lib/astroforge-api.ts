@@ -400,6 +400,92 @@ export const imageVersionGet = (
     ImageVersionJson | null
   >;
 
+// CR-06 P5 — region-aware mask system. The mask
+// engine in `astroforge-core::masks` produces JSON
+// payloads via `astroforge_core::masks::encoding`;
+// the Tauri commands persist the rows.
+
+export interface AiMaskJson {
+  mask_id: string;
+  project_id: string;
+  image_version_id: string;
+  provenance: string;
+  parents_json: string | null;
+  mask_json: string;
+  created_at: string;
+}
+
+export interface CreateAiMaskRequest {
+  project_id: string;
+  image_version_id: string;
+  provenance: string;
+  parents_json?: string | null;
+  mask_json: string;
+}
+
+export const createAiMask = (
+  request: CreateAiMaskRequest,
+): Promise<{ mask: AiMaskJson }> =>
+  invoke("create_ai_mask", { request }) as Promise<{ mask: AiMaskJson }>;
+
+export interface UpdateAiMaskRequest {
+  mask_id: string;
+  mask_json: string;
+}
+
+export const updateAiMask = (
+  request: UpdateAiMaskRequest,
+): Promise<{ mask: AiMaskJson }> =>
+  invoke("update_ai_mask", { request }) as Promise<{ mask: AiMaskJson }>;
+
+export const aiMaskGet = (maskId: string): Promise<AiMaskJson | null> =>
+  invoke("ai_mask_get", { maskId }) as Promise<AiMaskJson | null>;
+
+export const aiMaskListForVersion = (
+  imageVersionId: string,
+): Promise<{ items: AiMaskJson[] }> =>
+  invoke("ai_mask_list_for_version", {
+    imageVersionId,
+  }) as Promise<{ items: AiMaskJson[] }>;
+
+export type AutoMaskTarget = "stars" | "background" | "bright_core";
+
+export interface BuildAutoMaskRequest {
+  image_version_id: string;
+  width: number;
+  height: number;
+  channels: number;
+  pixels: number[];
+  target: AutoMaskTarget;
+}
+
+export interface BuildAutoMaskResponse {
+  mask_json: string;
+  provenance: string;
+  width: number;
+  height: number;
+}
+
+export const buildAutoMask = (
+  request: BuildAutoMaskRequest,
+): Promise<BuildAutoMaskResponse> =>
+  invoke("build_auto_mask", { request }) as Promise<BuildAutoMaskResponse>;
+
+export type CompositeMaskOp = "union" | "intersect" | "difference";
+
+export interface ComposeMaskRequest {
+  project_id: string;
+  image_version_id: string;
+  parent_a_id: string;
+  parent_b_id: string;
+  op: CompositeMaskOp;
+}
+
+export const composeMask = (
+  request: ComposeMaskRequest,
+): Promise<{ mask: AiMaskJson }> =>
+  invoke("compose_mask", { request }) as Promise<{ mask: AiMaskJson }>;
+
 export const aiOperationGet = (
   operationId: string,
 ): Promise<AiOperationJson | null> =>

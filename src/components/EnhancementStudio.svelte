@@ -45,6 +45,7 @@
     listImageVersions,
   } from "../state/ai-enhancement";
   import EnhancementOperationCard from "./EnhancementOperationCard.svelte";
+  import MaskEditor from "./MaskEditor.svelte";
   import type {
     EnhancementStackJson,
     OperationRegistryEntryJson,
@@ -377,6 +378,12 @@
           </li>
         {/each}
       </ul>
+      <!-- CR-06 P5 — region-aware mask editor. Lives
+        below the operations list in Zone C; the
+        editor shell exercises auto + composite
+        build flows. Painting (brush / polygon) ships
+        in a future slice. -->
+      <MaskEditor />
     {/if}
     {#if $aiEnhancementStore.error}
       <p class="error">{$aiEnhancementStore.error}</p>

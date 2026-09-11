@@ -731,3 +731,249 @@ fn now_iso_string() -> String {
         .unwrap_or(0);
     astroforge_ai::recommendations::format_unix_seconds(secs)
 }
+
+/// CR-06 P5 — request payload for `create_ai_mask`. The
+/// caller supplies the JSON-encoded mask (the
+/// `astroforge-core::masks::encoding::to_json` shape).
+/// Auto + parametric masks are built server-side via
+/// `apply_ai_mask_from_*` commands (see below); the
+/// `create_ai_mask` command accepts a pre-built mask
+/// from the frontend.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateAiMaskRequest {
+    pub project_id: String,
+    pub image_version_id: String,
+    pub provenance: String,
+    pub parents_json: Option<String>,
+    pub mask_json: String,
+}
+
+/// CR-06 P5 — response: the persisted mask row as JSON.
+#[derive(Debug, Clone, Serialize)]
+pub struct AiMaskDto {
+    pub mask: serde_json::Value,
+}
+
+/// CR-06 P5 — persist a mask row. The caller supplies
+/// the encoded mask (the JSON shape from
+/// `astroforge_core::masks::encoding::to_json`). The
+/// command validates the encoding via `from_json`
+/// before persisting so the store never holds a
+/// malformed row.
+#[tauri::command]
+pub fn create_ai_mask(request: CreateAiMaskRequest) -> Result<AiMaskDto, String> {
+    use crate::masks::encoding;
+    let _ = encoding::from_json(&request.mask_json)
+        .map_err(|e| format!("invalid mask encoding: {e}"))?;
+    let mask_id = format!("msk_{}", new_id_suffix());
+    let row = crate::domain::AiMask {
+        mask_id,
+        project_id: request.project_id,
+        image_version_id: request.image_version_id,
+        provenance: request.provenance,
+        parents_json: request.parents_json,
+        mask_json: request.mask_json,
+        created_at: now_iso_string(),
+    };
+    with_store(|s| s.upsert_ai_mask(&row).map_err(|e| e.to_string()))?;
+    Ok(AiMaskDto {
+        mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
+    })
+}
+
+/// CR-06 P5 — replace a mask row's `mask_json` (the
+/// user painted a new brush stroke or edited a
+/// polygon). The row's id + provenance + parents stay
+/// the same; only the pixel raster updates.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateAiMaskRequest {
+    pub mask_id: String,
+    pub mask_json: String,
+}
+
+#[tauri::command]
+pub fn update_ai_mask(request: UpdateAiMaskRequest) -> Result<AiMaskDto, String> {
+    use crate::masks::encoding;
+    let _ = encoding::from_json(&request.mask_json)
+        .map_err(|e| format!("invalid mask encoding: {e}"))?;
+    let row = with_store(|s| {
+        let mut existing = s
+            .get_ai_mask(&request.mask_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("mask not found: {}", request.mask_id))?;
+        existing.mask_json = request.mask_json.clone();
+        existing.created_at = now_iso_string();
+        s.upsert_ai_mask(&existing).map_err(|e| e.to_string())?;
+        Ok(existing)
+    })?;
+    Ok(AiMaskDto {
+        mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
+    })
+}
+
+/// CR-06 P5 — list the `AiMask` rows for an Image
+/// Version. The frontend renders the mask picker
+/// (the Zone B overlay source list per CR-06 §13).
+#[tauri::command]
+pub fn ai_mask_list_for_version(
+    image_version_id: String,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(|s| {
+        let rows = s
+            .list_ai_masks(&image_version_id)
+            .map_err(|e| e.to_string())?;
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })
+}
+
+/// CR-06 P5 — fetch a single mask row.
+#[tauri::command]
+pub fn ai_mask_get(mask_id: String) -> Result<serde_json::Value, String> {
+    with_store(|s| match s.get_ai_mask(&mask_id) {
+        Ok(Some(row)) => Ok(serde_json::to_value(&row).map_err(|e| e.to_string())?),
+        Ok(None) => Ok(serde_json::Value::Null),
+        Err(e) => Err(e.to_string()),
+    })
+}
+
+/// CR-06 P5 — build an auto mask on the server from
+/// an image + a target kind. The frontend supplies
+/// the pixel buffer (in `[0, 1]`, row-major) + the
+/// target, and the command runs the auto-mask
+/// builder, encodes the result, and returns the JSON.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuildAutoMaskRequest {
+    pub image_version_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub pixels: Vec<f64>,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuildAutoMaskResponse {
+    pub mask_json: String,
+    pub provenance: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub fn build_auto_mask(request: BuildAutoMaskRequest) -> Result<BuildAutoMaskResponse, String> {
+    use crate::masks::auto::{build as auto_build, AutoTarget};
+    let BuildAutoMaskRequest {
+        image_version_id: _,
+        width,
+        height,
+        channels,
+        pixels,
+        target,
+    } = request;
+    let target = match target.as_str() {
+        "stars" => AutoTarget::Stars,
+        "background" => AutoTarget::Background,
+        "bright_core" => AutoTarget::BrightCore,
+        other => return Err(format!("unknown auto mask target: {other}")),
+    };
+    let expected = (width as usize) * (height as usize) * (channels as usize);
+    if pixels.len() != expected {
+        return Err(format!(
+            "pixel count mismatch: got {}, expected {} ({}×{}×{})",
+            pixels.len(),
+            expected,
+            width,
+            height,
+            channels
+        ));
+    }
+    let mut img = F32Image::new(width as usize, height as usize, channels as usize);
+    for (i, v) in pixels.iter().enumerate() {
+        let clamped = v.clamp(0.0, 1.0) as f32;
+        let c = i / ((width as usize) * (height as usize));
+        let rem = i % ((width as usize) * (height as usize));
+        let y = rem / (width as usize);
+        let x = rem % (width as usize);
+        img[(c, y, x)] = clamped;
+    }
+    let mask = auto_build(&img, target).map_err(|e| e.to_string())?;
+    let provenance = mask.provenance.clone();
+    let json = crate::masks::encoding::to_json(&mask).map_err(|e| e.to_string())?;
+    Ok(BuildAutoMaskResponse {
+        mask_json: json,
+        provenance,
+        width: mask.width,
+        height: mask.height,
+    })
+}
+
+/// CR-06 P5 — compose two masks via a boolean operator
+/// (union / intersect / difference). The frontend
+/// supplies the two existing mask rows + the op; the
+/// command builds the composite, persists a fresh
+/// `AiMask` row tagged as `composite` provenance, and
+/// returns the row.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ComposeMaskRequest {
+    pub project_id: String,
+    pub image_version_id: String,
+    pub parent_a_id: String,
+    pub parent_b_id: String,
+    pub op: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ComposeMaskResponse {
+    pub mask: serde_json::Value,
+}
+
+#[tauri::command]
+pub fn compose_mask(request: ComposeMaskRequest) -> Result<ComposeMaskResponse, String> {
+    use crate::masks::composite::{apply, CompositeOp};
+    use crate::masks::encoding::{from_json, to_json};
+    let op = match request.op.as_str() {
+        "union" => CompositeOp::Union,
+        "intersect" => CompositeOp::Intersect,
+        "difference" => CompositeOp::Difference,
+        other => return Err(format!("unknown composite op: {other}")),
+    };
+    let composite = with_store(|s| {
+        let a_row = s
+            .get_ai_mask(&request.parent_a_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("mask a not found: {}", request.parent_a_id))?;
+        let b_row = s
+            .get_ai_mask(&request.parent_b_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("mask b not found: {}", request.parent_b_id))?;
+        let a_mask = from_json(&a_row.mask_json).map_err(|e| e.to_string())?;
+        let b_mask = from_json(&b_row.mask_json).map_err(|e| e.to_string())?;
+        let composite = apply(&a_mask, &b_mask, op).map_err(|e| e.to_string())?;
+        Ok(composite)
+    })?;
+    let composite_json = to_json(&composite).map_err(|e| e.to_string())?;
+    let mask_id = format!("msk_{}", new_id_suffix());
+    let row = crate::domain::AiMask {
+        mask_id,
+        project_id: request.project_id,
+        image_version_id: request.image_version_id,
+        provenance: composite.provenance.clone(),
+        parents_json: Some(
+            serde_json::to_string(&vec![
+                request.parent_a_id.clone(),
+                request.parent_b_id.clone(),
+            ])
+            .unwrap_or_else(|_| "[]".to_string()),
+        ),
+        mask_json: composite_json,
+        created_at: now_iso_string(),
+    };
+    with_store(|s| s.upsert_ai_mask(&row).map_err(|e| e.to_string()))?;
+    Ok(ComposeMaskResponse {
+        mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
+    })
+}

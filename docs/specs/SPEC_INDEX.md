@@ -8,14 +8,23 @@ truth for the project's behavior, architecture, and feature set.
 
 | Version | File | Status | Date |
 |---|---|---|---|
-| **1.1.0** | [AstroForge_Spec_v1.1.0.md](./AstroForge_Spec_v1.1.0.md) | ✅ Active | 2026-08-30 |
+| **1.2.0** | [AstroForge_Spec_v1.2.0.md](./AstroForge_Spec_v1.2.0.md) | ✅ Active | 2026-09-11 |
 
-> **CR-06 proposed 2026-09-10:** AI Enhancement Studio & Intelligent Image Revamp. Status: Proposed. Target: AstroForge v1.0. Depends on CR-01–CR-05. Enables CR-07+ etc. See [../CR-06-AI-ENHANCEMENT-STUDIO.md](../CR-06-AI-ENHANCEMENT-STUDIO.md). The spec is not yet bumped — CR-06 will warrant a 1.2.0 (or 2.0.0) version when its phases land; the proposal is filed alongside the 1.1.0 spec so cross-references resolve.
+> CR-06 landed in 1.2.0 (PRs #293–#299). The bump is backward-compatible:
+> existing recipes remain valid. The 1.2.0 spec rolls CR-06 (AI Enhancement
+> Studio) into the active spec; see the audit at [../M9_AUDIT.md](../M9_AUDIT.md)
+> for the per-criterion acceptance walk-through.
+>
+> **CR-06 (resolved 2026-09-11):** AI Enhancement Studio & Intelligent Image
+> Revamp. Status: Shipped (P1–P7). Target: AstroForge 1.2.0. Depends on
+> CR-01–CR-05. Enables CR-07+ etc. See
+> [../CR-06-AI-ENHANCEMENT-STUDIO.md](../CR-06-AI-ENHANCEMENT-STUDIO.md).
 
 ## Historical Specifications
 
 | Version | File | Status | Date | Notes |
 |---|---|---|---|---|
+| 1.1.0 | [AstroForge_Spec_v1.1.0.md](./AstroForge_Spec_v1.1.0.md) | 📦 Superseded | 2026-08-30 | Active until CR-06 landed; superseded by 1.2.0 |
 | 1.0.0 | *(attachment, not on disk)* | 📦 Superseded | 2026-08-30 | Original draft; superseded by 1.1.0 |
 
 ## Related Documents

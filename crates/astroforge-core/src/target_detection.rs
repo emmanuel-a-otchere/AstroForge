@@ -107,6 +107,30 @@ pub struct TargetIntelligence {
     pub observations: Vec<TargetObservation>,
 }
 
+impl TargetIntelligence {
+    /// Build a `TargetIntelligence` for a known canonical target
+    /// name (e.g. "M31"). Looks up the candidate in the embedded
+    /// catalog and emits a single high-confidence observation.
+    ///
+    /// Useful for tests, fixtures, and the IPC layer (P8) when
+    /// the caller has already resolved the target outside the
+    /// FITS-metadata path.
+    pub fn from_known_name(name: &str) -> Self {
+        match lookup(name) {
+            Some(c) => Self {
+                candidate: Some(c.clone()),
+                confidence: 1.0,
+                observations: vec![TargetObservation::new("explicit_lookup", name, 1.0, 1.0)],
+            },
+            None => Self {
+                candidate: None,
+                confidence: 0.0,
+                observations: vec![],
+            },
+        }
+    }
+}
+
 /// Normalize an arbitrary target-name string for matching.
 ///
 /// Strips whitespace, uppercases, removes punctuation that

@@ -25,9 +25,11 @@ import {
   analyzeImage,
   enhancementPreviewListForOperation,
   enhancementStackListForSource,
+  generateAiRecommendations,
   imageAnalysisLatest,
   imageRegionList,
   type AnalyzeImageRequest,
+  type GenerateRecommendationsRequest,
 } from "../lib/astroforge-api";
 
 /**
@@ -75,6 +77,16 @@ export interface AiEnhancementState {
   analysis: unknown | null;
   regions: unknown[];
   recommendations: unknown[];
+  /// CR-06 P3 — the recommendation engine's structured
+  /// report (sequenced recommendations + sequencing
+  /// notes). Distinct from `recommendations`, which is the
+  /// flattened list of persisted `AiRecommendation` rows
+  /// the store reads back; `recommendationsReport`
+  /// carries the engine's full output (including the
+  /// §23 sequencing rationale) so the UI can render
+  /// "Detail was moved after Denoise — amplifying noise
+  /// before denoise would bake it in" alongside each row.
+  recommendationsReport: unknown | null;
   masks: unknown[];
   stacks: unknown[];
   previews: unknown[];
@@ -86,6 +98,7 @@ const initial: AiEnhancementState = {
   analysis: null,
   regions: [],
   recommendations: [],
+  recommendationsReport: null,
   masks: [],
   stacks: [],
   previews: [],
@@ -116,6 +129,7 @@ export async function loadAiEnhancementFor(
     analysis: null,
     regions: [],
     recommendations: [],
+    recommendationsReport: null,
     masks: [],
     stacks: [],
     previews: [],
@@ -224,6 +238,54 @@ export function listAiOperationsForStage(stageRunId: string): Promise<unknown[]>
   return aiOperationListForStage(stageRunId).then((r) =>
     Array.isArray(r?.items) ? r.items : [],
   );
+}
+
+/**
+ * CR-06 P3 — run the recommendation engine over the
+ * latest analysis for an Image Version. The command
+ * persists the resulting `AiRecommendation` rows and
+ * returns the full engine report (sequenced
+ * recommendations + sequencing notes). The store keeps
+ * both the report and the persisted row list so the UI
+ * can render either shape.
+ *
+ * On failure (no analysis exists, or the IPC errors
+ * out), the function records the error on the store
+ * and re-throws so the caller can show a banner.
+ */
+export async function generateRecommendationsFor(
+  request: GenerateRecommendationsRequest,
+): Promise<void> {
+  aiEnhancementStore.update((s) => ({ ...s, loading: true, error: null }));
+  try {
+    const response = await generateAiRecommendations(request);
+    let report: unknown | null = null;
+    if (typeof response.report_json === "string" && response.report_json.length > 0) {
+      try {
+        report = JSON.parse(response.report_json);
+      } catch {
+        report = null;
+      }
+    }
+    const items = Array.isArray(response.recommendations?.items)
+      ? response.recommendations.items
+      : [];
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      recommendations: items,
+      recommendationsReport: report,
+      loading: false,
+      error: null,
+    }));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      loading: false,
+      error: msg,
+    }));
+    throw e;
+  }
 }
 
 // Snapshot helper used by tests / consumers that need a

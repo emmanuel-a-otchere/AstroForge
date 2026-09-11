@@ -12,3 +12,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 ndarray = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

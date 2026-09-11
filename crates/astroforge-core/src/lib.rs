@@ -5,6 +5,7 @@ pub mod background;
 pub mod bayer_detection;
 pub mod bayer_intelligence;
 pub mod calibration;
+pub mod capture_analysis;
 pub mod classification;
 pub mod color_calibration;
 pub mod cosmetic;

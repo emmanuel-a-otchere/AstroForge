@@ -5,6 +5,7 @@ pub mod operations;
 pub mod recommendations;
 pub mod registry;
 pub mod service;
+pub mod target_classify;
 pub mod tiling;
 
 pub use hardware::{GpuBackend, HardwareProbe, QualityTier};

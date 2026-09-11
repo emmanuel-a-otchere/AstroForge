@@ -15,10 +15,12 @@
   import {
     captureKindLabel,
     confidenceLabel,
+    fetchProvenance,
     goToStep,
     importWizard,
     narrowbandCompositionLabel,
     refreshUnderstanding,
+    type TargetProvenanceReportJson,
   } from "../../state/import-wizard";
 
   $: state = $importWizard;
@@ -30,9 +32,19 @@
       classification?.classification_confidence !== undefined &&
       (classification.classification_confidence ?? 1) < 0.6);
 
+  let provenance: TargetProvenanceReportJson | null = null;
+  let provenanceError: string | null = null;
+
   async function refresh(): Promise<void> {
     if (state.sessionId) {
       await refreshUnderstanding(state.sessionId);
+      try {
+        provenance = await fetchProvenance();
+        provenanceError = null;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        provenanceError = msg;
+      }
     }
   }
 </script>
@@ -98,6 +110,17 @@
           </p>
         </div>
       </aside>
+    {/if}
+
+    {#if provenance}
+      <details class="provenance">
+        <summary class="font-body">
+          Provenance: <strong>{provenance.provenance}</strong>
+        </summary>
+        <p class="font-body provenance-reasoning">{provenance.reasoning}</p>
+      </details>
+    {:else if provenanceError}
+      <p class="error" role="alert">Provenance fetch failed: {provenanceError}</p>
     {/if}
 
     <div class="actions">
@@ -168,6 +191,20 @@
   }
   .ambiguity-alert .material-symbols-outlined {
     color: var(--color-warning, #f5a623);
+  }
+  .provenance {
+    border: 1px solid var(--color-border, #444);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    background: var(--color-surface-elevated, #1a1a1a);
+  }
+  .provenance summary {
+    cursor: pointer;
+    color: var(--color-text-secondary, #999);
+  }
+  .provenance-reasoning {
+    margin: 0.5rem 0 0;
+    color: var(--color-text-primary, #eee);
   }
   .actions {
     display: flex;

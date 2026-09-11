@@ -20,13 +20,16 @@ import { get, writable, type Writable } from "svelte/store";
 import type {
   AssetMetadataInputJson,
   CaptureKind,
+  ClassificationProvenance,
   NarrowbandComposition,
   SessionAnalysisJson,
   SessionClassificationJson,
+  TargetProvenanceReportJson,
 } from "../lib/astroforge-api";
 import {
   importAnalyseSession,
   importConfirm,
+  importGetTargetProvenance,
   importGetUnderstanding,
   importOverrideClassification,
   importSetMaterialised,
@@ -35,9 +38,11 @@ import {
 export type {
   AssetMetadataInputJson,
   CaptureKind,
+  ClassificationProvenance,
   NarrowbandComposition,
   SessionAnalysisJson,
   SessionClassificationJson,
+  TargetProvenanceReportJson,
 };
 
 // ─── Wizard step ──────────────────────────────────────────────
@@ -273,6 +278,36 @@ export function setOverrideNarrowbandComposition(
     ...s,
     overrideNarrowbandComposition: composition,
   }));
+}
+
+/**
+ * Fetch the AI classification provenance for the current
+ * session. Returns null when no session is wired or the
+ * fetch fails (caller handles the error display).
+ */
+export async function fetchProvenance(): Promise<TargetProvenanceReportJson | null> {
+  const s = get(importWizard);
+  if (!s.sessionId) {
+    return null;
+  }
+  try {
+    return await importGetTargetProvenance(s.sessionId);
+  } catch {
+    return null;
+  }
+}
+
+export function provenanceLabel(
+  provenance: ClassificationProvenance,
+): string {
+  switch (provenance) {
+    case "deterministic":
+      return "Deterministic";
+    case "ai_stub_requested":
+      return "AI confirming…";
+    case "user_override":
+      return "User correction applied";
+  }
 }
 
 // ─── Tests ─────────────────────────────────────────────────────

@@ -727,6 +727,11 @@ fn main() {
             commands_import::import_confirm,
             commands_import::import_override_classification,
             commands_import::import_set_materialised,
+            // CR-04 P10 — AI provenance IPC. Surfaces the
+            // source of authority for the target
+            // classification (deterministic / ai-stub /
+            // user-override) to the Understanding panel.
+            commands_import::import_get_target_provenance,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

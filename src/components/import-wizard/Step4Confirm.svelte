@@ -15,18 +15,37 @@
     applyOverrides,
     captureKindLabel,
     confirmUnderstanding,
+    fetchProvenance,
     goToStep,
     importWizard,
     materialiseSession,
     narrowbandCompositionLabel,
+    provenanceLabel,
     setOverrideCaptureKind,
     setOverrideNarrowbandComposition,
     type CaptureKind,
     type NarrowbandComposition,
+    type TargetProvenanceReportJson,
   } from "../../state/import-wizard";
 
   $: state = $importWizard;
   $: classification = state.classification;
+
+  let provenance: TargetProvenanceReportJson | null = null;
+  let provenanceError: string | null = null;
+
+  async function viewProvenance(): Promise<void> {
+    provenanceError = null;
+    try {
+      provenance = await fetchProvenance();
+      if (!provenance) {
+        provenanceError = "No provenance recorded for this session.";
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      provenanceError = msg;
+    }
+  }
 
   async function onConfirm(): Promise<void> {
     await confirmUnderstanding();

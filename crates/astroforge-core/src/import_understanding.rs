@@ -169,10 +169,15 @@ pub fn analyse_session(input: &SessionAnalysisInput<'_>) -> SessionAnalysis {
 /// CR-04 P8 — convert a `SessionAnalysis` into a
 /// `SessionClassification` ready for persistence. The
 /// `import_state` field is derived from the analysis.
+/// The `target_provenance` is computed via the P10 AI
+/// stub (D-CR04-3) — when the deterministic P4 confidence
+/// is below the AI floor, the AI stub was invoked and the
+/// provenance records the intent.
 pub fn classification_from_analysis(
     session_id: &str,
     analysis: &SessionAnalysis,
 ) -> SessionClassification {
+    use crate::domain::ClassificationProvenance;
     let import_state = derive_import_state(analysis);
     let capture_kind = Some(analysis.capture.kind.as_str().to_string());
     let narrowband_composition = Some(
@@ -183,6 +188,18 @@ pub fn classification_from_analysis(
             .to_string(),
     );
     let classification_confidence = Some(analysis.aggregate_confidence);
+
+    // P10 — derive the target provenance from the
+    // aggregate confidence. When the deterministic
+    // pipeline was above the AI floor, the result is
+    // pure deterministic; otherwise the AI stub was
+    // invoked (even though the model is a no-op today).
+    let target_provenance = if analysis.aggregate_confidence >= 0.85 {
+        ClassificationProvenance::Deterministic
+    } else {
+        ClassificationProvenance::AiStubRequested
+    };
+
     let classification_metadata = serde_json::to_string(analysis).ok();
     SessionClassification {
         session_id: session_id.into(),
@@ -190,6 +207,7 @@ pub fn classification_from_analysis(
         capture_kind,
         narrowband_composition,
         classification_confidence,
+        target_provenance,
         classification_metadata,
     }
 }

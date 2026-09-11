@@ -23,7 +23,7 @@
 //! the Understanding panel + the ambiguity dialog.
 
 use crate::commands_project::ProjectState;
-use astroforge_core::domain::ImportState;
+use astroforge_core::domain::{ClassificationProvenance, ImportState};
 use astroforge_core::domain_store::DomainStore;
 use astroforge_core::import_understanding;
 use astroforge_core::import_scan::ExtractedMetadata;
@@ -164,10 +164,56 @@ pub fn import_override_classification(
         classification.narrowband_composition = Some(composition);
     }
     classification.import_state = ImportState::Confirmed;
+    // CR-04 P10 — recording the user override in the
+    // provenance column so the UI can surface "User
+    // correction applied" on the understanding panel.
+    classification.target_provenance = ClassificationProvenance::UserOverride;
     store
         .set_session_classification(&session_id, &classification)
         .map_err(|e| e.to_string())?;
     Ok(classification)
+}
+
+/// CR-04 P10 — fetch the AI classification provenance
+/// for a session. The UI calls this to render "AI
+/// confirming…" or "Deterministic" or "User override"
+/// on the Understanding panel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetProvenanceReport {
+    pub session_id: String,
+    pub provenance: String,
+    pub reasoning: String,
+}
+
+#[tauri::command]
+pub fn import_get_target_provenance(
+    state: State<'_, ProjectState>,
+    session_id: String,
+) -> Result<TargetProvenanceReport, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let classification = store
+        .get_session_classification(&session_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no classification recorded".into())?;
+    let provenance = classification.target_provenance.as_str().to_string();
+    let reasoning = match classification.target_provenance {
+        ClassificationProvenance::Deterministic => {
+            "Target detected by deterministic P4 classifier. No AI confirmation needed."
+                .into()
+        }
+        ClassificationProvenance::AiStubRequested => {
+            "AI confirmation requested (P10 stub). The deterministic P4 result was below the AI floor; the AI model is a no-op today and the deterministic fallback was used.".into()
+        }
+        ClassificationProvenance::UserOverride => {
+            "Target classification overridden by the user via the §13 ambiguity panel."
+                .into()
+        }
+    };
+    Ok(TargetProvenanceReport {
+        session_id,
+        provenance,
+        reasoning,
+    })
 }
 
 /// CR-04 P8 — mark the session as `Materialised`. Called

@@ -411,9 +411,31 @@ ALTER TABLE sessions ADD COLUMN classification_confidence REAL;
 ALTER TABLE sessions ADD COLUMN classification_metadata TEXT;
 "#,
     ),
+    // CR-04 P10 — provenance column. Records the source
+    // of authority for the target classification
+    // (deterministic / ai-stub-requested / user-override).
+    // The UI reads it to surface "AI confirming…" when
+    // the AI path was invoked.
+    (
+        8,
+        r#"
+ALTER TABLE sessions ADD COLUMN target_provenance TEXT NOT NULL DEFAULT 'deterministic';
+"#,
+    ),
 ];
 
 // ─── Store ──────────────────────────────────────────────────────────────────
+
+/// CR-04 P10 — parse the persisted target_provenance
+/// column into the `ClassificationProvenance` enum.
+fn parse_provenance(s: &str) -> crate::domain::ClassificationProvenance {
+    use crate::domain::ClassificationProvenance;
+    match s {
+        "ai_stub_requested" => ClassificationProvenance::AiStubRequested,
+        "user_override" => ClassificationProvenance::UserOverride,
+        _ => ClassificationProvenance::Deterministic,
+    }
+}
 
 pub struct DomainStore {
     conn: Mutex<Connection>,
@@ -658,11 +680,13 @@ impl DomainStore {
             Option<String>,
             Option<f64>,
             Option<String>,
+            String,
         );
         let row: Option<ClassificationRow> = conn
             .query_row(
                 "SELECT import_state, capture_kind, narrowband_composition,
-                        classification_confidence, classification_metadata
+                        classification_confidence, classification_metadata,
+                        target_provenance
                  FROM sessions WHERE id = ?1",
                 params![session_id],
                 |row| {
@@ -672,11 +696,12 @@ impl DomainStore {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
                     ))
                 },
             )
             .ok();
-        let Some((state, capture, narrowband, confidence, metadata)) = row else {
+        let Some((state, capture, narrowband, confidence, metadata, provenance)) = row else {
             return Ok(None);
         };
         Ok(Some(SessionClassification {
@@ -685,6 +710,7 @@ impl DomainStore {
             capture_kind: capture,
             narrowband_composition: narrowband,
             classification_confidence: confidence,
+            target_provenance: parse_provenance(&provenance),
             classification_metadata: metadata,
         }))
     }
@@ -708,6 +734,7 @@ impl DomainStore {
                 narrowband_composition = ?4,
                 classification_confidence = ?5,
                 classification_metadata = ?6,
+                target_provenance = ?7,
                 updated_at = datetime('now')
              WHERE id = ?1",
             params![
@@ -717,6 +744,7 @@ impl DomainStore {
                 classification.narrowband_composition,
                 classification.classification_confidence,
                 classification.classification_metadata,
+                classification.target_provenance.as_str(),
             ],
         )?;
         Ok(())
@@ -2401,10 +2429,12 @@ mod tests {
         // image_versions migration.
         // CR-04 P8 — schema_version() bumped to 7 by the
         // session-classification ALTER TABLE migration.
-        assert_eq!(s.schema_version(), 7);
+        // CR-04 P10 — schema_version() bumped to 8 by the
+        // target_provenance ALTER TABLE migration.
+        assert_eq!(s.schema_version(), 8);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 7);
+        assert_eq!(s2.schema_version(), 8);
     }
 
     #[test]

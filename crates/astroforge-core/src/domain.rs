@@ -263,6 +263,35 @@ impl ImportState {
     }
 }
 
+/// CR-04 P10 — the source of authority for the target
+/// classification. Mirrors
+/// `astroforge_ai::target_classify::TargetClassificationProvenance`
+/// but lives in `domain.rs` so the schema migration can
+/// record it directly on the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClassificationProvenance {
+    /// The deterministic P3..P7 classifier was authoritative.
+    Deterministic,
+    /// The AI stub was requested (per D-CR04-3) but
+    /// returned the deterministic fallback. The UI
+    /// surfaces "AI confirming…" when this is the
+    /// provenance.
+    AiStubRequested,
+    /// A user override was applied (per §13 ambiguity UX).
+    UserOverride,
+}
+
+impl ClassificationProvenance {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClassificationProvenance::Deterministic => "deterministic",
+            ClassificationProvenance::AiStubRequested => "ai_stub_requested",
+            ClassificationProvenance::UserOverride => "user_override",
+        }
+    }
+}
+
 /// CR-04 P8 — the per-session import understanding. The
 /// classification pipeline (P3 frame classification, P4
 /// target detection, P5 session grouping, P6 capture
@@ -283,6 +312,13 @@ pub struct SessionClassification {
     /// Below ~0.6 the UI surfaces the ambiguity dialog
     /// (CR-04 §13).
     pub classification_confidence: Option<f64>,
+    /// CR-04 P10 — the source of authority for the
+    /// target classification. `Deterministic` when the
+    /// P4 detector was above the AI floor; `AiStubRequested`
+    /// when the AI stub was invoked but returned the
+    /// deterministic fallback; `UserOverride` when the
+    /// user corrected the suggestion via the §13 panel.
+    pub target_provenance: ClassificationProvenance,
     /// JSON blob of per-classifier observations (target,
     /// capture, narrowband). Serialized so the UI can
     /// render "Observation → Evidence → Confidence →

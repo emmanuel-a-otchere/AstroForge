@@ -1286,3 +1286,38 @@ export const importSetMaterialised = (
   sessionId: string,
 ): Promise<SessionClassificationJson> =>
   invoke("import_set_materialised", { sessionId });
+
+// CR-04 P10 — AI provenance. Returns the source of
+// authority for the target classification
+// (deterministic / ai_stub_requested / user_override)
+// + a reasoning string the UI surfaces on the
+// Understanding panel.
+
+export type ClassificationProvenance =
+  | "deterministic"
+  | "ai_stub_requested"
+  | "user_override";
+
+export interface TargetProvenanceReportJson {
+  session_id: string;
+  provenance: ClassificationProvenance;
+  reasoning: string;
+}
+
+export const importGetTargetProvenance = (
+  sessionId: string,
+): Promise<TargetProvenanceReportJson> =>
+  invoke("import_get_target_provenance", { sessionId });
+
+export function provenanceLabel(
+  provenance: ClassificationProvenance,
+): string {
+  switch (provenance) {
+    case "deterministic":
+      return "Deterministic";
+    case "ai_stub_requested":
+      return "AI confirming…";
+    case "user_override":
+      return "User correction applied";
+  }
+}

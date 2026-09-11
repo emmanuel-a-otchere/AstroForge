@@ -1,16 +1,33 @@
 # AstroForge — Living Project Plan
 
-**Last updated:** 2026-09-03
-**Current phase:** Phase 0 + Phase 1 (UI scaffolding complete; 6 Phase 1 MVP tasks pending);
-Phase 1.5 (UI chrome complete; **50 of 50 processing-pipeline issues OPEN**);
-Phase 2+ deferred.
-**Spec version:** 1.1.0
-**Active CR:** AF-CR-2026-09-01-IMG-PIPELINE
-**Active plan:** [`docs/plans/2026-09-03-m2-tranche/`](plans/2026-09-03-m2-tranche/PLAN.md)
-**Re-plan rationale:** Phases 1-6 of the Coder session shipped UI chrome, design tokens,
-local GalleryStore, and Supabase removal. The M1.5 processing pipeline (50 issues) and
-MVP smoke tests (4 issues) are still pending. M2 = finish what was promised in M1.5,
-not start new work. See `plans/2026-09-03-m2-tranche/PLAN.md` for the tranche plan.
+**Last updated:** 2026-09-11
+**Current phase:** Phases 0–2 landed (UI scaffolding + MVP core pipeline + guided
+processing train). CR-02–CR-06 tranche programmes shipped P1–P7. CR-04 P5/P6/P7
+(session_grouping / capture_analysis / narrowband) is the next substantive slice
+tranche. **No open PRs on `main`.**
+**Spec version:** 1.2.0 (CR-06 bump, backward-compatible minor; see
+`docs/specs/SPEC_INDEX.md`)
+**Active CR programme:** CR-06 closed (P1–P7); CR-04 P5/P6/P7 is the next
+substantive tranche. CR-07 (Zone B canvas + before/after + split comparison) is
+the natural follow-on after CR-04 closes.
+**Active plan:** Per-tranche plans under [`docs/plans/`](plans/):
+- `2026-09-06-cr02-domain-model/PLAN.md` — CR-02 (closed)
+- `2026-09-06-cr03-application-shell/PLAN.md` — CR-03 (closed)
+- `2026-09-06-cr04-intelligent-import/PLAN.md` — CR-04 (P4 closed; P5–P7 pending)
+- `2026-09-07-cr05-intelligent-processing/PLAN.md` — CR-05 (closed)
+- `2026-09-10-cr06-ai-enhancement-studio/PLAN.md` — CR-06 (closed)
+
+**Programme state:** See [`docs/M9_AUDIT.md`](M9_AUDIT.md) for the per-criterion
+CR-06 walk-through (34/39 §35 criteria shipped, 5 partial, 0 missing) and the
+forward-look on P5.1 (real ONNX) + CR-07. [`docs/M8_AUDIT.md`](M8_AUDIT.md) is
+the CR-05 P7 audit + DoD evidence boundary.
+
+**Re-plan rationale (2026-09-11):** The CR-02..06 tranches all shipped P1–P7
+(49 PRs in the 8 days 2026-09-03 → 2026-09-11). AstroForge 1.2.0 spec is the
+contract; the plan now points at the audit docs for the per-programme state
+rather than duplicating the matrix inline. The next slice — this reconciliation
+PR itself — closes the bookkeeping drift (CR doc status headers, CHANGELOG,
+PROJECT_PLAN). After merge, the next substantive work is CR-04 P5/P6/P7.
 
 > This is a **living document**. It is rebased frequently against actual work
 > progress. When a task is completed, its status is updated here and the plan is

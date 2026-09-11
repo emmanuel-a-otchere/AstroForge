@@ -1,7 +1,7 @@
 # CR-06 Implementation Plan — AI Enhancement Studio & Intelligent Image Revamp
 
 **Date:** 2026-09-10
-**Source CR:** [CR-06 — AI Enhancement Studio & Intelligent Image Revamp](../../CR-06-AI-ENHANCEMENT-STUDIO.md) (Status: Proposed, Priority: Critical)
+**Source CR:** [CR-06 — AI Enhancement Studio & Intelligent Image Revamp](../../CR-06-AI-ENHANCEMENT-STUDIO.md) (Status: Shipped P1–P7 (PRs #292–#299); spec bump 1.1.0 → 1.2.0, Priority: Critical)
 **Strategy:** Phase-decomposed into 8 PRs (P0–P7), following the CR-02 / CR-03 / CR-04 / CR-05 conventions. Each phase is one PR-sized tranche; each tranche is independently reviewable and CI-green before the next starts. P0 is documentation-only (this PR).
 
 ## Why a phased rollout

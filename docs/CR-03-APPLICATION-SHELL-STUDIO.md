@@ -1,10 +1,19 @@
 # CR-03 — AstroForge Application Shell & Studio Workspace
 
-Status: Proposed
+Status: Implemented (PRs #241, #242, #243, #244, #245, #246, #247, #248)
 Target: AstroForge v1.0
 Priority: Critical
 Depends on: CR-01, CR-02
 Primary objective: Transform the current application into an image-first astrophotography studio shell built around the persistent Project/Session/Artifact model.
+
+> **Implementation note (2026-09-11):** All eight CR-03 slices
+> shipped behind PRs #241–#248 (CR-03 P1–P6) in the CR-03 tranche
+> (Sep 2026). Application shell + Home workspace + Projects
+> workspace + Studio shell + Overview + wizard deprecation +
+> image-versions / AI-recommendations / Compare / Export pickers +
+> save indicator + keyboard shortcuts all landed on `main`. See
+> `docs/plans/2026-09-06-cr03-application-shell/PLAN.md` for the
+> tranche plan and `CHANGELOG.md` for per-slice entries.
 
 ## Relationship to CR-01 and CR-02
 

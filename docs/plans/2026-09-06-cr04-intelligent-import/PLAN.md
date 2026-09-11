@@ -1,7 +1,7 @@
 # CR-04 Implementation Plan — Intelligent Import, Session Understanding & Target Detection
 
 **Date:** 2026-09-06
-**Source CR:** [CR-04 — Intelligent Import, Session Understanding & Target Detection](../../CR-04-INTELLIGENT-IMPORT.md) (Status: Proposed, Priority: Critical)
+**Source CR:** [CR-04 — Intelligent Import, Session Understanding & Target Detection](../../CR-04-INTELLIGENT-IMPORT.md) (Status: Partial — Target Detection shipped (PR #253); P5/P6/P7 pending, Priority: Critical)
 **Strategy:** Phase-decomposed into ~10 PRs (P0–P10), matching the CR-02 and CR-03 pattern. Each phase is one PR-sized tranche.
 
 ## Current state (as of 529c85d, CR-03 P6 merge)

@@ -1,10 +1,19 @@
 CR-04 — Intelligent Import, Session Understanding & Target Detection
 
-Status: Proposed
+Status: Partial — Target Detection shipped (PR #253); Session Grouping / Capture Analysis / Narrowband pending
 Target: AstroForge v1.0
 Priority: Critical
 Depends on: CR-01, CR-02, CR-03
 Enables: CR-05, CR-06, CR-09, CR-13, CR-14, CR-15, CR-18, CR-23
+
+> **Implementation note (2026-09-11):** The CR-04 tranche
+> shipped target_detection (FITS OBJECT keyword + filename +
+> directory pattern + ~50-target catalog) behind PR #253 plus
+> earlier slices in the same family. The P5/P6/P7 follow-on
+> slices (session_grouping / capture_analysis / narrowband) are
+> scoped in the CR-04 plan but not yet shipped. See
+> `docs/plans/2026-09-06-cr04-intelligent-import/PLAN.md` for the
+> tranche plan and `CHANGELOG.md` for per-slice entries.
 
 1. Intent
 

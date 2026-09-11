@@ -1,6 +1,6 @@
 CR-04 — Intelligent Import, Session Understanding & Target Detection
 
-Status: Partial — Target Detection (P4, PR #253) + Session Grouping (P5, PR #301) + Capture Analysis (P6, PR #302) + Narrowband Detection (P7, PR #303) + IPC layer (P8, PR #304) shipped; P9 (Import Review UI) pending
+Status: Partial — Target Detection (P4, PR #253) + Session Grouping (P5, PR #301) + Capture Analysis (P6, PR #302) + Narrowband Detection (P7, PR #303) + IPC layer (P8, PR #304) shipped; P9 (Import Review UI) in flight
 Target: AstroForge v1.0
 Priority: Critical
 Depends on: CR-01, CR-02, CR-03

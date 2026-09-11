@@ -31,6 +31,7 @@ pub mod ingest;
 pub mod masks;
 pub mod mvp_pipeline;
 pub mod narrowband;
+pub mod narrowband_image;
 pub mod orchestrator;
 pub mod pipeline;
 pub mod pipeline_plan;

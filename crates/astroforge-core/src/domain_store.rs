@@ -12,7 +12,7 @@
 
 use crate::domain::{
     AiMask, AiOperation, AiRecommendation, AiSafetyClassification, Artifact, ArtifactCategory,
-    EnhancementPreview, EnhancementStack, ImageAnalysis, ImageRegion, PipelineRun,
+    EnhancementPreview, EnhancementStack, ImageAnalysis, ImageRegion, ImageVersion, PipelineRun,
     PipelineRunStatus, PreviewRun, Project, ProjectEvent, ProjectEventKind, ProjectStatus, Session,
     SourceAsset, StageRunRecord, Target, DOMAIN_SCHEMA_VERSION,
 };
@@ -368,6 +368,31 @@ CREATE INDEX idx_enhancement_previews_project
     ON enhancement_previews(project_id);
 "#,
     ),
+    // CR-06 P4 — image_versions table. The apply round
+    // creates a new row per CR-06 §4 / §22 (every Apply
+    // is non-destructive). The schema mirrors the
+    // `ImageVersion` Rust struct; `primary_artifact_id`
+    // is a logical FK to the `artifacts` table.
+    (
+        6,
+        r#"
+CREATE TABLE image_versions (
+    version_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    sequence INTEGER NOT NULL DEFAULT 0,
+    primary_artifact_id TEXT NOT NULL,
+    source_version_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    hidden INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX idx_image_versions_project
+    ON image_versions(project_id);
+CREATE INDEX idx_image_versions_project_sequence
+    ON image_versions(project_id, sequence);
+"#,
+    ),
 ];
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -630,6 +655,107 @@ impl DomainStore {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    /// CR-06 P4 — insert (or replace) an `ImageVersion` row.
+    /// Every Apply round creates a new Image Version per
+    /// CR-06 §4 / §22 (non-destructive). The store is a thin
+    /// pass-through: the apply round owns the sequence number
+    /// + the artifact id.
+    pub fn upsert_image_version(&self, row: &ImageVersion) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO image_versions
+                (version_id, project_id, label, sequence,
+                 primary_artifact_id, source_version_id, created_at, hidden)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(NULLIF(?7, ''), datetime('now')), ?8)",
+            params![
+                row.version_id,
+                row.project_id,
+                row.label,
+                row.sequence,
+                row.primary_artifact_id,
+                row.source_version_id,
+                row.created_at,
+                row.hidden as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// CR-06 P4 — list the `ImageVersion` rows for a project,
+    /// sequence-asc (V0 first). Hidden versions are excluded.
+    pub fn list_image_versions_for_project(&self, project_id: &str) -> Result<Vec<ImageVersion>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT version_id, project_id, label, sequence, primary_artifact_id,
+                    source_version_id, created_at, hidden
+             FROM image_versions
+             WHERE project_id = ?1 AND hidden = 0
+             ORDER BY sequence ASC, created_at ASC, version_id ASC",
+        )?;
+        let rows = stmt.query_map(params![project_id], |row| {
+            Ok(ImageVersion {
+                version_id: row.get(0)?,
+                project_id: row.get(1)?,
+                label: row.get(2)?,
+                sequence: row.get::<_, i64>(3)? as u32,
+                primary_artifact_id: row.get(4)?,
+                source_version_id: row.get(5)?,
+                created_at: row.get(6)?,
+                hidden: row.get::<_, i64>(7)? != 0,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// CR-06 P4 — fetch a single `ImageVersion` by id. Returns
+    /// `Ok(None)` when the version does not exist (e.g. a
+    /// branch references an id that was never persisted).
+    pub fn get_image_version(&self, version_id: &str) -> Result<Option<ImageVersion>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT version_id, project_id, label, sequence, primary_artifact_id,
+                    source_version_id, created_at, hidden
+             FROM image_versions WHERE version_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![version_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(ImageVersion {
+                version_id: row.get(0)?,
+                project_id: row.get(1)?,
+                label: row.get(2)?,
+                sequence: row.get::<_, i64>(3)? as u32,
+                primary_artifact_id: row.get(4)?,
+                source_version_id: row.get(5)?,
+                created_at: row.get(6)?,
+                hidden: row.get::<_, i64>(7)? != 0,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// CR-06 P4 — return the highest sequence number currently
+    /// in use for a project. Returns 0 when the project has no
+    /// versions. The apply round adds 1 to this when creating
+    /// a new Image Version.
+    pub fn next_image_version_sequence(&self, project_id: &str) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(MAX(sequence), 0) FROM image_versions WHERE project_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![project_id])?;
+        if let Some(row) = rows.next()? {
+            let n: i64 = row.get(0)?;
+            Ok(n as u32)
+        } else {
+            Ok(0)
+        }
     }
 
     // ─── Source assets (CR-02 §6) ───────────────────────────────────────
@@ -1376,6 +1502,31 @@ impl DomainStore {
         Ok(out)
     }
 
+    /// CR-06 P4 — fetch a single `EnhancementStack` row by id.
+    /// The apply + mutation commands use this to read the
+    /// current state before applying a `StackMutation`.
+    pub fn get_enhancement_stack(&self, stack_id: &str) -> Result<Option<EnhancementStack>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT stack_id, project_id, source_image_version_id,
+                    operation_ids_json, branched_from_version_id, created_at
+             FROM enhancement_stacks WHERE stack_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![stack_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(EnhancementStack {
+                stack_id: row.get(0)?,
+                project_id: row.get(1)?,
+                source_image_version_id: row.get(2)?,
+                operation_ids_json: row.get(3)?,
+                branched_from_version_id: row.get(4)?,
+                created_at: row.get(5)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Insert (or replace) an `EnhancementPreview` row. P4 calls this
     /// from the preview runner.
     pub fn upsert_enhancement_preview(&self, row: &EnhancementPreview) -> Result<()> {
@@ -2072,10 +2223,12 @@ mod tests {
         // assertion still proves the runner applies migrations
         // exactly once and re-running it on a fresh store does
         // not double-apply.
-        assert_eq!(s.schema_version(), 5);
+        // CR-06 P4 — schema_version() bumped to 6 by the
+        // image_versions migration.
+        assert_eq!(s.schema_version(), 6);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 5);
+        assert_eq!(s2.schema_version(), 6);
     }
 
     #[test]

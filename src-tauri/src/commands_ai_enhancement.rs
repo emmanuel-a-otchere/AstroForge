@@ -23,8 +23,10 @@
 
 use crate::commands_project::lock_err;
 use crate::domain_store::DomainStore;
+use crate::enhancement as enhancement_engine;
 use crate::image::F32Image;
 use crate::image_analysis;
+use astroforge_ai::operations as ai_operations;
 use astroforge_ai::recommendations as ai_recommendations;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -368,4 +370,364 @@ pub fn generate_ai_recommendations(
         report_json,
         recommendations: stored,
     })
+}
+
+/// CR-06 P4 — request payload for `enhancement_stack_create`.
+/// The frontend supplies an initial set of operations (often
+/// the recommendation engine's output) and the command
+/// persists a fresh stack row.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateEnhancementStackRequest {
+    pub project_id: String,
+    pub source_image_version_id: String,
+    pub operations: Vec<enhancement_engine::StackOperation>,
+}
+
+/// CR-06 P4 — response: the persisted stack record.
+#[derive(Debug, Clone, Serialize)]
+pub struct EnhancementStackDto {
+    pub stack: serde_json::Value,
+}
+
+/// CR-06 P4 — create an enhancement stack from an initial
+/// operation list. Returns the typed stack record so the UI
+/// can render immediately without a follow-up `get`.
+#[tauri::command]
+pub fn enhancement_stack_create(
+    request: CreateEnhancementStackRequest,
+) -> Result<EnhancementStackDto, String> {
+    let now_iso = now_iso_string();
+    let stack_id = format!("stk_{}", new_id_suffix());
+    let op_json = enhancement_engine::EnhancementStackRecord::operations_to_json(&request.operations);
+    let record = crate::domain::EnhancementStack {
+        stack_id: stack_id.clone(),
+        project_id: request.project_id,
+        source_image_version_id: request.source_image_version_id.clone(),
+        operation_ids_json: op_json,
+        branched_from_version_id: None,
+        created_at: now_iso,
+    };
+    with_store(|s| s.upsert_enhancement_stack(&record).map_err(|e| e.to_string()))?;
+    let stack_record = enhancement_engine::EnhancementStackRecord {
+        stack_id,
+        project_id: record.project_id,
+        source_image_version_id: record.source_image_version_id,
+        operations: request.operations,
+        branched_from_version_id: None,
+        created_at: record.created_at,
+    };
+    Ok(EnhancementStackDto {
+        stack: serde_json::to_value(&stack_record).map_err(|e| e.to_string())?,
+    })
+}
+
+/// CR-06 P4 — fetch a stack by id.
+#[tauri::command]
+pub fn enhancement_stack_get(stack_id: String) -> Result<serde_json::Value, String> {
+    with_store(|s| match s.get_enhancement_stack(&stack_id) {
+        Ok(Some(row)) => {
+            let ops = enhancement_engine::EnhancementStackRecord::operations_from_json(
+                &row.operation_ids_json,
+            );
+            let rec = enhancement_engine::EnhancementStackRecord {
+                stack_id: row.stack_id,
+                project_id: row.project_id,
+                source_image_version_id: row.source_image_version_id,
+                operations: ops,
+                branched_from_version_id: row.branched_from_version_id,
+                created_at: row.created_at,
+            };
+            Ok(serde_json::to_value(&rec).map_err(|e| e.to_string())?)
+        }
+        Ok(None) => Ok(serde_json::Value::Null),
+        Err(e) => Err(e.to_string()),
+    })
+}
+
+/// CR-06 P4 — apply a `StackMutation` (reorder, set enabled,
+/// remove, mark needs preview, append). Returns the updated
+/// typed stack.
+#[tauri::command]
+pub fn enhancement_stack_apply_mutation(
+    stack_id: String,
+    mutation: enhancement_engine::StackMutation,
+) -> Result<serde_json::Value, String> {
+    with_store(|s| {
+        let row = s
+            .get_enhancement_stack(&stack_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("stack not found: {stack_id}"))?;
+        let mut record = enhancement_engine::EnhancementStackRecord {
+            stack_id: row.stack_id.clone(),
+            project_id: row.project_id.clone(),
+            source_image_version_id: row.source_image_version_id.clone(),
+            operations: enhancement_engine::EnhancementStackRecord::operations_from_json(
+                &row.operation_ids_json,
+            ),
+            branched_from_version_id: row.branched_from_version_id.clone(),
+            created_at: row.created_at.clone(),
+        };
+        record = enhancement_engine::apply_mutation(record, mutation)
+            .map_err(|e| e.to_string())?;
+        let op_json =
+            enhancement_engine::EnhancementStackRecord::operations_to_json(&record.operations);
+        let updated = crate::domain::EnhancementStack {
+            stack_id: record.stack_id.clone(),
+            project_id: record.project_id.clone(),
+            source_image_version_id: record.source_image_version_id.clone(),
+            operation_ids_json: op_json,
+            branched_from_version_id: record.branched_from_version_id.clone(),
+            created_at: record.created_at.clone(),
+        };
+        s.upsert_enhancement_stack(&updated).map_err(|e| e.to_string())?;
+        Ok(serde_json::to_value(&record).map_err(|e| e.to_string())?)
+    })
+}
+
+/// CR-06 P4 — create a branch from a stack at the given
+/// cutoff. Returns the new stack record. The new stack
+/// references a fresh `source_image_version_id` (the caller
+/// supplies one — typically a new Image Version the branch
+/// round is about to create).
+#[derive(Debug, Clone, Deserialize)]
+pub struct BranchEnhancementStackRequest {
+    pub source_stack_id: String,
+    pub cutoff: usize,
+    pub new_image_version_id: String,
+}
+
+#[tauri::command]
+pub fn enhancement_stack_branch(
+    request: BranchEnhancementStackRequest,
+) -> Result<serde_json::Value, String> {
+    let now_iso = now_iso_string();
+    let new_stack_id = format!("stk_{}", new_id_suffix());
+    with_store(|s| {
+        let source = s
+            .get_enhancement_stack(&request.source_stack_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| {
+                format!("source stack not found: {}", request.source_stack_id)
+            })?;
+        let source_record = enhancement_engine::EnhancementStackRecord {
+            stack_id: source.stack_id,
+            project_id: source.project_id,
+            source_image_version_id: source.source_image_version_id,
+            operations: enhancement_engine::EnhancementStackRecord::operations_from_json(
+                &source.operation_ids_json,
+            ),
+            branched_from_version_id: source.branched_from_version_id,
+            created_at: source.created_at,
+        };
+        let branched = enhancement_engine::branch(
+            source_record,
+            request.cutoff,
+            new_stack_id.clone(),
+            request.new_image_version_id.clone(),
+            now_iso.clone(),
+        );
+        let op_json = enhancement_engine::EnhancementStackRecord::operations_to_json(
+            &branched.operations,
+        );
+        let row = crate::domain::EnhancementStack {
+            stack_id: branched.stack_id.clone(),
+            project_id: branched.project_id.clone(),
+            source_image_version_id: branched.source_image_version_id.clone(),
+            operation_ids_json: op_json,
+            branched_from_version_id: branched.branched_from_version_id.clone(),
+            created_at: branched.created_at.clone(),
+        };
+        s.upsert_enhancement_stack(&row).map_err(|e| e.to_string())?;
+        Ok(serde_json::to_value(&branched).map_err(|e| e.to_string())?)
+    })
+}
+
+/// CR-06 P4 — list the canonical operations registry so the
+/// UI can render the operation picker without hard-coding
+/// the list. The Tauri command shape matches the
+/// `astroforge_ai::operations::OperationInfo` JSON form.
+#[tauri::command]
+pub fn operations_registry_list() -> Result<Vec<serde_json::Value>, String> {
+    Ok(ai_operations::registry()
+        .into_iter()
+        .map(|op| serde_json::to_value(&op).unwrap_or(serde_json::Value::Null))
+        .collect())
+}
+
+/// CR-06 P4 — list Image Versions for a project (sequence-asc).
+#[tauri::command]
+pub fn image_version_list_for_project(
+    project_id: String,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(|s| {
+        let rows = s
+            .list_image_versions_for_project(&project_id)
+            .map_err(|e| e.to_string())?;
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })
+}
+
+/// CR-06 P4 — fetch a single Image Version by id.
+#[tauri::command]
+pub fn image_version_get(version_id: String) -> Result<serde_json::Value, String> {
+    with_store(|s| match s.get_image_version(&version_id) {
+        Ok(Some(row)) => Ok(serde_json::to_value(&row).map_err(|e| e.to_string())?),
+        Ok(None) => Ok(serde_json::Value::Null),
+        Err(e) => Err(e.to_string()),
+    })
+}
+
+/// CR-06 P4 — request payload for `enhancement_apply_operation`.
+/// The command runs the operation via the (P4 passthrough)
+/// dispatcher, persists a fresh `ImageVersion` row, and
+/// records the operation provenance on the `AiOperation`
+/// row.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApplyAiOperationRequest {
+    pub project_id: String,
+    pub source_image_version_id: String,
+    pub operation_id: String,
+    pub parameters_json: String,
+    pub preview_id: Option<String>,
+}
+
+/// CR-06 P4 — response: the new Image Version + the
+/// dispatch outcome.
+#[derive(Debug, Clone, Serialize)]
+pub struct ApplyAiOperationResponse {
+    pub image_version: serde_json::Value,
+    pub outcome: serde_json::Value,
+    pub operation_row: serde_json::Value,
+}
+
+/// CR-06 P4 — apply an AI operation. The P4 dispatcher
+/// returns a passthrough outcome (no real pixel work); the
+/// command still creates a fresh Image Version per
+/// CR-06 §4 / §22, persists an `AiOperation` provenance
+/// row, and returns the new version id. P5 replaces the
+/// dispatcher body with real ONNX inference.
+#[tauri::command]
+pub fn enhancement_apply_operation(
+    request: ApplyAiOperationRequest,
+) -> Result<ApplyAiOperationResponse, String> {
+    let now_iso = now_iso_string();
+    let result_version_id = format!("ver_{}", new_id_suffix());
+    let preview_id = request
+        .preview_id
+        .clone()
+        .unwrap_or_else(|| format!("pv_{}", new_id_suffix()));
+    let outcome = ai_operations::dispatch_operation(
+        &request.operation_id,
+        &request.parameters_json,
+        &request.source_image_version_id,
+        result_version_id.clone(),
+        preview_id.clone(),
+    )
+    .map_err(|e| e.to_string())?;
+    let sequence = with_store(|s| {
+        s.next_image_version_sequence(&request.project_id)
+            .map_err(|e| e.to_string())
+    })?;
+    let artifact_id = format!("art_{}", new_id_suffix());
+    let version = crate::domain::ImageVersion {
+        version_id: result_version_id.clone(),
+        project_id: request.project_id.clone(),
+        label: request.operation_id.clone(),
+        sequence: sequence + 1,
+        primary_artifact_id: artifact_id.clone(),
+        source_version_id: Some(request.source_image_version_id.clone()),
+        created_at: now_iso.clone(),
+        hidden: false,
+    };
+    with_store(|s| s.upsert_image_version(&version).map_err(|e| e.to_string()))?;
+    let ai_op_id = format!("op_{}", new_id_suffix());
+    let safety_str = match outcome.safety_classification {
+        ai_operations::SafetyClassification::Deterministic => "deterministic",
+        ai_operations::SafetyClassification::Perceptual => "perceptual",
+        ai_operations::SafetyClassification::Generative => "generative",
+    };
+    let safety_cls = parse_safety(safety_str);
+    let ai_op_row = crate::domain::AiOperation {
+        operation_id: ai_op_id,
+        stage_run_id: String::new(),
+        model_id: request.operation_id.clone(),
+        model_version: "0.0.0".into(),
+        model_hash: None,
+        runtime: None,
+        backend: None,
+        precision: None,
+        parameters_json: Some(request.parameters_json.clone()),
+        seed: None,
+        deterministic: matches!(safety_cls, crate::domain::AiSafetyClassification::Deterministic),
+        safety_classification: safety_cls,
+        experimental: false,
+        input_artifact_id: Some(request.source_image_version_id.clone()),
+        output_artifact_id: Some(result_version_id.clone()),
+        engine_version: Some("cr-06-p4".into()),
+        tile_configuration: None,
+        resource_metrics: None,
+    };
+    with_store(|s| s.upsert_ai_operation(&ai_op_row).map_err(|e| e.to_string()))?;
+    Ok(ApplyAiOperationResponse {
+        image_version: serde_json::to_value(&version).map_err(|e| e.to_string())?,
+        outcome: serde_json::to_value(&outcome).map_err(|e| e.to_string())?,
+        operation_row: serde_json::to_value(&ai_op_row).map_err(|e| e.to_string())?,
+    })
+}
+
+fn parse_safety(s: &str) -> crate::domain::AiSafetyClassification {
+    match s {
+        "perceptual" => crate::domain::AiSafetyClassification::Perceptual,
+        "generative" => crate::domain::AiSafetyClassification::Generative,
+        _ => crate::domain::AiSafetyClassification::Deterministic,
+    }
+}
+
+/// CR-06 P4 — list the operations registry (the 11
+/// canonical AI operations). Returns the JSON shape.
+#[derive(Debug, Clone, Serialize)]
+pub struct OperationRegistryEntry {
+    pub operation_id: String,
+    pub display_name: String,
+    pub category: String,
+    pub safety_classification: String,
+    pub description: String,
+    pub default_parameters_json: String,
+    pub requires_region: bool,
+}
+
+fn to_registry_entry(op: &ai_operations::OperationInfo) -> OperationRegistryEntry {
+    OperationRegistryEntry {
+        operation_id: op.operation_id.clone(),
+        display_name: op.display_name.clone(),
+        category: op.category.as_str().to_string(),
+        safety_classification: op.safety_classification.as_str().to_string(),
+        description: op.description.clone(),
+        default_parameters_json: op.default_parameters_json.clone(),
+        requires_region: op.requires_region,
+    }
+}
+
+/// CR-06 P4 — return the operations registry as a typed
+/// list. The Tauri command keeps the wire shape stable so
+/// consumers do not have to handle serde `Value`.
+#[tauri::command]
+pub fn enhancement_operations_list() -> Result<Vec<OperationRegistryEntry>, String> {
+    Ok(ai_operations::registry().iter().map(to_registry_entry).collect())
+}
+
+/// CR-06 P4 — ISO-8601 timestamp helper used by every
+/// P4 command. Same shape as
+/// `astroforge_ai::recommendations::now_iso_string`.
+fn now_iso_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    astroforge_ai::recommendations::format_unix_seconds(secs)
 }

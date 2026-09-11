@@ -353,7 +353,9 @@ mod tests {
         // Enhancement Studio migration (ai_operations,
         // image_analyses, image_regions, ai_recommendations,
         // ai_masks, enhancement_stacks, enhancement_previews).
-        assert_eq!(reopened.store.schema_version(), 5);
+        // CR-06 P4 — schema_version() bumped to 6 by the
+        // image_versions migration.
+        assert_eq!(reopened.store.schema_version(), 6);
 
         // Tampered manifest is rejected.
         let mut bad = reopened.manifest.clone();

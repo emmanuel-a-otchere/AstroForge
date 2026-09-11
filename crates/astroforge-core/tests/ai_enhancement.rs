@@ -26,7 +26,7 @@
 
 use astroforge_core::domain::{
     AiMask, AiOperation, AiRecommendation, AiSafetyClassification, EnhancementPreview,
-    EnhancementStack, ImageAnalysis, ImageRegion, ImageRegionKind,
+    EnhancementStack, ImageAnalysis, ImageRegion, ImageRegionKind, ImageVersion,
 };
 use astroforge_core::domain_store::DomainStore;
 use std::path::PathBuf;
@@ -351,4 +351,185 @@ fn safety_classification_default_is_deterministic() {
     assert!(op.engine_version.is_none());
     assert!(op.tile_configuration.is_none());
     assert!(op.resource_metrics.is_none());
+}
+
+// CR-06 P4 — image_versions round-trip. The apply round
+// creates a new Image Version per CR-06 §4 / §22; the
+// sequence number is monotonic per project.
+#[test]
+fn image_version_round_trip_preserves_sequence() {
+    let s = store();
+    let v1 = ImageVersion {
+        version_id: "ver_1".into(),
+        project_id: "p1".into(),
+        label: "v1".into(),
+        sequence: 1,
+        primary_artifact_id: "art_1".into(),
+        source_version_id: None,
+        created_at: "2026-01-01 00:00:00 UTC".into(),
+        hidden: false,
+    };
+    let v2 = ImageVersion {
+        version_id: "ver_2".into(),
+        project_id: "p1".into(),
+        label: "v2".into(),
+        sequence: 2,
+        primary_artifact_id: "art_2".into(),
+        source_version_id: Some("ver_1".into()),
+        created_at: "2026-01-02 00:00:00 UTC".into(),
+        hidden: false,
+    };
+    s.upsert_image_version(&v1).expect("upsert v1");
+    s.upsert_image_version(&v2).expect("upsert v2");
+    let list = s.list_image_versions_for_project("p1").expect("list");
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].version_id, "ver_1");
+    assert_eq!(list[1].version_id, "ver_2");
+    assert_eq!(list[1].source_version_id.as_deref(), Some("ver_1"));
+}
+
+#[test]
+fn image_version_sequence_increments() {
+    let s = store();
+    assert_eq!(s.next_image_version_sequence("p1").unwrap(), 0);
+    let v1 = ImageVersion {
+        version_id: "ver_1".into(),
+        project_id: "p1".into(),
+        label: "".into(),
+        sequence: 1,
+        primary_artifact_id: "art_1".into(),
+        source_version_id: None,
+        created_at: "2026-01-01 00:00:00 UTC".into(),
+        hidden: false,
+    };
+    s.upsert_image_version(&v1).unwrap();
+    assert_eq!(s.next_image_version_sequence("p1").unwrap(), 1);
+}
+
+#[test]
+fn image_version_get_returns_none_for_unknown_id() {
+    let s = store();
+    let result = s.get_image_version("ver_missing").expect("query");
+    assert!(result.is_none());
+}
+
+#[test]
+fn hidden_versions_excluded_from_list() {
+    let s = store();
+    let v1 = ImageVersion {
+        version_id: "ver_1".into(),
+        project_id: "p1".into(),
+        label: "v1".into(),
+        sequence: 1,
+        primary_artifact_id: "art_1".into(),
+        source_version_id: None,
+        created_at: "2026-01-01 00:00:00 UTC".into(),
+        hidden: false,
+    };
+    let v2_hidden = ImageVersion {
+        version_id: "ver_2_hidden".into(),
+        project_id: "p1".into(),
+        label: "v2 hidden".into(),
+        sequence: 2,
+        primary_artifact_id: "art_2".into(),
+        source_version_id: Some("ver_1".into()),
+        created_at: "2026-01-02 00:00:00 UTC".into(),
+        hidden: true,
+    };
+    s.upsert_image_version(&v1).unwrap();
+    s.upsert_image_version(&v2_hidden).unwrap();
+    let list = s.list_image_versions_for_project("p1").unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].version_id, "ver_1");
+    // get_image_version still returns the hidden row.
+    let hidden = s.get_image_version("ver_2_hidden").unwrap().unwrap();
+    assert!(hidden.hidden);
+}
+
+// CR-06 P4 — enhancement stack apply mutation persists.
+#[test]
+fn enhancement_stack_apply_mutation_persists() {
+    use astroforge_core::enhancement::{
+        apply_mutation, EnhancementStackRecord, StackMutation, StackOperation,
+    };
+    let s = store();
+    let initial = EnhancementStackRecord {
+        stack_id: "stk_1".into(),
+        project_id: "p1".into(),
+        source_image_version_id: "ver_1".into(),
+        operations: vec![
+            StackOperation {
+                operation_id: "denoise_luminance".into(),
+                recommendation_id: None,
+                parameters_json: "{}".into(),
+                enabled: true,
+                needs_preview: false,
+            },
+            StackOperation {
+                operation_id: "super_resolution".into(),
+                recommendation_id: None,
+                parameters_json: "{}".into(),
+                enabled: true,
+                needs_preview: false,
+            },
+        ],
+        branched_from_version_id: None,
+        created_at: "2026-01-01 00:00:00 UTC".into(),
+    };
+    let op_json = EnhancementStackRecord::operations_to_json(&initial.operations);
+    s.upsert_enhancement_stack(&EnhancementStack {
+        stack_id: initial.stack_id.clone(),
+        project_id: initial.project_id.clone(),
+        source_image_version_id: initial.source_image_version_id.clone(),
+        operation_ids_json: op_json,
+        branched_from_version_id: None,
+        created_at: initial.created_at.clone(),
+    })
+    .unwrap();
+
+    // Disable the super_resolution operation.
+    let mut updated = initial.clone();
+    updated = apply_mutation(
+        updated,
+        StackMutation::SetEnabled {
+            operation_id: "super_resolution".into(),
+            enabled: false,
+        },
+    )
+    .unwrap();
+    let updated_json = EnhancementStackRecord::operations_to_json(&updated.operations);
+    s.upsert_enhancement_stack(&EnhancementStack {
+        stack_id: updated.stack_id.clone(),
+        project_id: updated.project_id.clone(),
+        source_image_version_id: updated.source_image_version_id.clone(),
+        operation_ids_json: updated_json,
+        branched_from_version_id: updated.branched_from_version_id.clone(),
+        created_at: updated.created_at.clone(),
+    })
+    .unwrap();
+
+    let fetched = s.get_enhancement_stack("stk_1").unwrap().unwrap();
+    let ops = EnhancementStackRecord::operations_from_json(&fetched.operation_ids_json);
+    assert_eq!(ops.len(), 2);
+    assert_eq!(ops[0].operation_id, "denoise_luminance");
+    assert!(ops[0].enabled);
+    assert_eq!(ops[1].operation_id, "super_resolution");
+    assert!(!ops[1].enabled);
+}
+
+// CR-06 P4 — preview state-machine round-trip via JSON.
+#[test]
+fn preview_status_round_trip_via_json() {
+    use astroforge_core::enhancement::{parse_status, PreviewStatus};
+    for s in [
+        PreviewStatus::Pending,
+        PreviewStatus::Rendering,
+        PreviewStatus::Completed,
+        PreviewStatus::Failed,
+    ] {
+        let raw = s.as_str();
+        assert_eq!(parse_status(raw), s);
+    }
+    // Unknown falls back to pending (defensive).
+    assert_eq!(parse_status("unknown_thing"), PreviewStatus::Pending);
 }

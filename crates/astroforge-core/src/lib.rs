@@ -19,6 +19,7 @@ pub mod dip;
 pub mod dng_parser;
 pub mod domain;
 pub mod domain_store;
+pub mod enhancement;
 pub mod export;
 pub mod fits;
 pub mod gallery;

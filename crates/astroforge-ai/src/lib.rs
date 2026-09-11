@@ -1,6 +1,7 @@
 pub mod hardware;
 pub mod hub;
 pub mod models;
+pub mod operations;
 pub mod recommendations;
 pub mod registry;
 pub mod service;
@@ -9,6 +10,10 @@ pub mod tiling;
 pub use hardware::{GpuBackend, HardwareProbe, QualityTier};
 pub use hub::{get_model, get_models_for_stage, model_catalog, ModelInfo};
 pub use models::*;
+pub use operations::{
+    dispatch_operation, get_operation, registry as operations_registry, OperationCategory,
+    OperationError, OperationInfo, OperationOutcome, SafetyClassification,
+};
 pub use recommendations::{
     analyze, analyze_at, flatten_for_store, AiRecommendation, ModelCandidate, RecommendationReport,
     RecommendationSet, SequencingNote,

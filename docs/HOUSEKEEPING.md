@@ -46,3 +46,35 @@ A running log of clean-up work that should land as standalone PRs. Each item bel
 ## Closed tickets
 
 _(empty; tickets move here when the housekeeping PR lands.)_
+
+## Backlog tickets
+
+### HOUSE-3 — AI target hook real model swap-in
+
+**Source:** CR-04 P10 D-CR04-3 shipped a stub `astroforge_ai::target_classify::classify_target` that records the AI boundary but does not invoke a real model. The seam is in place; the real ONNX target-recognition model lands in a follow-on tranche (likely co-tranche with the first narrowband image-processing slice in CR-14).
+
+**Files in scope:**
+
+- `crates/astroforge-ai/src/target_classify.rs` — replace the `AiStubRequested` branch with a real `astroforge_ai::service::classify_target` call once the model lands.
+- `crates/astroforge-ai/src/models.rs` — register the new target-recognition model + its catalog entry.
+- `crates/astroforge-ai/src/registry.rs` — confirm the model resolves for the `classify_target` stage.
+
+**Disposal rule:** swap in only when the real model has been benchmarked on a representative dataset AND the deterministic fallback (P4) is preserved for the asset-count > 1024 case. Migration test: a synthetic dataset where the deterministic P4 result is below the AI floor must round-trip through the new model and produce a confidence score.
+
+**Outcome target:** the `ClassifyTargetProvenance::AiStubRequested` variant becomes `AiModel` (new variant). The UI surfaces "AI confirmed" instead of "AI confirming…".
+
+**Estimated blast radius:** low — the seam is in place. Touches ~3 files. Single PR once the model ships.
+
+### HOUSE-4 — narrowband image-processing re-home
+
+**Source:** CR-04 P7 preserved the pre-existing `narrowband.rs` image-processing helpers (`extract_channel`, `extract_oiii`, `compose_palette`, `scnr_green`, `scnr_magenta`, `normalize_channel_ratio`, `is_narrowband_session`) verbatim in `narrowband_image.rs` so the new §11 detection engine could land cleanly. These helpers belong with the image-processing pipeline (CR-14 Narrowband Studio), not the import classification layer.
+
+**Files in scope:**
+
+- `crates/astroforge-core/src/narrowband_image.rs` — relocate to `astroforge-app` or a new `astroforge-image` crate.
+
+**Disposal rule:** move only when CR-14 begins work on the narrowband palette compositor. Keep `narrowband_image.rs` in place until then.
+
+**Outcome target:** `narrowband.rs` owns only the §11 detection engine; `narrowband_image.rs` is gone.
+
+**Estimated blast radius:** low — the helpers are unreferenced today. Single PR.

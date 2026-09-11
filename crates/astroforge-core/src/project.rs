@@ -357,7 +357,9 @@ mod tests {
         // image_versions migration.
         // CR-04 P8 — schema_version() bumped to 7 by the
         // session-classification ALTER TABLE migration.
-        assert_eq!(reopened.store.schema_version(), 7);
+        // CR-04 P10 — schema_version() bumped to 8 by the
+        // target_provenance ALTER TABLE migration.
+        assert_eq!(reopened.store.schema_version(), 8);
 
         // Tampered manifest is rejected.
         let mut bad = reopened.manifest.clone();

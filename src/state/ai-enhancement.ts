@@ -35,6 +35,7 @@ import {
   imageAnalysisLatest,
   imageRegionList,
   imageVersionListForProject,
+  runAiQualityReport,
   type AnalyzeImageRequest,
   type ApplyAiOperationRequest,
   type BranchEnhancementStackRequest,
@@ -42,6 +43,8 @@ import {
   type EnhancementStackJson,
   type GenerateRecommendationsRequest,
   type OperationRegistryEntryJson,
+  type QualityGateReportJson,
+  type RunAiQualityReportRequest,
   type StackMutation as StackMutationJson,
 } from "../lib/astroforge-api";
 
@@ -112,9 +115,14 @@ export interface AiEnhancementState {
   /// CR-06 P4 — the canonical operations registry. The
   /// Studio panel renders the operation picker from this
   /// list (eleven operations across cleanup / denoise /
-  /// restoration / star / detail / upscale / inpaint /
-  /// background categories).
+  // restoration / star / detail / upscale / inpaint /
+  // background categories).
   operationsRegistry: OperationRegistryEntryJson[];
+  /// CR-06 P6 — the latest quality gate report. The
+  /// QualityGatePanel reads this; the apply round (or
+  // a manual "Run gate" click) populates it. Null
+  // until the gate has run at least once.
+  qualityReport: QualityGateReportJson | null;
   loading: boolean;
   error: string | null;
 }
@@ -129,6 +137,7 @@ const initial: AiEnhancementState = {
   previews: [],
   activeStack: null,
   operationsRegistry: [],
+  qualityReport: null,
   loading: false,
   error: null,
 };
@@ -162,6 +171,7 @@ export async function loadAiEnhancementFor(
     previews: [],
     activeStack: null,
     operationsRegistry: [],
+    qualityReport: null,
     error: null,
   };
   let firstError: string | null = null;
@@ -505,5 +515,52 @@ export async function listImageVersions(
       error: msg,
     }));
     return [];
+  }
+}
+
+/**
+ * CR-06 P6 — run the quality gate against the
+ * current analysis pixels. The Tauri command accepts
+ * (source, result) buffers; for the P6 manual
+ * review path, both are the analysis pixels (the
+ * gate is a no-op pass when result = source). When
+ * real ONNX inference produces a distinct result
+ * image, the apply round will pass `source_pixels =
+ * analysis_pixels`, `result_pixels = result_pixels`
+ * and the gate will run for real.
+ */
+export async function runQualityReport(): Promise<QualityGateReportJson | null> {
+  const state = get(aiEnhancementStore);
+  const analysis = state.analysis as
+    | {
+        image_version_id?: string;
+        width?: number;
+        height?: number;
+        channels?: number;
+        pixels?: number[];
+      }
+    | null;
+  if (!analysis) {
+    return null;
+  }
+  try {
+    const request: RunAiQualityReportRequest = {
+      source_image_version_id: analysis.image_version_id ?? "src",
+      result_image_version_id: analysis.image_version_id ?? "res",
+      operation_id: "manual_review",
+      width: analysis.width ?? 0,
+      height: analysis.height ?? 0,
+      channels: analysis.channels ?? 3,
+      source_pixels: analysis.pixels ?? [],
+      result_pixels: analysis.pixels ?? [],
+    };
+    const response = await runAiQualityReport(request);
+    aiEnhancementStore.update((s) => ({
+      ...s,
+      qualityReport: response.report,
+    }));
+    return response.report;
+  } catch {
+    return null;
   }
 }

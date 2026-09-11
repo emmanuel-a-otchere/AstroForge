@@ -707,6 +707,16 @@ fn main() {
             commands_ai_enhancement::ai_mask_list_for_version,
             commands_ai_enhancement::build_auto_mask,
             commands_ai_enhancement::compose_mask,
+            // CR-06 P6 — quality gate orchestrator.
+            // The engine in
+            // `astroforge-core::quality_gates` runs
+            // the ten §37 checks; the command
+            // accepts (source, result) pixels and
+            // returns the verdict + per-gate findings.
+            // Real ONNX inference will trigger this
+            // from `enhancement_apply_operation` once
+            // the dispatcher is swapped (P5.1).
+            commands_ai_enhancement::run_ai_quality_report,
             // CR-05 P1 — pipeline plan commands (additive).
             commands_pipeline_plan::create_pipeline_plan,
             commands_pipeline_plan::pipeline_plan_list_for_project,

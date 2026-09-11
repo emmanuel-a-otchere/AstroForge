@@ -977,3 +977,102 @@ pub fn compose_mask(request: ComposeMaskRequest) -> Result<ComposeMaskResponse, 
         mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
     })
 }
+
+/// CR-06 P6 — request payload for
+/// `run_ai_quality_report`. The caller supplies the
+/// (source, result) pixel buffers in `[0, 1]`
+/// row-major. P6 ships the gate engine + the
+/// orchestrator; the apply round (P4) uses this
+/// once real ONNX inference produces a result
+/// image. With the current P4 passthrough
+/// dispatcher the result equals the source, so the
+/// gate always returns `Ok` — but the integration
+/// path is in place.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RunAiQualityReportRequest {
+    pub source_image_version_id: String,
+    pub result_image_version_id: String,
+    pub operation_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub source_pixels: Vec<f64>,
+    pub result_pixels: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RunAiQualityReportResponse {
+    pub report: serde_json::Value,
+    pub verdict: String,
+}
+
+#[tauri::command]
+pub fn run_ai_quality_report(
+    request: RunAiQualityReportRequest,
+) -> Result<RunAiQualityReportResponse, String> {
+    use crate::image::F32Image;
+    use crate::quality_gates::report::run;
+    use crate::quality_gates::GateThresholds;
+
+    let n = (request.width as usize)
+        * (request.height as usize)
+        * (request.channels as usize);
+    if request.source_pixels.len() != n {
+        return Err(format!(
+            "source pixel count mismatch: got {}, expected {}",
+            request.source_pixels.len(),
+            n
+        ));
+    }
+    if request.result_pixels.len() != n {
+        return Err(format!(
+            "result pixel count mismatch: got {}, expected {}",
+            request.result_pixels.len(),
+            n
+        ));
+    }
+    let src = pixels_to_f32image(
+        &request.source_pixels,
+        request.width as usize,
+        request.height as usize,
+        request.channels as usize,
+    );
+    let res = pixels_to_f32image(
+        &request.result_pixels,
+        request.width as usize,
+        request.height as usize,
+        request.channels as usize,
+    );
+    let report = run(
+        &src,
+        &res,
+        &GateThresholds::default(),
+        request.source_image_version_id,
+        request.result_image_version_id,
+        request.operation_id,
+    );
+    let verdict = report.verdict.as_str().to_string();
+    Ok(RunAiQualityReportResponse {
+        verdict: verdict.clone(),
+        report: serde_json::to_value(&report).map_err(|e| e.to_string())?,
+    })
+}
+
+fn pixels_to_f32image(
+    pixels: &[f64],
+    width: usize,
+    height: usize,
+    channels: usize,
+) -> F32Image {
+    let mut img = F32Image::new(width, height, channels);
+    let plane = width * height;
+    for (i, v) in pixels.iter().enumerate() {
+        let clamped = v.clamp(0.0, 1.0) as f32;
+        let c = i / plane;
+        let rem = i % plane;
+        let y = rem / width;
+        let x = rem % width;
+        img[(c, y, x)] = clamped;
+    }
+    img
+}

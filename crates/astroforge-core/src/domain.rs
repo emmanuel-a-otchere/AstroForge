@@ -216,6 +216,80 @@ pub struct Session {
     pub updated_at: String,
 }
 
+/// CR-04 P8 — the import lifecycle state attached to a
+/// session. Distinct from `processing_status` (which
+/// tracks pipeline execution) — `import_state` tracks the
+/// CR-04 §12 wizard stages (scanned → understanding →
+/// confirmed → materialised).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportState {
+    /// Created from `create_session`; no understanding yet.
+    Created,
+    /// Scan complete; assets grouped; awaiting understanding.
+    Scanned,
+    /// P3 + P4 + P5 + P6 + P7 ran; understanding + suggestion emitted.
+    Understanding,
+    /// Ambiguous classification surfaced; UI must prompt user
+    /// for confirmation before materialising.
+    Ambiguous,
+    /// User confirmed the import (or accepted the override).
+    Confirmed,
+    /// Session + assets persisted; the project now owns this session.
+    Materialised,
+}
+
+impl ImportState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ImportState::Created => "created",
+            ImportState::Scanned => "scanned",
+            ImportState::Understanding => "understanding",
+            ImportState::Ambiguous => "ambiguous",
+            ImportState::Confirmed => "confirmed",
+            ImportState::Materialised => "materialised",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "scanned" => ImportState::Scanned,
+            "understanding" => ImportState::Understanding,
+            "ambiguous" => ImportState::Ambiguous,
+            "confirmed" => ImportState::Confirmed,
+            "materialised" => ImportState::Materialised,
+            _ => ImportState::Created,
+        }
+    }
+}
+
+/// CR-04 P8 — the per-session import understanding. The
+/// classification pipeline (P3 frame classification, P4
+/// target detection, P5 session grouping, P6 capture
+/// analysis, P7 narrowband detection) emits this struct
+/// which the IPC layer persists alongside the Session row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionClassification {
+    pub session_id: String,
+    pub import_state: ImportState,
+    /// P6 capture kind as a snake_case string:
+    /// "deep_sky" / "planetary_lunar" / "ambiguous".
+    pub capture_kind: Option<String>,
+    /// P7 narrowband composition as a snake_case string:
+    /// "none" / "mono" / "hoo" / "sho" / "lrgb" /
+    /// "hoo_or_sho".
+    pub narrowband_composition: Option<String>,
+    /// 0.0..=1.0. Aggregate confidence from the pipeline.
+    /// Below ~0.6 the UI surfaces the ambiguity dialog
+    /// (CR-04 §13).
+    pub classification_confidence: Option<f64>,
+    /// JSON blob of per-classifier observations (target,
+    /// capture, narrowband). Serialized so the UI can
+    /// render "Observation → Evidence → Confidence →
+    /// Decision" without re-running the pipeline.
+    pub classification_metadata: Option<String>,
+}
+
 /// CR-02 §6 — an immutable original input. The processing engine must never
 /// overwrite a SourceAsset; identity is by content hash (CR-02 §7, D-5).
 #[derive(Debug, Clone, Serialize, Deserialize)]

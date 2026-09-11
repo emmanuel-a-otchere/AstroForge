@@ -355,7 +355,9 @@ mod tests {
         // ai_masks, enhancement_stacks, enhancement_previews).
         // CR-06 P4 — schema_version() bumped to 6 by the
         // image_versions migration.
-        assert_eq!(reopened.store.schema_version(), 6);
+        // CR-04 P8 — schema_version() bumped to 7 by the
+        // session-classification ALTER TABLE migration.
+        assert_eq!(reopened.store.schema_version(), 7);
 
         // Tampered manifest is rejected.
         let mut bad = reopened.manifest.clone();

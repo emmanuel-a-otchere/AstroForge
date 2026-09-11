@@ -14,8 +14,8 @@ use crate::domain::{
     AiMask, AiOperation, AiRecommendation, AiSafetyClassification, Artifact, ArtifactCategory,
     EnhancementPreview, EnhancementStack, ImageAnalysis, ImageRegion, ImageRegionKind,
     ImageVersion, PipelineRun, PipelineRunStatus, PreviewRun, Project, ProjectEvent,
-    ProjectEventKind, ProjectStatus, Session, SourceAsset, StageRunRecord, Target,
-    DOMAIN_SCHEMA_VERSION,
+    ProjectEventKind, ProjectStatus, Session, SessionClassification, SourceAsset, StageRunRecord,
+    Target, DOMAIN_SCHEMA_VERSION,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
@@ -394,6 +394,23 @@ CREATE INDEX idx_image_versions_project_sequence
     ON image_versions(project_id, sequence);
 "#,
     ),
+    // CR-04 P8 — IPC layer. Persists per-session import
+    // understanding (target / capture kind / narrowband
+    // composition + per-channel asset groups + override
+    // history) alongside the durable Session row. The
+    // frontend reads it via the new commands_import.rs IPC
+    // surface; the UI (P9) renders the ambiguity dialog
+    // from `import_state = 'ambiguous'` + `confidence < 0.6`.
+    (
+        7,
+        r#"
+ALTER TABLE sessions ADD COLUMN import_state TEXT NOT NULL DEFAULT 'created';
+ALTER TABLE sessions ADD COLUMN capture_kind TEXT;
+ALTER TABLE sessions ADD COLUMN narrowband_composition TEXT;
+ALTER TABLE sessions ADD COLUMN classification_confidence REAL;
+ALTER TABLE sessions ADD COLUMN classification_metadata TEXT;
+"#,
+    ),
 ];
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -624,6 +641,85 @@ impl DomainStore {
             },
         )
         .map_err(|e| not_found_if_missing(e, "session", session_id))
+    }
+
+    /// CR-04 P8 — read the per-session import understanding
+    /// (import_state, capture_kind, narrowband_composition,
+    /// classification_confidence, classification_metadata).
+    /// Returns None when no understanding has been recorded.
+    pub fn get_session_classification(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionClassification>> {
+        let conn = self.conn.lock().unwrap();
+        type ClassificationRow = (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<f64>,
+            Option<String>,
+        );
+        let row: Option<ClassificationRow> = conn
+            .query_row(
+                "SELECT import_state, capture_kind, narrowband_composition,
+                        classification_confidence, classification_metadata
+                 FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .ok();
+        let Some((state, capture, narrowband, confidence, metadata)) = row else {
+            return Ok(None);
+        };
+        Ok(Some(SessionClassification {
+            session_id: session_id.into(),
+            import_state: crate::domain::ImportState::parse(&state),
+            capture_kind: capture,
+            narrowband_composition: narrowband,
+            classification_confidence: confidence,
+            classification_metadata: metadata,
+        }))
+    }
+
+    /// CR-04 P8 — persist the per-session import
+    /// understanding. Called by `commands_import` after
+    /// the analysis pipeline (P3..P7) has emitted its
+    /// verdicts. Idempotent: calling it twice with the
+    /// same fields is a no-op (used by the override path
+    /// to record user corrections).
+    pub fn set_session_classification(
+        &self,
+        session_id: &str,
+        classification: &SessionClassification,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE sessions SET
+                import_state = ?2,
+                capture_kind = ?3,
+                narrowband_composition = ?4,
+                classification_confidence = ?5,
+                classification_metadata = ?6,
+                updated_at = datetime('now')
+             WHERE id = ?1",
+            params![
+                session_id,
+                classification.import_state.as_str(),
+                classification.capture_kind,
+                classification.narrowband_composition,
+                classification.classification_confidence,
+                classification.classification_metadata,
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn list_sessions(&self, project_id: &str) -> Result<Vec<Session>> {
@@ -2303,10 +2399,12 @@ mod tests {
         // not double-apply.
         // CR-06 P4 — schema_version() bumped to 6 by the
         // image_versions migration.
-        assert_eq!(s.schema_version(), 6);
+        // CR-04 P8 — schema_version() bumped to 7 by the
+        // session-classification ALTER TABLE migration.
+        assert_eq!(s.schema_version(), 7);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 6);
+        assert_eq!(s2.schema_version(), 7);
     }
 
     #[test]

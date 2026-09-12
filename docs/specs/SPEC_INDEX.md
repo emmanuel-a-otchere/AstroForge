@@ -82,8 +82,8 @@ programmes; none blocks a current tranche.
 
 | # | Item | Origin | Slice |
 |---|---|---|---|
-| 1 | DP#4 catalog digest pinning for the 7 real-catalog models (SwinIR etc.) | `M9_AUDIT.md` forward-look; #135 | Slice per model as licenses + hashes land |
-| 2 | GPU execution providers (CUDA / DirectML / Metal) | `M9_AUDIT.md` P5.2 | Per-platform compile-time features; CI matrix expansion |
+| 1 | DP#4 catalog digest pinning for the 7 real-catalog models (SwinIR etc.) — each one-line table update when upstream publishes hash + license | M9_AUDIT forward-look; #135 | Per-model close-out (see `docs/adr/0003-dp4-catalog-audit-checklist.md`) |
+| 2 | GPU execution provider runtime validation — per-platform CI runners (one job per `gpu-*` feature × OS) | M9_AUDIT P5.2; PR #315 | Per-platform CI matrix expansion |
 | 3 | Plate-solve integration on top of ADR-0001 (ASTAP bundled + offline) | #73 (ADR-0001) | Phase 2.4 |
 | 4 | Smart-telescope SDK plugin on top of ADR-0002 (file-only v1.x contract) | #133 (ADR-0002) | Phase 4 plugin API |
 

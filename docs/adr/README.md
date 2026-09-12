@@ -11,6 +11,7 @@ the consequences (good and bad).
 |---|---|---|---|
 | [0001](0001-plate-solve-dependency.md) | Plate-solve dependency (closes #73) | 2026-09-12 | Accepted |
 | [0002](0002-smart-telescope-sdk.md) | Smart-telescope SDK integration (closes #133) | 2026-09-12 | Accepted |
+| [0003](0003-dp4-catalog-audit-checklist.md) | DP#4 catalog license audit close-out checklist | 2026-09-12 | Accepted |
 
 ## Workflow
 

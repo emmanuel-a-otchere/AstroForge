@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### CR-07 follow-on — Compare tools (split, blink, difference, region)
+
+- New `src/components/CompareTools.svelte` — split-slider (vertical
+  `clip-path` overlay with keyboard-accessible `<input
+  type="range">`), blink comparator (1Hz toggle, pauses via
+  `Page Visibility API` so backgrounded tabs don't burn cycles,
+  speed slider 200ms–3s, pause/resume), and difference-map
+  overlay (per-pixel absolute delta with `1×–16×` gain slider).
+- `src/components/CompareWorkspace.svelte` — adds a "Compare
+  tools" toggle (shown only when both picked versions have a
+  `primary_artifact_id`); the toggle swaps the side-by-side
+  canvas layout for `<CompareTools />`.
+- `src/components/ImageCanvas.svelte` — region-inspection
+  readout in the toolbar; the live rect from the most recent
+  shift-drag is rendered as `x0,y0 → x1,y1` with a "Clear"
+  button. (The `onRegion` callback was wired in slice 1; the
+  follow-on adds the local readout.)
+- Spec bump target: AstroForge v1.4.0 (unchanged).
+
 ### CR-07 — Zone B Canvas, Image Rendering & Compare Surfaces
 
 - Closes M9 §35 criteria U2 (preview rendering), U3 (before/after

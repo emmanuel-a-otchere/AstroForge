@@ -18,12 +18,16 @@ tightly-coupled sub-bullets ship together; larger bundles get broken into
 multiple slices if a single PR exceeds the trusted reviewable size
 (~1000 LOC).
 
+The priority order below is informed by [`CR-07-AUDIT.md`](CR-07-AUDIT.md)
+which reconciles every §1–§35 acceptance criterion against the existing
+codebase (2026-09-12).
+
 | # | Bundle | Slices | PR scope | LOC est. |
 |---|---|---|---|---|
 | **B1** | **Foundation** | Audit + §25 data model + §33 ADRs | `comparison.rs` types (session, item, region, metric, delta, assessment, decision, set) + ADR-07.1..07.8 | 1500 |
 | **B2** | **Metrics + delta** | §8 + §10 + §11 + §12 | `metrics.rs` (noise, sharpness, stars, background, dynamic-range, signal, AI-quality) + `difference.rs` (absolute, signed, amplified, structural) + `assessment.rs` | 2500 |
 | **B3** | **Decisions** | §17 + §18 + §16 | `image_decision` state machine + promotion flow + comparison sets (CRUD + persistence) | 1500 |
-| **B4** | **UX** | §5 + §6 + §7 + §15 | modes UI (side-by-side/split/blink/difference/overlay) — extends existing WebGL canvas + synchronized nav + comparison region + version tree | 2500 |
+| **B4** | **UX** | §5 + §6 + §7 + §15 | modes UI (overlay + amplified/structural difference) + synchronized nav + comparison region + version tree (DAG visualization) | 2500 |
 | **B5** | **Provenance + AI** | §13 + §14 + §20 | provenance panel + AI-aware comparison + recommendation feedback loop | 1500 |
 | **B6** | **Polish** | §22 + §23 + §24 + §30 | optional quality profiles + expert comparison + beginner comparison + export from comparison | 1000 |
 | **B7** | **Perf + tests** | §29 + §32 | streaming, GPU/WebGPU acceleration, visual regression, metric validation, version integrity, AI comparison tests, performance tests | 1500 |
@@ -66,10 +70,17 @@ version tree visualization.
 
 ## Comparison sets (§16) + decisions (§17, §18)
 
-`crates/astroforge-persistence/src/comparison/` (NEW) — SQLite tables
+`crates/astroforge-core/src/comparison/` (NEW) — SQLite tables
 for comparison sets + decision history. ImageDecision state machine:
 `Working → Candidate → Preferred → Final` (with branches to `Rejected`
 and `Reference`). Promotion preserves complete history.
+
+> **Note:** the implementation map in CR-07 §28 references a
+> `crates/astroforge-persistence/` crate which does not exist. The
+> recommendation from [`CR-07-AUDIT.md`](CR-07-AUDIT.md) is to put
+> comparison tables in `crates/astroforge-core/src/comparison/`,
+> reusing the existing `db.rs` sqlite connection. No new persistence
+> crate is needed.
 
 ## ADRs (§33)
 

@@ -459,10 +459,21 @@ packaged for Windows (.msix) and macOS (.dmg).
 
 | ID | Task | Spec ref | Status | Depends on |
 |---|---|---|---|---|
-| P3-M4-T1 | [#110](https://github.com/emmanuel-a-otchere/AstroForge/issues/110) | Implement statistical Bayer detection (autocorrelation, green variance, camera signature DB) | §5.2 | pending | Phase 1 |
-| P3-M4-T2 | [#111](https://github.com/emmanuel-a-otchere/AstroForge/issues/111) | Implement DNG parser (TIFF tags: CFAPattern, CFARepeatPatternDim, BlackLevel, WhiteLevel) | §5.2 | pending | T1 |
-| P3-M4-T3 | [#112](https://github.com/emmanuel-a-otchere/AstroForge/issues/112) | Implement Bayer uncertainty prompt (telescope selection / pattern selection) | §5.2 | pending | T1 |
-| P3-M4-T4 | [#113](https://github.com/emmanuel-a-otchere/AstroForge/issues/113) | Implement confidence scoring (>0.85 auto, 0.5–0.85 prompt, <0.5 assume RGB) | §5.2 | pending | T1 |
+| P3-M4-T1 | [#110](https://github.com/emmanuel-a-otchere/AstroForge/issues/110) | Implement statistical Bayer detection (autocorrelation, green variance, camera signature DB) | §5.2 | **done** (`56d2184`) | Phase 1 |
+| P3-M4-T2 | [#111](https://github.com/emmanuel-a-otchere/AstroForge/issues/111) | Implement DNG parser (TIFF tags: CFAPattern, CFARepeatPatternDim, BlackLevel, WhiteLevel) | §5.2 | **done** (`56d2184`) | T1 |
+| P3-M4-T3 | [#112](https://github.com/emmanuel-a-otchere/AstroForge/issues/112) | Implement Bayer uncertainty prompt (telescope selection / pattern selection) | §5.2 | **done** (`56d2184`) | T1 |
+| P3-M4-T4 | [#113](https://github.com/emmanuel-a-otchere/AstroForge/issues/113) | Implement confidence scoring (>0.85 auto, 0.5–0.85 prompt, <0.5 assume RGB) | §5.2 | **done** (`56d2184`) | T1 |
+
+> **Walk-down note (2026-09-12):** All four P3-M4 tasks shipped in commit
+> `56d2184` ("Phase 3 M3.4: PNG/JPG/DNG Bayer detection"). The
+> implementation lives in `crates/astroforge-core/src/bayer_detection.rs`
+> (autocorrelation + green-variance + pattern detection, 364 LOC),
+> `crates/astroforge-core/src/bayer_intelligence.rs` (camera signature
+> DB wiring + four-state taxonomy, 436 LOC),
+> `crates/astroforge-core/src/dng_parser.rs` (CFA tags + BlackLevel +
+> WhiteLevel, 229 LOC), and `src/components/BayerPromptDialog.svelte`
+> (uncertainty prompt UI). The PROJECT_PLAN status column was not
+> updated when the milestone landed; this entry corrects the drift.
 
 ---
 

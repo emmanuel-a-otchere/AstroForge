@@ -8,42 +8,51 @@ truth for the project's behavior, architecture, and feature set.
 
 | Version | File | Status | Date |
 |---|---|---|---|
-| **1.3.0** | [AstroForge_Spec_v1.3.0.md](./AstroForge_Spec_v1.3.0.md) | 🟡 Pending bump (P5.1 + CR-07 + follow-ons landed; carrier authoring deferred — see [Open issue list](./SPEC_INDEX.md#open-issue-list)) | 2026-09-12 |
-| **1.2.0** | [AstroForge_Spec_v1.2.0.md](./AstroForge_Spec_v1.2.0.md) | ✅ Active (becomes superseded on the 1.3.0 bump) | 2026-09-11 |
+| **1.4.0** | [AstroForge_Spec_v1.4.0.md](./AstroForge_Spec_v1.4.0.md) | ✅ Active | 2026-09-12 |
+| **1.3.0** | [AstroForge_Spec_v1.3.0.md](./AstroForge_Spec_v1.3.0.md) | 📦 Superseded | 2026-09-12 |
 
 > **CR-06 (resolved 2026-09-11):** AI Enhancement Studio & Intelligent Image
 > Revamp. Status: Shipped (P1–P7). Target: AstroForge 1.2.0. Depends on
 > CR-01–CR-05. Enables CR-07+ etc. See
 > [../CR-06-AI-ENHANCEMENT-STUDIO.md](../CR-06-AI-ENHANCEMENT-STUDIO.md).
 >
-> **CR-06 P5.1 (resolved, PR #307):** Real ONNX inference + tile execution +
-> mask-aware apply. The dispatcher contract (P4 metadata shape) is
-> unchanged; the engine inside the operation dispatch is swapped for `ort`
-> (ONNX Runtime 1.28) running on bundled classical-kernel ONNX graphs.
-> The §37 `SegmentationLeakage` gate (P6 no-op) now compares real
-> inside / outside region deltas. A new `ai_quality_reports` table
-> persists every gate verdict. Bump target: 1.3.0 (spec file authoring
-> deferred; see Open issue list).
+> **CR-06 P5.1 (resolved, PR #307, 2026-09-12):** Real ONNX inference + tile execution +
+> mask-aware apply. The dispatcher contract (P4 metadata shape) is unchanged;
+> the engine inside the operation dispatch is swapped for `ort` (ONNX Runtime
+> 1.28) running on bundled classical-kernel ONNX graphs. The §37
+> `SegmentationLeakage` gate (P6 no-op) now compares real inside / outside
+> region deltas. A new `ai_quality_reports` table persists every gate verdict.
+> Carried into [AstroForge_Spec_v1.3.0.md § Delta from 1.2.0](./AstroForge_Spec_v1.3.0.md#delta-from-120).
 >
-> **CR-07 + follow-ons (resolved, PRs #308 + #309 + #310):** Zone B canvas
+> **CR-07 + follow-ons (resolved, PRs #308 + #309 + #310, 2026-09-12):** Zone B canvas
 > + compare surfaces + WebGL back-end. Adds `read_image_artifact` Tauri
 > command, `ImageCanvas` rendering component, `CompareTools` split /
 > blink / difference surfaces, plus a self-contained WebGL shader path
-> with Canvas 2D fallback for > 4 MP renders. Bump target: 1.4.0
-> (carrier authoring deferred — see Open issue list).
+> with Canvas 2D fallback for > 4 MP renders. Carried into
+> [AstroForge_Spec_v1.3.0.md § Delta from 1.2.0](./AstroForge_Spec_v1.3.0.md#delta-from-120).
 >
-> **Forward-look slice (in flight, 2026-09-12):** DP#4 license verification
-> (`OnnxEngine::open_catalog` is now digest-pinned against `CATALOG_MODELS`;
+> **Forward-look slice (resolved, PR #311, 2026-09-12):** DP#4 license verification
+> (`OnnxEngine::open_catalog` is digest-pinned against `CATALOG_MODELS`;
 > unpinned entries carry the `UNVERIFIED_SHA256` sentinel and fail
 > closed), `SessionCache` for session-reuse across apply rounds, plus
 > two ADRs (`docs/adr/0001` plate-solve / `0002` smart-telescope SDK)
 > that close decision-points #73 and #133 from the Open Decision Points
-> table in PROJECT_PLAN.
+> table in PROJECT_PLAN. Carried into [AstroForge_Spec_v1.4.0.md § Delta from 1.3.0](./AstroForge_Spec_v1.4.0.md#delta-from-130).
+>
+> **Spec carrier authoring (resolved, 2026-09-12):**
+> [AstroForge_Spec_v1.3.0.md](./AstroForge_Spec_v1.3.0.md) (carrier from
+> 1.1.0 with a **Delta from 1.2.0** section linking to canonical CR
+> documents) + [AstroForge_Spec_v1.4.0.md](./AstroForge_Spec_v1.4.0.md)
+> (carrier from 1.3.0 with a **Delta from 1.3.0** section). Each carrier
+> preserves the previous carrier's full content unchanged; the delta
+> section links to canonical CR documents rather than re-authoring prose.
 
 ## Historical Specifications
 
 | Version | File | Status | Date | Notes |
 |---|---|---|---|---|
+| 1.3.0 | [AstroForge_Spec_v1.3.0.md](./AstroForge_Spec_v1.3.0.md) | 📦 Superseded | 2026-09-12 | First formal delta carrier (CR-06 P5.1 + CR-07 + ADRs + DP#4) |
+| 1.2.0 | *(delta commit, not on disk)* | 📦 Superseded | 2026-09-11 | CR-06 (AI Enhancement Studio) delta; bumped in 1.3.0 carrier |
 | 1.1.0 | [AstroForge_Spec_v1.1.0.md](./AstroForge_Spec_v1.1.0.md) | 📦 Superseded | 2026-08-30 | Active until CR-06 landed; superseded by 1.2.0 |
 | 1.0.0 | *(attachment, not on disk)* | 📦 Superseded | 2026-08-30 | Original draft; superseded by 1.1.0 |
 
@@ -73,12 +82,10 @@ programmes; none blocks a current tranche.
 
 | # | Item | Origin | Slice |
 |---|---|---|---|
-| 1 | Author `AstroForge_Spec_v1.3.0.md` (carrier) | `SPEC_INDEX.md` 🟡 Pending bump entry | Forward-look (docs-only) |
-| 2 | Author `AstroForge_Spec_v1.4.0.md` (carrier) | `SPEC_INDEX.md` 1.4.0 target | Forward-look (docs-only) |
-| 3 | DP#4 catalog digest pinning for the 7 real-catalog models (SwinIR etc.) | `M9_AUDIT.md` forward-look; #135 | Slice per model as licenses + hashes land |
-| 4 | GPU execution providers (CUDA / DirectML / Metal) | `M9_AUDIT.md` P5.2 | Per-platform compile-time features; CI matrix expansion |
-| 5 | Plate-solve dependency (ADR-0001 — ASTAP bundled) | #73 | Phase 2.4 |
-| 6 | Smart-telescope SDK decision (ADR-0002 — file-only v1.x; plugin Phase 4) | #133 | Phase 4 plugin API |
+| 1 | DP#4 catalog digest pinning for the 7 real-catalog models (SwinIR etc.) | `M9_AUDIT.md` forward-look; #135 | Slice per model as licenses + hashes land |
+| 2 | GPU execution providers (CUDA / DirectML / Metal) | `M9_AUDIT.md` P5.2 | Per-platform compile-time features; CI matrix expansion |
+| 3 | Plate-solve integration on top of ADR-0001 (ASTAP bundled + offline) | #73 (ADR-0001) | Phase 2.4 |
+| 4 | Smart-telescope SDK plugin on top of ADR-0002 (file-only v1.x contract) | #133 (ADR-0002) | Phase 4 plugin API |
 
 ## Versioning Rules
 

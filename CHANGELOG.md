@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Spec carrier authoring — v1.3.0 + v1.4.0 + delta summary
+
+- **`docs/specs/AstroForge_Spec_v1.3.0.md` (NEW, carrier, 660 lines):**
+  preserves the v1.1.0 base content unchanged and appends a **Delta
+  from 1.2.0** section that captures the substantive changes that
+  landed between 1.1.0 and 1.3.0 (CR-06 P5.1, CR-07 + follow-ons).
+  The delta section links to the canonical CR documents rather than
+  re-authoring prose.
+- **`docs/specs/AstroForge_Spec_v1.4.0.md` (NEW, carrier, 661 lines):**
+  preserves the 1.3.0 carrier content unchanged and appends a **Delta
+  from 1.3.0** section that captures the substantive changes that
+  landed in the forward-look bundle (DP#4, SessionCache, ADRs).
+- **`docs/specs/SPEC_INDEX.md`:** 1.4.0 flipped to ✅ Active; 1.3.0
+  moved to historical (📦 Superseded); 1.2.0 documented as a delta
+  commit (not on disk). Open issue list items 1+2 (carrier
+  authoring) closed; remaining items reshuffled. CR-06 P5.1, CR-07 +
+  follow-ons, forward-look bundle, and carrier authoring are all
+  now noted as Resolved.
+- **Robustness:** each carrier preserves the previous carrier's full
+  content unchanged; the delta section links to canonical CR docs
+  rather than re-authoring prose. The 1.3.0 + 1.4.0 carriers are
+  ~660 lines each (vs ~555 lines for the 1.1.0 base) because the
+  delta sections are short and the base content is preserved verbatim.
+
 ### Forward-look slice — DP#4, SessionCache, ADRs, spec index reconciliation
 
 - **DP#4 catalog license verification (`crates/astroforge-ai/src/inference.rs`):**

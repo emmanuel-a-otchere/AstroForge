@@ -35,7 +35,7 @@ use astroforge_core::image::F32Image;
 use astroforge_core::masks::Mask;
 
 use crate::hardware::HardwareProbe;
-use crate::inference::{BuiltinInputKind, OnnxEngine};
+use crate::inference::OnnxEngine;
 
 /// One operation's canonical metadata. The Studio UI
 /// reads this list to render the per-operation card.
@@ -641,26 +641,17 @@ fn resolve_engine(
         if path.exists() {
             let bytes = std::fs::read(&path)
                 .map_err(|e| OperationError::Io(format!("read {}: {e}", path.display())))?;
-            let kind = catalog_input_kind(name);
-            return OnnxEngine::open_catalog(bytes, kind)
+            // DP#4: open_catalog verifies the digest against the
+            // pinned registry entry. Unknown ids fail closed;
+            // unpinned entries (sha256 = "unverified") fail closed
+            // until real hashes land.
+            return OnnxEngine::open_catalog(name, bytes)
                 .map_err(|e| OperationError::Inference(e.to_string()));
         }
     }
     let builtin = crate::inference::builtin_model(binding.builtin_model_id)
         .ok_or_else(|| OperationError::UnknownOperation(binding.builtin_model_id.into()))?;
     OnnxEngine::open_builtin(builtin).map_err(|e| OperationError::Inference(e.to_string()))
-}
-
-/// Map a catalog model onto the engine's input-binding
-/// kind from its hub metadata: 4-channel input means
-/// image+mask (LaMa-style), scale > 1 means upscale,
-/// otherwise a plain strength-blend graph shape.
-fn catalog_input_kind(catalog_model_name: &str) -> BuiltinInputKind {
-    match crate::hub::get_model(catalog_model_name) {
-        Some(info) if info.input_channels == 4 => BuiltinInputKind::Mask,
-        Some(info) if info.scale_factor > 1 => BuiltinInputKind::ImageOnly,
-        _ => BuiltinInputKind::Strength,
-    }
 }
 
 /// The (id, version, hash) identity of the model that

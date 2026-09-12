@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Forward-look slice — DP#4, SessionCache, ADRs, spec index reconciliation
+
+- **DP#4 catalog license verification (`crates/astroforge-ai/src/inference.rs`):**
+  - New `CATALOG_MODELS` registry shadows the 5 builtin entries (with
+    real SHA-256 digests) and lists the 7 real-catalog entries from
+    PROJECT_PLAN P2-M1-T5..T11 with the `UNVERIFIED_SHA256` sentinel.
+  - `OnnxEngine::open_catalog(id, bytes)` is now digest-pinned: looks
+    up the registry, verifies the runtime SHA-256 against the pinned
+    value, fails closed on unknown id, fails closed on unpinned entry.
+  - New `InferenceError` variants: `UnknownCatalogModel`, `CatalogUnpinned`.
+  - Legacy `open_catalog(bytes, kind)` renamed to `open_catalog_unpinned`
+    so test paths + pre-DP#4 callers keep working.
+- **`SessionCache` (same file):** process-wide `Arc<Mutex<HashMap>>`
+  cache keyed by `(kind, sha256)`; `get_or_build(key, || …)` runs the
+  build closure outside the cache lock so a slow build doesn't block
+  reads; `clear()` exposed for model-registry changes. Cuts session-
+  build cost from N (per-apply) to 1 (per-model lifetime) for batches.
+- **`docs/adr/` (new):** Architecture Decision Records folder.
+  - `0001-plate-solve-dependency.md` — adopt ASTAP, bundled, offline;
+    close issue #73.
+  - `0002-smart-telescope-sdk.md` — file-only ingest is the v1.x
+    contract; SDK integration deferred to Phase 4 plugin; close #133.
+  - `README.md` — index + workflow.
+- **`docs/specs/SPEC_INDEX.md`:** 1.3.0 + 1.4.0 carrier authoring
+  deferred (Open issue list items 1 + 2); CR-06 / P5.1 / CR-07 status
+  blocks now reflect the resolved state; forward-look slice noted.
+- **Tests:** 11 new unit tests on `inference.rs` (catalog registry,
+  fail-closed catalog paths, SessionCache behaviour, cache-key
+  distinctness). All workspace + clippy + mvp_smoke green.
+- **Forward-look items closed:** DP#4 fail-closed machinery; SessionCache
+  for apply-round session reuse; ADRs #73 and #133.
+
 ### CR-07 follow-on 2 — ImageCanvas WebGL back-end
 
 - Adds a GPU shader path to `src/components/ImageCanvas.svelte`:

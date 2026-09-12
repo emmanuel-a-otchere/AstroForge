@@ -19,6 +19,15 @@ truth for the project's behavior, architecture, and feature set.
 > Revamp. Status: Shipped (P1–P7). Target: AstroForge 1.2.0. Depends on
 > CR-01–CR-05. Enables CR-07+ etc. See
 > [../CR-06-AI-ENHANCEMENT-STUDIO.md](../CR-06-AI-ENHANCEMENT-STUDIO.md).
+>
+> **CR-06 P5.1 (in flight, 2026-09-12):** Real ONNX inference + tile execution +
+> mask-aware apply. The dispatcher contract (P4 metadata shape) is unchanged;
+> the engine inside the operation dispatch is swapped for `ort` (ONNX Runtime
+> 1.28) running on bundled classical-kernel ONNX graphs. The §37
+> `SegmentationLeakage` gate (P6 no-op) now compares real inside / outside
+> region deltas. A new `ai_quality_reports` table persists every gate verdict.
+> Bump target: 1.3.0 (spec file authored in this PR's M9 forward-look; see
+> [../M9_AUDIT.md § Cross-cutting observations](../M9_AUDIT.md)).
 
 ## Historical Specifications
 

@@ -153,7 +153,7 @@
           type="button"
           class="mode-button"
           class:active={!useCompareTools}
-          on:click={() => (useCompareTools = false)}
+          onclick={() => (useCompareTools = false)}
           aria-pressed={!useCompareTools}
         >
           Side by side
@@ -162,7 +162,7 @@
           type="button"
           class="mode-button"
           class:active={useCompareTools}
-          on:click={() => (useCompareTools = true)}
+          onclick={() => (useCompareTools = true)}
           aria-pressed={useCompareTools}
           data-testid="compare-tools-toggle"
         >

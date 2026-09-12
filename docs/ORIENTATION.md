@@ -129,6 +129,14 @@ processing (P0–P7), CR-06 AI enhancement studio (P0–P7 + P5.1 real ONNX
 inference), CR-07 Zone B canvas + compare surfaces (PR #308 + #309). The
 M9 audit is closed at 39/39 §35 criteria shipped.
 
+CR-07 expanded scope (2026-09-12): the original `docs/CR-07-ZONE-B-CANVAS.md`
+covered the Zone B ImageCanvas + compare surfaces (shipped). The expanded
+[`docs/CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md`](CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md)
+now codifies the rest of CR-07 (sections 1-35: review, comparison,
+decision, provenance, version tree, sets, recommendation). Implementation
+of the expanded scope is staged across 7 bundles — see
+[`docs/CR-07-IMPLEMENTATION-PLAN.md`](CR-07-IMPLEMENTATION-PLAN.md).
+
 Active slice (2026-09-12): CR-07 follow-on 2 — ImageCanvas WebGL back-end
 (self-contained GPU shader path for > 4 MP renders, with Canvas 2D
 auto-fallback). Forward-look: spec bump 1.3.0 → 1.4.0 paperwork carrier,

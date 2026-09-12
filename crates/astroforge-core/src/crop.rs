@@ -121,6 +121,48 @@ pub fn remove_borders(image: &F32Image, border_width: usize) -> F32Image {
     crop(image, &region)
 }
 
+/// P1.5-M7-T5 — exact inverse of [`crop`]. Pastes the cropped image
+/// back into a fresh canvas of `canvas_size` at the original
+/// `CropRegion`, with pixels outside the region initialised to `fill`.
+/// The composition is the algebraic inverse of [`crop`]: for every
+/// pixel `(c, y, x)` in the original that fell inside the region,
+/// `crop` copied it to `(c, y - region.y, x - region.x)` and
+/// `uncrop` copies it back. Pixels outside the region are written
+/// with `fill` (typically `0.0`); those values are not recoverable
+/// from the cropped image, which is the documented non-lossy
+/// behaviour of [`crop`].
+pub fn uncrop(
+    canvas_size: (usize, usize),
+    cropped: &F32Image,
+    region: &CropRegion,
+    fill: f32,
+) -> F32Image {
+    let (canvas_w, canvas_h) = canvas_size;
+    let channels = cropped.channels();
+    let mut result = F32Image::new(canvas_w, canvas_h, channels);
+    result.fill(fill);
+
+    // Clamp the region to the canvas so an out-of-bounds region
+    // cannot panic. The clipped area is silently dropped — this
+    // matches [`crop`]'s silent out-of-bounds read behaviour.
+    let x_end = (region.x + region.width).min(canvas_w);
+    let y_end = (region.y + region.height).min(canvas_h);
+    let src_w = x_end.saturating_sub(region.x);
+    let src_h = y_end.saturating_sub(region.y);
+    if src_w == 0 || src_h == 0 {
+        return result;
+    }
+
+    for c in 0..channels {
+        for y in 0..src_h {
+            for x in 0..src_w {
+                result[(c, region.y + y, region.x + x)] = cropped[(c, y, x)];
+            }
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +210,73 @@ mod tests {
         let result = remove_borders(&img, 1);
         assert_eq!(result.width(), 6);
         assert_eq!(result.height(), 6);
+    }
+
+    // ---- P1.5-M7-T5 reversibility tests ----
+
+    #[test]
+    fn uncrop_round_trips_crop_for_full_region() {
+        let mut img = F32Image::new(8, 8, 1);
+        for i in 0..64 {
+            img[(0, i / 8, i % 8)] = i as f32;
+        }
+        let region = CropRegion {
+            x: 2,
+            y: 2,
+            width: 4,
+            height: 4,
+        };
+        let cropped = crop(&img, &region);
+        let restored = uncrop((8, 8), &cropped, &region, 0.0);
+
+        // Inside the region, every pixel must match the original.
+        for c in 0..1 {
+            for y in 0..4 {
+                for x in 0..4 {
+                    assert_eq!(
+                        restored[(c, region.y + y, region.x + x)],
+                        img[(c, region.y + y, region.x + x)],
+                        "pixel ({c}, {y}, {x}) mismatched",
+                    );
+                }
+            }
+        }
+        // Outside the region, the canvas is filled with `fill`.
+        assert_eq!(restored[(0, 0, 0)], 0.0);
+        assert_eq!(restored[(0, 7, 7)], 0.0);
+    }
+
+    #[test]
+    fn uncrop_with_fill_value_clears_outside_region() {
+        let mut img = F32Image::new(8, 8, 1);
+        img.fill(7.5);
+        let region = CropRegion {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 4,
+        };
+        let cropped = crop(&img, &region);
+        let restored = uncrop((8, 8), &cropped, &region, 42.0);
+        // Bottom-right quadrant should be the fill value.
+        assert_eq!(restored[(0, 7, 7)], 42.0);
+        assert_eq!(restored[(0, 4, 4)], 42.0);
+        // Top-left quadrant should hold the original values.
+        assert_eq!(restored[(0, 0, 0)], 7.5);
+        assert_eq!(restored[(0, 3, 3)], 7.5);
+    }
+
+    #[test]
+    fn uncrop_clamps_out_of_bounds_region_without_panic() {
+        let img = F32Image::new(4, 4, 1);
+        let region = CropRegion {
+            x: 3,
+            y: 3,
+            width: 4,
+            height: 4,
+        };
+        let result = uncrop((4, 4), &img, &region, 0.0);
+        assert_eq!(result.width(), 4);
+        assert_eq!(result.height(), 4);
     }
 }

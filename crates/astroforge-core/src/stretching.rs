@@ -1,6 +1,27 @@
 use crate::image::F32Image;
 
+/// P1.5-M7-T5 — captured parameters of [`auto_stretch`]. The forward
+/// stretch records `min`, `max`, and `midtones` so the inverse can
+/// recover the original linear values. Without these captures,
+/// `auto_stretch` is non-reversible (information is lost in the
+/// normalisation step); the [`auto_stretch_with_params`] entry point
+/// returns the parameters alongside the stretched image.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutoStretchParams {
+    pub min: f32,
+    pub max: f32,
+    pub midtones: f64,
+}
+
 pub fn auto_stretch(image: &F32Image) -> F32Image {
+    auto_stretch_with_params(image).0
+}
+
+/// Forward stretch that also returns the captured parameters. The
+/// companion inverse is [`auto_stretch_inverse`]; together they form
+/// an exact round-trip — every recovered pixel matches the original
+/// within float-precision tolerance.
+pub fn auto_stretch_with_params(image: &F32Image) -> (F32Image, AutoStretchParams) {
     let mut result = image.clone();
 
     let min = result.iter().copied().fold(f32::INFINITY, f32::min);
@@ -12,6 +33,22 @@ pub fn auto_stretch(image: &F32Image) -> F32Image {
     for val in result.iter_mut() {
         let normalized = (*val - min) / range;
         *val = arcsinh_stretch(f64::from(normalized), midtones) as f32;
+    }
+
+    (result, AutoStretchParams { min, max, midtones })
+}
+
+/// P1.5-M7-T5 — exact inverse of [`auto_stretch`]. For each pixel
+/// `stretched`, recover `linear = unnormalise(arcsinh_inverse(value),
+/// params)`. The output matches `image` within float-precision
+/// tolerance when the forward stretch used the same `params`.
+pub fn auto_stretch_inverse(image: &F32Image, params: AutoStretchParams) -> F32Image {
+    let mut result = image.clone();
+    let range = (params.max - params.min).max(1e-10);
+
+    for val in result.iter_mut() {
+        let linearised = arcsinh_stretch_inverse(f64::from(*val), params.midtones);
+        *val = (params.min as f64 + linearised * range as f64) as f32;
     }
 
     result
@@ -27,6 +64,20 @@ pub fn arcsinh_stretch(value: f64, midtones: f64) -> f64 {
     // Maps 0 -> 0 and 1 -> 1 regardless of beta.
     let stretched = (value / beta).asinh() / (1.0 / beta).asinh();
     stretched.clamp(0.0, 1.0)
+}
+
+/// P1.5-M7-T5 — exact inverse of [`arcsinh_stretch`]. Solves
+/// `stretched = asinh(x / beta) / asinh(1 / beta)` for `x`:
+/// `x = beta * sinh(stretched * asinh(1 / beta))`. Mirrors the Lupton
+/// 1999 formula exactly; preserves the 0/1 endpoints.
+pub fn arcsinh_stretch_inverse(value: f64, midtones: f64) -> f64 {
+    if value <= 0.0 {
+        return 0.0;
+    }
+    let beta = midtones.max(1e-10);
+    let y = value.clamp(0.0, 1.0);
+    let recovered = beta * (y * (1.0 / beta).asinh()).sinh();
+    recovered.clamp(0.0, 1.0)
 }
 
 fn compute_midtones(image: &F32Image) -> f64 {
@@ -70,6 +121,50 @@ pub fn histogram_stretch(
     result
 }
 
+/// P1.5-M7-T5 — inverse of [`histogram_stretch`]. For each post-MTF
+/// pixel, invert the midtone transfer and then the (x - shadows) /
+/// range normalisation. The forward path clamps the normalised
+/// value to `[0, 1]` before applying the MTF; values originally
+/// outside `[shadows, highlights]` therefore lose information
+/// (any value below `shadows` maps to `0.0`; any value above
+/// `highlights` to the highlight envelope). The inverse handles
+/// the saturated cases explicitly:
+///   - `post_mtf <= 0.0` → recovered value clamped to `shadows`.
+///   - `post_mtf >= highlights` → recovered value clamped to `highlights`.
+///   - everything in between → exact round-trip via the inverse MTF.
+pub fn histogram_stretch_inverse(
+    image: &F32Image,
+    shadows: f64,
+    highlights: f64,
+    midtones: f64,
+) -> F32Image {
+    let mut result = image.clone();
+    let range = (highlights - shadows).max(1e-10);
+    let shadows_f32 = shadows as f32;
+    let highlights_f32 = highlights as f32;
+
+    for val in result.iter_mut() {
+        let post_mtf = f64::from(*val);
+        // Saturated: forward path clamped this pixel; recover the
+        // boundary rather than the (unrecoverable) original.
+        // Compare against the float32 representation of the
+        // envelope values to match the forward path's clamp.
+        if post_mtf <= shadows_f32 as f64 {
+            *val = shadows_f32;
+            continue;
+        }
+        if post_mtf >= highlights_f32 as f64 {
+            *val = highlights_f32;
+            continue;
+        }
+        let pre_mtf = midtone_transfer_inverse(post_mtf, midtones).clamp(0.0, 1.0);
+        let linear = (pre_mtf * range + shadows) as f32;
+        *val = linear;
+    }
+
+    result
+}
+
 fn midtone_transfer(value: f64, midtones: f64) -> f64 {
     if value <= 0.0 {
         return 0.0;
@@ -87,6 +182,30 @@ fn midtone_transfer(value: f64, midtones: f64) -> f64 {
     // src/lib/shaders.ts (`MTF_STRETCH_SHADER`). If you change one, change the other
     // and update both test suites.
     let result = ((m - 1.0) * value) / ((2.0 * m - 1.0) * value - m);
+    result.clamp(0.0, 1.0)
+}
+
+/// P1.5-M7-T5 — exact inverse of [`midtone_transfer`]. Solves
+/// `y = ((m - 1) * x) / ((2m - 1) * x - m)` for `x`:
+/// `x = (m * y) / (y * (2m - 1) + (1 - m))`. Returns `0.0` when
+/// `y <= 0.0` and `1.0` when `y >= 1.0`, matching the forward endpoints.
+fn midtone_transfer_inverse(value: f64, midtones: f64) -> f64 {
+    if value <= 0.0 {
+        return 0.0;
+    }
+    if value >= 1.0 {
+        return 1.0;
+    }
+    let m = midtones.clamp(0.001, 0.999);
+    let numerator = m * value;
+    let denominator = value * (2.0 * m - 1.0) + (1.0 - m);
+    if denominator.abs() <= 1e-12 {
+        // Degenerate case: the forward MTF was constant at this y, so any
+        // input in [0, 1] produced the same output. Return the midpoint
+        // to preserve the round-trip drift as small as possible.
+        return 0.5;
+    }
+    let result = numerator / denominator;
     result.clamp(0.0, 1.0)
 }
 
@@ -291,5 +410,104 @@ mod tests {
                 "identity stretch: in={v_in} out={v_out}"
             );
         }
+    }
+
+    // ---- P1.5-M7-T5 reversibility tests ----
+
+    #[test]
+    fn arcsinh_stretch_inverse_round_trips_endpoint_zero() {
+        assert_eq!(arcsinh_stretch_inverse(0.0, 0.5), 0.0);
+    }
+
+    #[test]
+    fn arcsinh_stretch_inverse_round_trips_endpoint_one() {
+        // asinh(1/beta) saturates at 1.0 for any beta; inverse of 1.0 is 1.0.
+        assert!((arcsinh_stretch_inverse(1.0, 0.5) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn arcsinh_stretch_round_trips_through_inverse() {
+        for midtones in [0.05, 0.25, 0.5, 0.75, 5.0] {
+            for v in [0.05, 0.25, 0.5, 0.75] {
+                let stretched = arcsinh_stretch(v, midtones);
+                let recovered = arcsinh_stretch_inverse(stretched, midtones);
+                assert!(
+                    (recovered - v).abs() < 1e-6,
+                    "round-trip drift v={v} midtones={midtones}: recovered={recovered}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn auto_stretch_round_trips_through_inverse() {
+        let mut img = F32Image::new(8, 8, 1);
+        for i in 0..64 {
+            img[(0, i / 8, i % 8)] = i as f32 / 63.0;
+        }
+        let (stretched, params) = auto_stretch_with_params(&img);
+        let recovered = auto_stretch_inverse(&stretched, params);
+        for y in 0..8 {
+            for x in 0..8 {
+                assert!(
+                    (recovered[(0, y, x)] - img[(0, y, x)]).abs() < 1e-4,
+                    "pixel ({y}, {x}) drift: original={} recovered={}",
+                    img[(0, y, x)],
+                    recovered[(0, y, x)],
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn histogram_stretch_round_trips_through_inverse() {
+        let mut img = F32Image::new(8, 8, 1);
+        // Generate values inside [0, 1] (the natural MTF domain).
+        // With shadows=0.0, highlights=1.0, the forward path's
+        // clamps are no-ops; the round-trip therefore preserves
+        // every pixel exactly (within float-precision noise).
+        // The inverse is documented to be lossy when the input is
+        // outside the [shadows, highlights] window — that path is
+        // covered separately by `histogram_stretch_inverse_loses_info_outside_window`.
+        for i in 0..64 {
+            img[(0, i / 8, i % 8)] = i as f32 / 63.0;
+        }
+        let shadows = 0.0;
+        let highlights = 1.0;
+        let midtones = 0.4;
+        let stretched = histogram_stretch(&img, shadows, highlights, midtones);
+        let recovered = histogram_stretch_inverse(&stretched, shadows, highlights, midtones);
+        for y in 0..8 {
+            for x in 0..8 {
+                assert!(
+                    (recovered[(0, y, x)] - img[(0, y, x)]).abs() < 1e-4,
+                    "pixel ({y}, {x}) drift: original={} recovered={}",
+                    img[(0, y, x)],
+                    recovered[(0, y, x)],
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn histogram_stretch_inverse_loses_info_outside_window() {
+        // This is the documented lossy behaviour: inputs outside
+        // [shadows, highlights] get clamped in the forward path and
+        // cannot be recovered. The inverse clamps the recovered
+        // value back into [shadows, highlights]; this test pins the
+        // behaviour so future changes don't silently widen the loss.
+        let mut img = F32Image::new(2, 1, 1);
+        img[(0, 0, 0)] = 0.05; // below shadows=0.1
+        img[(0, 0, 1)] = 0.95; // above highlights=0.9
+        let stretched = histogram_stretch(&img, 0.1, 0.9, 0.4);
+        let recovered = histogram_stretch_inverse(&stretched, 0.1, 0.9, 0.4);
+        // Forward clamps both to the [shadows, highlights] envelope.
+        assert_eq!(stretched[(0, 0, 0)], 0.0);
+        assert_eq!(stretched[(0, 0, 1)], 0.9);
+        // Inverse recovers shadows / highlights — not the original
+        // 0.05 / 0.95 — because the forward path lost that
+        // information when it clamped.
+        assert!((recovered[(0, 0, 0)] - 0.1).abs() < 1e-3);
+        assert!((recovered[(0, 0, 1)] - 0.9).abs() < 1e-3);
     }
 }

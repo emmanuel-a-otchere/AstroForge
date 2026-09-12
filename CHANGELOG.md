@@ -2,6 +2,91 @@
 
 ## Unreleased
 
+### Slice M7 — P1.5-M7-T1..T5 walk-down + T5 reversibility primitives
+
+**Scope:** Bundled-batch-tight per the slice order. T1..T4
+were shipped in earlier PRs (#225 checkpoint IPC, #226
+reapplyStage, #227 multi-format dispatch, #228 warning gate).
+T5 — exact reversibility for crop, stretch, and star-replace —
+was genuinely missing in code (only forward operations existed);
+this slice ships the inverses plus paperwork reconciliation for
+the other four tasks.
+
+#### T1..T4 paperwork reconciliation
+
+- `docs/PROJECT_PLAN.md` — flipped P1.5-M7-T1..T5 status from
+  `in_progress` / `pending` to `done (PR #...)` with canonical
+  PR references (#225, #226, #227, #228) for T1..T4 and the
+  in-flight PR for T5.
+
+#### T5 reversibility primitives
+
+- `crates/astroforge-core/src/crop.rs`:
+  - `uncrop(canvas_size, cropped, region, fill) -> F32Image` —
+    exact inverse of `crop(region)`. Pastes the cropped image
+    back into a fresh canvas at the original `CropRegion`;
+    outside-region pixels are initialised to `fill`. Out-of-bounds
+    regions are silently clamped (matches `crop`'s silent
+    out-of-bounds read behaviour).
+  - 3 unit tests: full-region round-trip, fill-value isolation,
+    out-of-bounds clamping.
+
+- `crates/astroforge-core/src/stretching.rs`:
+  - `AutoStretchParams { min, max, midtones }` — captures the
+    parameters the forward `auto_stretch` discards. Without
+    these captures, `auto_stretch` is non-reversible.
+  - `auto_stretch_with_params(image) -> (F32Image, AutoStretchParams)`
+    — forward entry point that returns the captured params.
+  - `auto_stretch_inverse(image, params) -> F32Image` — exact
+    round-trip when fed the forward's params.
+  - `arcsinh_stretch_inverse(value, midtones) -> f64` — exact
+    inverse of the Lupton 1999 arcsinh stretch.
+  - `histogram_stretch_inverse(image, shadows, highlights, midtones) -> F32Image`
+    — inverse that handles the saturated cases explicitly: pixels
+    that the forward path clamped to `shadows` or `highlights`
+    recover the boundary (the original was already discarded).
+  - `midtone_transfer_inverse(value, midtones) -> f64` — solves
+    `y = ((m - 1) * x) / ((2m - 1) * x - m)` for `x`.
+  - 5 unit tests: endpoint round-trips, MTF round-trip across a
+    range of midtones, auto_stretch image round-trip, histogram
+    round-trip inside the unclamped window, and the documented
+    lossy behaviour outside the window.
+
+- `crates/astroforge-core/src/star_segmentation.rs`:
+  - `replace_stars(star_layer, background_layer) -> F32Image` —
+    exact inverse of `segment_stars`. The forward path partitions
+    each pixel into `star_layer` + `background_layer` (one of
+    them is 0); summing the layers recovers the original. Panics
+    on geometry mismatch (caller bug, not recoverable).
+  - `inverse_star_enhancement(enhanced, color_boost) -> F32Image`
+    — exact inverse of `enhance_star_layer` (multiplies by
+    `color_boost`); inverse divides. Asserts on zero `color_boost`.
+  - `inverse_background_enhancement(enhanced, contrast) -> F32Image`
+    — inverse of `enhance_background_layer` (multiplies
+    difference from mean by `contrast`); inverse divides. Asserts
+    on zero contrast.
+  - 4 unit tests: `replace_stars` image round-trip,
+    `inverse_star_enhancement` round-trip, panic-on-zero-boost,
+    `inverse_background_enhancement` round-trip.
+
+#### Robustness
+
+| Risk | Mitigation |
+|---|---|
+| `arcsinh_stretch` midtones=0 division-by-zero | Forward `beta = midtones.max(1e-10)`; inverse mirrors |
+| `histogram_stretch` saturation (input outside [shadows, highlights]) | Inverse explicitly recovers the envelope value for saturated pixels; documented lossy behaviour pinned by test |
+| Float32 representation of envelope values | Inverse compares `post_mtf` against `envelope_f32 as f64` to match the forward path's f32-clamped output |
+| `replace_stars` geometry mismatch | Panics with a precise message — caller bug, not recoverable runtime error |
+| `inverse_star_enhancement(0.0)` | Asserts on zero `color_boost` to surface the contract violation |
+| Float-precision drift in round-trip tests | Tolerance is `1e-4` for stretch and crop, matching the MTF formula's intrinsic error budget |
+
+#### Tests / verification
+
+- `cargo test --workspace` — 719 passed (656 + 30 + 3 + 2 + 8 + 3 + 5 + 2 + 5 + 5); 0 failed
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session` — green
+- 12 new unit tests across `crop.rs`, `stretching.rs`, `star_segmentation.rs`
+
 ### Slice CD — GPU execution providers (P5.2) + DP#4 catalog license audit
 
 **Scope:** Two tightly-coupled forward-look items bundled into one

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### P3-M4-T1..T4 walk-down — Bayer detection paperwork reconciliation
+
+**Status:** No-op audit. P3-M4-T1 (`#110`), T2 (`#111`), T3 (`#112`), T4
+(`#113`) all shipped in commit `56d2184` ("Phase 3 M3.4: PNG/JPG/DNG
+Bayer detection — statistical Bayer detection (autocorrelation, green
+variance, camera signature DB), DNG parser (CFA tags, BlackLevel,
+WhiteLevel), Bayer uncertainty prompt (telescope selection / pattern
+selection), confidence scoring (>0.85 auto, 0.5–0.85 prompt, <0.5 assume
+RGB)"). The PROJECT_PLAN status column was not updated when the
+milestone landed; this slice corrects the drift.
+
+- `crates/astroforge-core/src/bayer_detection.rs` (364 LOC) —
+  autocorrelation + green-variance + pattern detection + camera
+  signature DB.
+- `crates/astroforge-core/src/bayer_intelligence.rs` (436 LOC) —
+  camera signature DB wiring + four-state taxonomy
+  (`BayerInferenceKind` / `BayerRoute`).
+- `crates/astroforge-core/src/dng_parser.rs` (229 LOC) — CFA tags +
+  BlackLevel + WhiteLevel.
+- `src/components/BayerPromptDialog.svelte` — uncertainty prompt UI.
+- `docs/PROJECT_PLAN.md` § Milestone 3.4 — P3-M4-T1..T4 status
+  flipped from `pending` to **done** (`56d2184`) with a walk-down
+  note capturing the reconciliation rationale.
+- **No Rust changes**; no CI gates needed beyond `mvp_smoke` for
+  correctness confirmation.
+
 ### Spec carrier authoring — v1.3.0 + v1.4.0 + delta summary
 
 - **`docs/specs/AstroForge_Spec_v1.3.0.md` (NEW, carrier, 660 lines):**

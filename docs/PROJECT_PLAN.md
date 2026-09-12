@@ -3,11 +3,11 @@
 **Last updated:** 2026-09-12
 **Current phase:** Phases 0–2 landed (UI scaffolding + MVP core pipeline + guided
 processing train). CR-02–CR-06 tranche programmes all shipped P1–P7 + P5.1.
-**CR-07 (Zone B canvas + before/after + split comparison) is the active slice**
-(P5.1 PR #307 merged; CR-07 unblocked because the canvas has real pixels to
-render).
+**CR-07 Zone B canvas (PR #308) + compare tools (PR #309) + WebGL back-end
+(in-flight) are the active slices.** Spec bump 1.3.0 → 1.4.0 target.
 **Spec version:** 1.3.0 in flight (P5.1 bump target; see
-`docs/specs/SPEC_INDEX.md`).
+`docs/specs/SPEC_INDEX.md`); 1.4.0 paperwork carrier pending CR-07 + follow-on
+merge.
 **Active CR programme:** CR-07 — Zone B Canvas, Image Rendering & Compare
 Surfaces. Depends on P5.1 real pixels (now shipped). Closes the last three
 M9 §35 gaps (U2 preview rendering, U3 before/after surface, U4 split
@@ -19,7 +19,7 @@ comparison).
 - `2026-09-07-cr05-intelligent-processing/PLAN.md` — CR-05 (closed)
 - `2026-09-10-cr06-ai-enhancement-studio/PLAN.md` — CR-06 (closed)
 - `2026-09-12-cr06-p5-1-real-onnx/PLAN.md` — CR-06 P5.1 (closed, merged PR #307)
-- `2026-09-12-cr07-zone-b-canvas/PLAN.md` — CR-07 (active)
+- `2026-09-12-cr07-zone-b-canvas/PLAN.md` — CR-07 (closed, PR #308 + PR #309)
 
 **Programme state:** See [`docs/M9_AUDIT.md`](M9_AUDIT.md) for the per-criterion
 CR-06 walk-through (34/39 §35 criteria shipped, 5 partial, 0 missing) and the

@@ -29,7 +29,14 @@
   difference map, split slider, annotations.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { readImageArtifact } from "../lib/astroforge-api";
+  import {
+    initImageCanvasGl,
+    drawImageCanvasGl,
+    destroyImageCanvasGl,
+    type ImageCanvasGlInitResult,
+  } from "../lib/image-canvas-webgl";
 
   export let versionId: string | null = null;
   export let mask: Float32Array | null = null;
@@ -41,6 +48,18 @@
     x1: number;
     y1: number;
   }) => void = () => {};
+  // CR-07 follow-on 2: render-back-end toggle. "auto" probes
+  // WebGL first and falls back to Canvas 2D when the context
+  // creation fails (sandbox, headless, very old webview).
+  // Callers can pin a back-end explicitly for testing.
+  export let backend: "auto" | "webgl" | "canvas2d" = "auto";
+  // CR-07 follow-on 2: WebGL-overlay canvas (mask + clipping
+  // wash). Lives behind the WebGL canvas as a sibling
+  // absolutely-positioned element when the WebGL back-end is
+  // active; the existing Canvas 2D path overlays directly into
+  // the single canvas.
+  export let overlayCanvasEl: HTMLCanvasElement | undefined =
+    undefined;
 
   type ZoomMode = "fit" | "1:1";
 
@@ -68,6 +87,32 @@
   // onRegion; the component also stores a copy for the local
   // readout so users can see what they just drew.
   let regionRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
+
+  // CR-07 follow-on 2: WebGL back-end state. The renderer is
+  // created lazily on first render when the WebGL path is
+  // active; destroyed on unmount.
+  let glState: ImageCanvasGlInitResult | null = null;
+  let glContext: WebGLRenderingContext | null = null;
+  let activeBackend: "webgl" | "canvas2d" | null = null;
+  let webglFailed = false;
+  // CR-07 follow-on 2: rolling FPS tracker (last 30 frames).
+  // Surfaced in the toolbar so the user can see the actual
+  // rendering cost of the active back-end.
+  let fpsAvg = 0;
+  const fpsSamples: number[] = [];
+  // CR-07 follow-on 2: byte cost of the most recent source
+  // upload (per-frame). Drives the perf-hint copy.
+  let lastUploadBytes = 0;
+  // CR-07 follow-on 2: cached normalised FPS timestamps.
+  let lastFrameTs = 0;
+
+  onDestroy(() => {
+    if (glContext && glState) {
+      destroyImageCanvasGl(glContext, glState);
+    }
+    glContext = null;
+    glState = null;
+  });
 
   // Re-fetch on version change.
   $: if (versionId) loadArtifact(versionId);
@@ -152,6 +197,123 @@
   }
 
   function draw() {
+    if (!canvasEl || !bytes || !dims) return;
+    // CR-07 follow-on 2: pick the back-end. Auto probes WebGL
+    // once; on failure we set `webglFailed` and never try again
+    // for the lifetime of the component (the failure mode is
+    // always persistent on a given webview).
+    if (!activeBackend) {
+      activeBackend =
+        backend === "canvas2d" || webglFailed
+          ? "canvas2d"
+          : "webgl";
+    }
+    // CR-07 follow-on 2: WebGL fast-path.
+    if (activeBackend === "webgl") {
+      try {
+        drawWebGL();
+        trackFps();
+        return;
+      } catch (e) {
+        // Any failure mid-render: fall back to Canvas 2D for
+        // the rest of the component's lifetime. Don't throw —
+        // the user still has a usable surface.
+        console.warn("ImageCanvas WebGL render failed:", e);
+        webglFailed = true;
+        activeBackend = "canvas2d";
+        if (glContext && glState) {
+          destroyImageCanvasGl(glContext, glState);
+        }
+        glContext = null;
+        glState = null;
+      }
+    }
+    drawCanvas2D();
+    trackFps();
+  }
+
+  // CR-07 follow-on 2: WebGL fast-path body. Pulled out of
+  // draw() so the catch-block stays small and obvious.
+  function drawWebGL(): void {
+    if (!canvasEl || !bytes || !dims) return;
+    const decoded = decodeTiff(bytes);
+    if (!decoded) {
+      drawCanvas2D(); // surface the decode-failed error in 2D
+      return;
+    }
+    // Lazy init: first WebGL draw allocates the context.
+    if (!glContext || !glState) {
+      const gl = canvasEl.getContext("webgl", {
+        premultipliedAlpha: false,
+        preserveDrawingBuffer: false,
+        antialias: false,
+      }) as WebGLRenderingContext | null;
+      if (!gl) {
+        webglFailed = true;
+        activeBackend = "canvas2d";
+        return drawCanvas2D();
+      }
+      const init = initImageCanvasGl(gl);
+      if (!init.ok) {
+        webglFailed = true;
+        activeBackend = "canvas2d";
+        return drawCanvas2D();
+      }
+      glContext = gl;
+      glState = init;
+    }
+    // Project zoom + pan into UV space. The existing Canvas 2D
+    // path uses screen-pixel offsets; the WebGL path uses UV
+    // pan, so we translate once here.
+    const cw = canvasEl.clientWidth || 600;
+    const ch = canvasEl.clientHeight || 400;
+    let scale: number;
+    if (zoomMode === "fit") {
+      scale = Math.min(cw / decoded.width, ch / decoded.height);
+    } else if (zoomMode === "1:1") {
+      scale = zoomLevel;
+    } else {
+      scale = zoomLevel;
+    }
+    const dispW = Math.max(1, Math.round(decoded.width * scale));
+    const dispH = Math.max(1, Math.round(decoded.height * scale));
+    const baseX = (cw - dispW) / 2;
+    const baseY = (ch - dispH) / 2;
+    const uvPanX =
+      decoded.width > 0 ? (baseX + panX) / decoded.width : 0;
+    const uvPanY =
+      decoded.height > 0 ? (baseY + panY) / decoded.height : 0;
+    // UV zoom: how much of the texture fills the canvas.
+    // zoom == 1 → fill (texture covers the full quad).
+    const uvZoom = dispW > 0 ? cw / dispW : 1;
+    const result = drawImageCanvasGl({
+      gl: glContext,
+      state: glState,
+      width: decoded.width,
+      height: decoded.height,
+      channels: decoded.channels === 3 ? 3 : 1,
+      data: decoded.data,
+      params: { blackPoint: clipLow, whitePoint: clipHigh },
+      viewport: { zoom: uvZoom, panX: uvPanX, panY: uvPanY },
+    });
+    lastUploadBytes = result.uploadBytes;
+  }
+
+  // CR-07 follow-on 2: rolling FPS tracker.
+  function trackFps(): void {
+    const now = performance.now();
+    if (lastFrameTs > 0) {
+      const dt = now - lastFrameTs;
+      if (dt > 0) fpsSamples.push(1000 / dt);
+      if (fpsSamples.length > 30) fpsSamples.shift();
+      if (fpsSamples.length > 0) {
+        fpsAvg = fpsSamples.reduce((a, b) => a + b, 0) / fpsSamples.length;
+      }
+    }
+    lastFrameTs = now;
+  }
+
+  function drawCanvas2D() {
     if (!canvasEl || !bytes || !dims) return;
     const decoded = decodeTiff(bytes);
     if (!decoded) {
@@ -355,6 +517,7 @@
 </script>
 
 <div class="image-canvas" data-testid="image-canvas">
+    <!-- Toolbar -->
   <div class="toolbar">
     <button type="button" on:click={fit} aria-label="Fit to window">Fit</button>
     <button type="button" on:click={oneToOne} aria-label="1:1 zoom">1:1</button>
@@ -399,6 +562,44 @@
         aria-label="Clip high"
       />
     </label>
+    <!--
+      CR-07 follow-on 2: render back-end selector. Default
+      "auto" probes WebGL on first draw; explicit pin is
+      available for testing or for users who want to force
+      Canvas 2D on a flaky webview.
+    -->
+    <label class="check">
+      Back-end
+      <select
+        bind:value={backend}
+        on:change={() => {
+          activeBackend = null;
+          webglFailed = false;
+          fpsSamples.length = 0;
+          fpsAvg = 0;
+          if (glContext && glState) {
+            destroyImageCanvasGl(glContext, glState);
+          }
+          glContext = null;
+          glState = null;
+          draw();
+        }}
+        aria-label="Render back-end"
+      >
+        <option value="auto">Auto (WebGL → 2D)</option>
+        <option value="webgl">WebGL</option>
+        <option value="canvas2d">Canvas 2D</option>
+      </select>
+    </label>
+    {#if activeBackend && fpsAvg > 0}
+      <span
+        class="fps-readout"
+        data-testid="image-canvas-fps"
+        title={`Active back-end: ${activeBackend}. Last upload: ${(lastUploadBytes / 1024 / 1024).toFixed(1)} MB.`}
+      >
+        {activeBackend} · {fpsAvg.toFixed(1)} fps
+      </span>
+    {/if}
     {#if regionRect}
       <span class="region-readout" data-testid="region-readout">
         Region: {regionRect.x0},{regionRect.y0} →
@@ -529,5 +730,20 @@
     font-family: var(--font-data, monospace);
     padding: 0 8px;
     border-left: 1px solid #2a2f3a;
+  }
+  .fps-readout {
+    font-size: 12px;
+    color: #50d0ff;
+    font-family: var(--font-data, monospace);
+    padding: 0 8px;
+    border-left: 1px solid #2a2f3a;
+  }
+  .toolbar select {
+    background: #2a2f3a;
+    color: #d8dde6;
+    border: none;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
   }
 </style>

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### CR-07 follow-on 2 — ImageCanvas WebGL back-end
+
+- Adds a GPU shader path to `src/components/ImageCanvas.svelte`:
+  16-bit TIFF pixels are decoded once, packed into a Float32
+  RGBA texture, and rendered through a `zoom / pan / clip`
+  fragment shader. The existing Canvas 2D path is preserved
+  verbatim and serves as the auto-fallback when WebGL context
+  creation fails (sandbox, headless, very old webview).
+- New `src/lib/image-canvas-webgl.ts` — self-contained WebGL
+  adapter purpose-built for the CR-07 surface (avoids coupling
+  the ImageCanvas path to the P1.5 wizard's `gl-renderer.ts`
+  which is wired for MTF / SCNR / star-compositing rather than
+  raw 16-bit TIFF). Uses Float32 RGBA texture upload when
+  `OES_texture_float` is available; falls back to 8-bit RGBA
+  upload (same display precision as the Canvas 2D path) on
+  contexts without the extension.
+- Toolbar gains a Back-end selector (`auto / webgl / canvas2d`)
+  with FPS readout (rolling 30-frame average) and per-frame
+  upload-cost tooltip for the scorecard.
+- The existing Canvas 2D path is unchanged (no behaviour
+  regression for the default `auto` profile on a system where
+  WebGL init fails on first probe).
+- Spec bump target: AstroForge v1.4.0 (unchanged; follow-on
+  paperwork carrier).
+
 ### CR-07 follow-on — Compare tools (split, blink, difference, region)
 
 - New `src/components/CompareTools.svelte` — split-slider (vertical

@@ -123,6 +123,16 @@ The UI is a *projection* of persistent state, not the canonical source. This pre
 
 ## Roadmap note
 
-CR-04 — Intelligent Import, Session Understanding & Target Detection — implementation is in flight (P0–P10 phase structure; see `docs/plans/2026-09-06-cr04-intelligent-import/PLAN.md`). It takes the existing ingest, Bayer detection, frame classification, session grouping, and deep-sky/planetary routing logic and turns them into the first genuinely intelligent user experience: Drop Folder → Detect → Classify → Explain → Confirm → Build Session → Recommend Pipeline. That is the point where AstroForge begins to demonstrate its intelligence before a single processing stage is executed.
+CR-02 → CR-07 all shipped (2026-09-12): CR-02 domain architecture, CR-03
+application shell, CR-04 intelligent import (P0–P10), CR-05 intelligent
+processing (P0–P7), CR-06 AI enhancement studio (P0–P7 + P5.1 real ONNX
+inference), CR-07 Zone B canvas + compare surfaces (PR #308 + #309). The
+M9 audit is closed at 39/39 §35 criteria shipped.
 
-After CR-04 ships, the next CR is CR-05 — Intelligent Processing Workspace & Adaptive Pipeline Execution — which takes the Session Understanding + Recommendation produced by CR-04 and turns it into the actual image-processing experience (human-readable pipeline, live previews, execution controls, checkpoints, adaptive parameter recommendations, progress, recovery, and creation of Image Versions).
+Active slice (2026-09-12): CR-07 follow-on 2 — ImageCanvas WebGL back-end
+(self-contained GPU shader path for > 4 MP renders, with Canvas 2D
+auto-fallback). Forward-look: spec bump 1.3.0 → 1.4.0 paperwork carrier,
+DP#4 license verification (#135), GPU providers for `ort` (P5.2),
+plate-solve dependency decision (#73), smart-telescope SDK decision (#133),
+recipe system (Phase 3 M2), packaging (Phase 3 M3), plugin architecture
+(Phase 4).

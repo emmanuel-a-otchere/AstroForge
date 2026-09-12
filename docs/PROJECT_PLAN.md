@@ -520,8 +520,8 @@ are optimized. StableSR is available as an experimental opt-in plugin.
 | ID | Task | Spec ref | Status | Depends on |
 |---|---|---|---|---|
 | P4-M2-T1 | [#119](https://github.com/emmanuel-a-otchere/AstroForge/issues/119) | Decide hosting: GitHub-based repo vs. static JSON index | §17 item 3 | pending | P3-M2-T1 |
-| P4-M2-T2 | [#120](https://github.com/emmanuel-a-otchere/AstroForge/issues/120) | Implement in-app recipe gallery (browsable, filterable by target/equipment/palette) | §11.3 | pending | T1 |
-| P4-M2-T3 | [#121](https://github.com/emmanuel-a-otchere/AstroForge/issues/121) | Implement recipe search and filtering | §11.3 | pending | T2 |
+| P4-M2-T2 | [#120](https://github.com/emmanuel-a-otchere/AstroForge/issues/120) | Implement in-app recipe gallery (browsable, filterable by target/equipment/palette) | §11.3 | done (PR #318) | T1 |
+| P4-M2-T3 | [#121](https://github.com/emmanuel-a-otchere/AstroForge/issues/121) | Implement recipe search and filtering | §11.3 | done (PR #318) | T2 |
 
 ### Milestone 4.3 — Platform Optimizations
 

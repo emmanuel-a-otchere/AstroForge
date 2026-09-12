@@ -1,15 +1,16 @@
 # AstroForge — Living Project Plan
 
-**Last updated:** 2026-09-11
+**Last updated:** 2026-09-12
 **Current phase:** Phases 0–2 landed (UI scaffolding + MVP core pipeline + guided
-processing train). CR-02–CR-06 tranche programmes shipped P1–P7. CR-04 P5/P6/P7
-(session_grouping / capture_analysis / narrowband) is the next substantive slice
-tranche. **No open PRs on `main`.**
-**Spec version:** 1.2.0 (CR-06 bump, backward-compatible minor; see
-`docs/specs/SPEC_INDEX.md`)
-**Active CR programme:** CR-06 closed (P1–P7); CR-04 P5/P6/P7 is the next
-substantive tranche. CR-07 (Zone B canvas + before/after + split comparison) is
-the natural follow-on after CR-04 closes.
+processing train). CR-02–CR-06 tranche programmes all shipped P1–P7. **CR-06 P5.1
+(Real ONNX inference + tile execution + mask-aware apply) is the next substantive
+slice.** No open PRs on `main` after P5.1 merges.
+**Spec version:** 1.3.0 (CR-06 P5.1 bump: stable dispatcher contract unchanged;
+the AI Enhancement Studio gains real inference + §37 segmentation-leakage
+gate; see `docs/specs/SPEC_INDEX.md`).
+**Active CR programme:** CR-06 P5.1 is the active slice. CR-07 (Zone B canvas +
+before/after + split comparison) is the natural follow-on: the canvas only has
+real pixels to render once P5.1's apply round produces them.
 **Active plan:** Per-tranche plans under [`docs/plans/`](plans/):
 - `2026-09-06-cr02-domain-model/PLAN.md` — CR-02 (closed)
 - `2026-09-06-cr03-application-shell/PLAN.md` — CR-03 (closed)

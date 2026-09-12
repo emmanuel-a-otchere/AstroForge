@@ -119,7 +119,7 @@ fn cosine_blend_weight(x: usize, y: usize, width: usize, height: usize) -> f32 {
 pub fn run_tiled_inference(
     image: &F32Image,
     config: &TileConfig,
-    infer_fn: impl Fn(&F32Image) -> F32Image,
+    infer_fn: impl Fn(&F32Image, &Tile) -> F32Image,
 ) -> F32Image {
     let width = image.width();
     let height = image.height();
@@ -132,7 +132,7 @@ pub fn run_tiled_inference(
 
     for tile in &tiles {
         let tile_input = extract_tile(image, tile);
-        let tile_output = infer_fn(&tile_input);
+        let tile_output = infer_fn(&tile_input, tile);
         blend_tile(&mut output, &tile_output, tile, &mut weight_map);
     }
 
@@ -211,7 +211,7 @@ mod tests {
             tile_size: 16,
             overlap: 4,
         };
-        let result = run_tiled_inference(&image, &config, |tile| tile.clone());
+        let result = run_tiled_inference(&image, &config, |tile, _geom| tile.clone());
         for y in 0..32 {
             for x in 0..32 {
                 assert!((result[(0, y, x)] - image[(0, y, x)]).abs() < 1.0);

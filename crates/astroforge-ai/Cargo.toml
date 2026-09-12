@@ -12,6 +12,21 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 ndarray = { workspace = true }
+# CR-06 P5.1 — real ONNX inference. `ort` wraps ONNX Runtime 1.28;
+# the `download-binaries` feature fetches the prebuilt CPU runtime at
+# build time. `tls-rustls` keeps that fetch pure-Rust (the default
+# `tls-native` would require system OpenSSL headers, which minimal
+# CI/dev images do not carry). `ndarray` interop is off: the engine
+# builds tensors from (shape, Vec) directly. GPU execution providers
+# stay disabled in P5.1 (compile-time features; CUDA / DirectML /
+# Metal enablement is P5.2 work gated on per-platform CI runners).
+ort = { version = "2.0.0-rc.13", default-features = false, features = [
+    "std",
+    "download-binaries",
+    "tls-rustls",
+    "copy-dylibs",
+    "api-27",
+] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

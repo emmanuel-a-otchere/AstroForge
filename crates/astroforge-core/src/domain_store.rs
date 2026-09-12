@@ -11,11 +11,11 @@
 //! other stores.
 
 use crate::domain::{
-    AiMask, AiOperation, AiRecommendation, AiSafetyClassification, Artifact, ArtifactCategory,
-    EnhancementPreview, EnhancementStack, ImageAnalysis, ImageRegion, ImageRegionKind,
-    ImageVersion, PipelineRun, PipelineRunStatus, PreviewRun, Project, ProjectEvent,
-    ProjectEventKind, ProjectStatus, Session, SessionClassification, SourceAsset, StageRunRecord,
-    Target, DOMAIN_SCHEMA_VERSION,
+    AiMask, AiOperation, AiQualityReport, AiRecommendation, AiSafetyClassification, Artifact,
+    ArtifactCategory, EnhancementPreview, EnhancementStack, ImageAnalysis, ImageRegion,
+    ImageRegionKind, ImageVersion, PipelineRun, PipelineRunStatus, PreviewRun, Project,
+    ProjectEvent, ProjectEventKind, ProjectStatus, Session, SessionClassification, SourceAsset,
+    StageRunRecord, Target, DOMAIN_SCHEMA_VERSION,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
@@ -420,6 +420,30 @@ ALTER TABLE sessions ADD COLUMN classification_metadata TEXT;
         8,
         r#"
 ALTER TABLE sessions ADD COLUMN target_provenance TEXT NOT NULL DEFAULT 'deterministic';
+"#,
+    ),
+    // CR-06 P5.1 — AI quality reports. The apply round
+    // now produces a real result image, so the §37 gate
+    // fires on (source, result) pixels at apply time and
+    // the verdict + findings persist alongside the
+    // resulting Image Version.
+    (
+        9,
+        r#"
+CREATE TABLE ai_quality_reports (
+    report_id TEXT PRIMARY KEY,
+    operation_id TEXT NOT NULL,
+    source_image_version_id TEXT NOT NULL,
+    result_image_version_id TEXT NOT NULL,
+    verdict TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_ai_quality_reports_result_version
+    ON ai_quality_reports(result_image_version_id);
+CREATE INDEX idx_ai_quality_reports_operation
+    ON ai_quality_reports(operation_id);
 "#,
     ),
 ];
@@ -1601,6 +1625,64 @@ impl DomainStore {
             Ok(None)
         }
     }
+
+    // ─── AI quality reports (CR-06 P5.1) — migration v9 ─────────────
+
+    /// Persist a §37 quality-gate report produced by the
+    /// apply round. Idempotent on `report_id` (the id is
+    /// minted fresh per apply, so collisions do not occur
+    /// in practice; INSERT OR REPLACE keeps the store
+    /// total on retries).
+    pub fn record_ai_quality_report(&self, row: &AiQualityReport) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO ai_quality_reports (
+                report_id, operation_id, source_image_version_id,
+                result_image_version_id, verdict, report_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                row.report_id,
+                row.operation_id,
+                row.source_image_version_id,
+                row.result_image_version_id,
+                row.verdict,
+                row.report_json,
+                row.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Latest quality report for a result Image Version
+    /// (the Studio's QualityGatePanel reads this).
+    pub fn latest_ai_quality_report_for_version(
+        &self,
+        result_image_version_id: &str,
+    ) -> Result<Option<AiQualityReport>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT report_id, operation_id, source_image_version_id,
+                    result_image_version_id, verdict, report_json, created_at
+             FROM ai_quality_reports
+             WHERE result_image_version_id = ?1
+             ORDER BY created_at DESC, report_id DESC
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![result_image_version_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(AiQualityReport {
+                report_id: row.get(0)?,
+                operation_id: row.get(1)?,
+                source_image_version_id: row.get(2)?,
+                result_image_version_id: row.get(3)?,
+                verdict: row.get(4)?,
+                report_json: row.get(5)?,
+                created_at: row.get(6)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
     /// CR-06 P7 — fetch a single `ImageRegion` row by id. Mirrors
     /// the `get_ai_mask` helper added in P5.
     pub fn get_image_region(&self, region_id: &str) -> Result<Option<ImageRegion>> {
@@ -2431,10 +2513,12 @@ mod tests {
         // session-classification ALTER TABLE migration.
         // CR-04 P10 — schema_version() bumped to 8 by the
         // target_provenance ALTER TABLE migration.
-        assert_eq!(s.schema_version(), 8);
+        // CR-06 P5.1 — schema_version() bumped to 9 by the
+        // ai_quality_reports migration.
+        assert_eq!(s.schema_version(), 9);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 8);
+        assert_eq!(s2.schema_version(), 9);
     }
 
     #[test]
@@ -2948,5 +3032,47 @@ mod tests {
             assert!(id.starts_with("prev_"));
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ai_quality_report_round_trips_and_latest_wins() {
+        let s = store();
+        let row = AiQualityReport {
+            report_id: "qr_1".into(),
+            operation_id: "op_1".into(),
+            source_image_version_id: "ver_src".into(),
+            result_image_version_id: "ver_res".into(),
+            verdict: "ok".into(),
+            report_json: r#"{"verdict":"ok","findings":[]}"#.into(),
+            created_at: "2026-09-12T00:00:00Z".into(),
+        };
+        s.record_ai_quality_report(&row).unwrap();
+        let fetched = s
+            .latest_ai_quality_report_for_version("ver_res")
+            .unwrap()
+            .expect("report present");
+        assert_eq!(fetched.verdict, "ok");
+        assert_eq!(fetched.operation_id, "op_1");
+
+        // A later report for the same result version supersedes.
+        let newer = AiQualityReport {
+            report_id: "qr_2".into(),
+            verdict: "warning".into(),
+            created_at: "2026-09-12T00:01:00Z".into(),
+            ..row.clone()
+        };
+        s.record_ai_quality_report(&newer).unwrap();
+        let fetched = s
+            .latest_ai_quality_report_for_version("ver_res")
+            .unwrap()
+            .expect("report present");
+        assert_eq!(fetched.verdict, "warning");
+        assert_eq!(fetched.report_id, "qr_2");
+
+        // Unknown version → None.
+        assert!(s
+            .latest_ai_quality_report_for_version("ver_nope")
+            .unwrap()
+            .is_none());
     }
 }

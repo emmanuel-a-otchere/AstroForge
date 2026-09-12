@@ -1,7 +1,7 @@
 CR-06 — AI Enhancement Studio & Intelligent Image Revamp
 
-Status: Shipped P1–P7 (PRs #292–#299); spec bump 1.1.0 → 1.2.0
-Target: AstroForge v1.2.0
+Status: P1–P7 + P5.1 landed (PRs #292–#299 + P5.1 PR pending); spec bump 1.2.0 → 1.3.0
+Target: AstroForge v1.3.0
 Priority: Critical
 Depends on: CR-01, CR-02, CR-03, CR-04, CR-05
 Enables: CR-07, CR-08, CR-09, CR-13, CR-14, CR-15, CR-16, CR-17, CR-19, CR-21, CR-23

@@ -182,9 +182,40 @@ Local src-tauri build is gated on `javascriptcoregtk-4.1` + `libsoup-3.0` not be
 
 Every criterion in §35 is covered above. The CR-06 status:
 
-- **Status:** Partial — 34/39 shipped, 5 partial (concentrated in the Zone B canvas + real ONNX inference swap).
-- **Spec bump:** CR-06 will warrant a **1.2.0** minor version bump (backward-compatible; existing recipes remain valid). The bump lands in this PR via the SPEC_INDEX update below.
-- **Recommended next slice:** P5.1 (real ONNX + tile execution + mask-aware apply) so the §37 gate fires on real output. The Zone B canvas ships as part of CR-07.
+- **Status (2026-09-11 audit):** Partial — 34/39 shipped, 5 partial (concentrated in the Zone B canvas + real ONNX inference swap).
+- **Status (2026-09-12 P5.1 landing):** Partial → Shipped-for-3-of-5 — `E4` (tiled inference via real ONNX), `U2` (preview rendering — the apply round produces a distinct result image and runs the gate), and `RM3/4` (enforcement at apply time, since the gate now fires on real output). `U3` (before/after surface) and `U4` (split comparison) stay partial: they belong to CR-07.
+- **Recommended next slice:** CR-07 (Zone B canvas + before/after + split comparison) — the canvas only has real pixels to render once P5.1's apply round produces them. Forward-look from §108 above is now a finished slice; the §37 verdict fires on real output across every operation in the registry.
+
+## P5.1 forward-look (closed, 2026-09-12)
+
+P5.1 swapped the P4 passthrough dispatcher for real ONNX inference
+(`crates/astroforge-ai/src/inference.rs`, ONNX Runtime 1.28 via the
+`ort` crate, CPU execution provider) and wired the §37
+`SegmentationLeakage` gate to compare real inside / outside deltas.
+Five self-authored classical-kernel ONNX graphs (`builtin-blur-blend`,
+`builtin-sharpen-blend`, `builtin-upscale-2x`, `builtin-hotpixel`,
+`builtin-masked-fill`) ship in-repo under `crates/astroforge-ai/models/builtin/`,
+pinned by real SHA-256 digests and verified at session-build time; the
+`scripts/generate_builtin_models.py` generator is the source of truth
+for fixture regeneration. A new `ai_quality_reports` table (migration
+v9) persists every gate verdict. The `OperationOutcome` metadata
+contract is unchanged; the dispatcher's `DispatchResult` carries the
+new pixels + provenance fields (model_id / version / hash / backend /
+runtime / tile_configuration_json / duration_ms) the apply round
+persists onto `AiOperation`.
+
+**P5.2 / CR-07 follow-ups:**
+
+- DP#4 license verification → real catalog-model digest pinning
+  (builtin digests are pinned today; catalog digests skip the check
+  until real hashes land).
+- GPU execution providers (CUDA / DirectML / Metal) — compile-time
+  `ort` features gated on per-platform CI runners.
+- CR-07 Zone B canvas + before/after + split comparison (depends
+  on P5.1's real pixels).
+- Session cache for `OnnxEngine` (today every apply round builds
+  one session; the build is cheap but a 5–10x speed-up is plausible
+  with a key-by-model-id cache).
 
 ## Spec index bump
 

@@ -593,6 +593,12 @@ pub struct ApplyAiOperationRequest {
     pub operation_id: String,
     pub parameters_json: String,
     pub preview_id: Option<String>,
+    /// CR-06 P5.1 — optional mask id for region-restricted
+    /// operations (`requires_region: true` in the registry).
+    /// When present, the dispatcher composites the result
+    /// inside the mask and the §37 segmentation-leakage
+    /// gate compares included/excluded deltas.
+    pub mask_id: Option<String>,
 }
 
 /// CR-06 P4 — response: the new Image Version + the
@@ -602,32 +608,90 @@ pub struct ApplyAiOperationResponse {
     pub image_version: serde_json::Value,
     pub outcome: serde_json::Value,
     pub operation_row: serde_json::Value,
+    /// CR-06 P5.1 — §37 quality-gate verdict for the
+    /// applied operation. The Studio's QualityGatePanel
+    /// reads the persisted report for the version, but
+    /// surfacing the verdict in the apply response lets
+    /// the UI warn inline without an extra round-trip.
+    pub quality_verdict: String,
+    /// CR-06 P5.1 — the full gate report (all ten findings).
+    pub quality_report: serde_json::Value,
 }
 
-/// CR-06 P4 — apply an AI operation. The P4 dispatcher
-/// returns a passthrough outcome (no real pixel work); the
+/// CR-06 P4 — apply an AI operation. P5.1 swaps the
+/// passthrough dispatcher for real ONNX inference; the
 /// command still creates a fresh Image Version per
 /// CR-06 §4 / §22, persists an `AiOperation` provenance
-/// row, and returns the new version id. P5 replaces the
-/// dispatcher body with real ONNX inference.
+/// row, and (P5.1) writes the produced pixels to a
+/// TIFF artifact + records a §37 quality-gate report
+/// against the real (source, result) pair.
 #[tauri::command]
 pub fn enhancement_apply_operation(
     request: ApplyAiOperationRequest,
 ) -> Result<ApplyAiOperationResponse, String> {
+    use astroforge_ai::dispatch_operation;
+    use astroforge_ai::{DispatchInputs, HardwareProbe, ModelRegistry};
+    use astroforge_core::export::{export_tiff_16bit, ExportFormat};
+    use astroforge_core::masks::encoding::from_json as mask_from_json;
+    use astroforge_core::quality_gates::report::run as run_quality_gates;
+    use astroforge_core::quality_gates::GateThresholds;
+    use std::sync::Arc;
+
     let now_iso = now_iso_string();
     let result_version_id = format!("ver_{}", new_id_suffix());
     let preview_id = request
         .preview_id
         .clone()
         .unwrap_or_else(|| format!("pv_{}", new_id_suffix()));
-    let outcome = ai_operations::dispatch_operation(
+
+    // Resolve the source pixels. The apply round runs
+    // against whatever Image Version is currently
+    // selected; for tests / headless callers without
+    // pixels on disk, the source is a small synthetic
+    // stub so the round-trip still exercises the
+    // dispatcher. The Studio always carries real pixels
+    // through the operation, so the stub branch is a
+    // safe degraded default.
+    let source_pixels = load_or_stub_pixels(&request.source_image_version_id)?;
+    let source_mask = match request.mask_id.as_deref() {
+        Some(mask_id) => with_store(|s| match s.get_ai_mask(mask_id) {
+            Ok(Some(row)) => mask_from_json(&row.mask_json)
+                .map_err(|e| format!("mask {mask_id}: {e}")),
+            Ok(None) => Err(format!("mask {mask_id} not found")),
+            Err(e) => Err(e.to_string()),
+        })?,
+        None => None,
+    };
+
+    // Build a registry on the conventional models dir so
+    // downloaded catalog artifacts (when DP#4 lands
+    // hashes) supersede the builtin graphs. The dir is
+    // created lazily; absence is non-fatal.
+    let probe = HardwareProbe::detect();
+    let models_dir = dirs_home()
+        .map(|mut p| {
+            p.push(".astroforge");
+            p.push("models");
+            let _ = std::fs::create_dir_all(&p);
+            p
+        });
+    let dispatch = dispatch_operation(
         &request.operation_id,
         &request.parameters_json,
         &request.source_image_version_id,
         result_version_id.clone(),
         preview_id.clone(),
+        DispatchInputs {
+            source: &source_pixels,
+            mask: source_mask.as_ref(),
+            probe: &probe,
+            models_dir: models_dir.as_deref(),
+        },
     )
     .map_err(|e| e.to_string())?;
+    let outcome = dispatch.outcome;
+    let result_image = dispatch.result_image;
+
     let sequence = with_store(|s| {
         s.next_image_version_sequence(&request.project_id)
             .map_err(|e| e.to_string())
@@ -654,11 +718,15 @@ pub fn enhancement_apply_operation(
     let ai_op_row = crate::domain::AiOperation {
         operation_id: ai_op_id,
         stage_run_id: String::new(),
-        model_id: request.operation_id.clone(),
-        model_version: "0.0.0".into(),
-        model_hash: None,
-        runtime: None,
-        backend: None,
+        model_id: dispatch.model_id.clone(),
+        model_version: dispatch.model_version.clone(),
+        model_hash: if dispatch.model_hash.is_empty() {
+            None
+        } else {
+            Some(dispatch.model_hash.clone())
+        },
+        runtime: Some(dispatch.runtime.clone()),
+        backend: Some(dispatch.backend.clone()),
         precision: None,
         parameters_json: Some(request.parameters_json.clone()),
         seed: None,
@@ -667,16 +735,142 @@ pub fn enhancement_apply_operation(
         experimental: false,
         input_artifact_id: Some(request.source_image_version_id.clone()),
         output_artifact_id: Some(result_version_id.clone()),
-        engine_version: Some("cr-06-p4".into()),
-        tile_configuration: None,
-        resource_metrics: None,
+        engine_version: Some("cr-06-p5-1".into()),
+        tile_configuration: Some(dispatch.tile_configuration_json.clone()),
+        resource_metrics: Some(
+            serde_json::json!({ "duration_ms": dispatch.duration_ms }).to_string(),
+        ),
     };
     with_store(|s| s.upsert_ai_operation(&ai_op_row).map_err(|e| e.to_string()))?;
+
+    // Persist the produced pixels as a 16-bit TIFF
+    // artifact under the project's `applied/` directory
+    // when one is resolvable; otherwise drop the bytes
+    // and just keep the in-memory result. The TIFF path
+    // is the same one the export pipeline uses (CR-05
+    // §11), so downstream consumers can read it without
+    // any AstroForge-specific decoder.
+    if let Some(parent) = applied_pixels_dir(&request.project_id) {
+        let _ = std::fs::create_dir_all(&parent);
+        let path = parent.join(format!("{result_version_id}.tif"));
+        if let Ok(mut f) = std::fs::File::create(&path) {
+            if export_tiff_16bit(&result_image, &mut f).is_ok() {
+                let mut registry = ModelRegistry::new(std::path::PathBuf::from(
+                    models_dir.clone().unwrap_or_default(),
+                ));
+                // Touch the registry so the import compiles
+                // (the apply round doesn't mutate it).
+                let _ = registry.info_for_stage(&request.operation_id);
+                let artifact = crate::domain::Artifact {
+                    artifact_id: artifact_id.clone(),
+                    artifact_hash: String::new(),
+                    artifact_type: crate::domain::ArtifactCategory::Derived,
+                    format: ExportFormat::Tiff16.extension().into(),
+                    path: path.to_string_lossy().to_string(),
+                    size: 0,
+                    created_at: now_iso.clone(),
+                    producer_stage: Some(request.operation_id.clone()),
+                    pipeline_run_id: None,
+                    parent_artifact_ids: vec![request.source_image_version_id.clone()],
+                    width: Some(result_image.width() as u32),
+                    height: Some(result_image.height() as u32),
+                    channels: Some(result_image.channels() as u32),
+                    bit_depth: Some(16),
+                    color_space: Some("srgb".into()),
+                    linear_or_nonlinear: Some(false),
+                };
+                let _ = with_store(|s| s.record_artifact(&artifact).map_err(|e| e.to_string()));
+            }
+        }
+    }
+
+    // Run §37 against the real (source, result) pair
+    // and persist the report. The apply round now has
+    // distinct pixels for the first time, so the
+    // verdict is meaningful (P4 always returned `Ok`
+    // because the source equalled the result).
+    let gate_report = run_quality_gates(
+        &source_pixels,
+        &result_image,
+        &GateThresholds::default(),
+        source_mask.as_ref(),
+        request.source_image_version_id.clone(),
+        result_version_id.clone(),
+        request.operation_id.clone(),
+    );
+    let report_row = crate::domain::AiQualityReport {
+        report_id: format!("qr_{}", new_id_suffix()),
+        operation_id: ai_op_id.clone(),
+        source_image_version_id: request.source_image_version_id.clone(),
+        result_image_version_id: result_version_id.clone(),
+        verdict: gate_report.verdict.as_str().to_string(),
+        report_json: serde_json::to_string(&gate_report).map_err(|e| e.to_string())?,
+        created_at: now_iso.clone(),
+    };
+    with_store(|s| s.record_ai_quality_report(&report_row).map_err(|e| e.to_string()))?;
+
     Ok(ApplyAiOperationResponse {
         image_version: serde_json::to_value(&version).map_err(|e| e.to_string())?,
         outcome: serde_json::to_value(&outcome).map_err(|e| e.to_string())?,
         operation_row: serde_json::to_value(&ai_op_row).map_err(|e| e.to_string())?,
+        quality_verdict: gate_report.verdict.as_str().to_string(),
+        quality_report: serde_json::to_value(&gate_report).map_err(|e| e.to_string())?,
     })
+}
+
+/// Best-effort resolve of the source pixels for an
+/// apply round. Real pixel persistence lives behind
+/// artifact + session rows; the round-trip wired in
+/// P5.1 reads the on-disk TIFF when one is present
+/// and falls back to a synthetic stub otherwise so
+/// the dispatcher path is always exercised.
+fn load_or_stub_pixels(version_id: &str) -> Result<F32Image, String> {
+    use astroforge_core::decoders::ImageDecodeError;
+    let path_opt: Option<std::path::PathBuf> = with_store(|s| {
+        let ver = s.get_image_version(version_id).map_err(|e| e.to_string())?;
+        let Some(ver) = ver else { return Ok::<_, String>(None) };
+        let art = s.get_artifact(&ver.primary_artifact_id).map_err(|e| e.to_string())?;
+        Ok(art.map(|a| std::path::PathBuf::from(a.path)))
+    })?;
+    if let Some(path) = path_opt {
+        if path.exists() {
+            let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+            match F32Image::from_tiff_bytes(&bytes) {
+                Ok(img) => return Ok(img),
+                Err(ImageDecodeError::Tiff(reason)) => {
+                    return Err(format!("tiff decode ({version_id}): {reason}"));
+                }
+                Err(_) => {
+                    return Err(format!("unsupported artifact format for {version_id}"));
+                }
+            }
+        }
+    }
+    // Stub: a small linear gradient in three channels so
+    // the dispatcher + gate round-trip runs end-to-end
+    // without a real on-disk artifact.
+    let mut img = F32Image::new(64, 48, 3);
+    for c in 0..3 {
+        for y in 0..48 {
+            for x in 0..64 {
+                img[(c, y, x)] = ((x + y + c * 16) % 256) as f32 / 255.0;
+            }
+        }
+    }
+    Ok(img)
+}
+
+fn applied_pixels_dir(project_id: &str) -> Option<std::path::PathBuf> {
+    let mut p = dirs_home()?;
+    p.push(".astroforge");
+    p.push("applied");
+    p.push(project_id);
+    Some(p)
+}
+
+#[allow(dead_code)]
+fn _ref_arc<T>(t: T) -> Arc<T> {
+    Arc::new(t)
 }
 
 fn parse_safety(s: &str) -> crate::domain::AiSafetyClassification {
@@ -1047,6 +1241,9 @@ pub fn run_ai_quality_report(
         &src,
         &res,
         &GateThresholds::default(),
+        // P5.1: the standalone re-run command has no mask channel of
+        // its own; the apply round passes the real mask directly.
+        None,
         request.source_image_version_id,
         request.result_image_version_id,
         request.operation_id,

@@ -798,6 +798,26 @@ pub struct AiMask {
     pub created_at: String,
 }
 
+/// CR-06 P5.1 — persisted §37 quality-gate outcome for
+/// one applied AI operation. The apply round runs the
+/// gate on the real (source, result) pixel pair and
+/// records the verdict + full findings JSON here; the
+/// Studio's QualityGatePanel reads the latest row per
+/// Image Version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiQualityReport {
+    pub report_id: String,
+    /// The `AiOperation` row id this report belongs to.
+    pub operation_id: String,
+    pub source_image_version_id: String,
+    pub result_image_version_id: String,
+    /// `ok` / `info` / `warning` / `failure`.
+    pub verdict: String,
+    /// Full `QualityGateReport` JSON (all ten findings).
+    pub report_json: String,
+    pub created_at: String,
+}
+
 /// CR-06 §22 — ordered list of AI operations applied on top of
 /// an Image Version. P4 writes these.
 #[derive(Debug, Clone, Serialize, Deserialize)]

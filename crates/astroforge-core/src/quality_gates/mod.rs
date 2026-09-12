@@ -161,6 +161,30 @@ pub struct GateThresholds {
     /// artifact warning.
     pub edge_artifact_warn: f32,
     pub edge_artifact_fail: f32,
+    /// CR-06 P5.1 — segmentation leakage tuning.
+    /// Mean absolute change below this floor in the
+    /// excluded region is ignored even when the
+    /// inside/outside ratio is large.
+    #[serde(default = "default_leak_abs_floor")]
+    pub leak_abs_floor: f32,
+    /// Outside/inside mean-delta ratio that triggers
+    /// a leakage warning.
+    #[serde(default = "default_leak_warn_ratio")]
+    pub leak_warn_ratio: f32,
+    /// Outside/inside mean-delta ratio that triggers
+    /// a leakage failure.
+    #[serde(default = "default_leak_fail_ratio")]
+    pub leak_fail_ratio: f32,
+}
+
+fn default_leak_abs_floor() -> f32 {
+    0.005
+}
+fn default_leak_warn_ratio() -> f32 {
+    0.25
+}
+fn default_leak_fail_ratio() -> f32 {
+    1.0
 }
 
 impl Default for GateThresholds {
@@ -180,6 +204,9 @@ impl Default for GateThresholds {
             false_structure_fail: 0.05,
             edge_artifact_warn: 1.50,
             edge_artifact_fail: 2.50,
+            leak_abs_floor: default_leak_abs_floor(),
+            leak_warn_ratio: default_leak_warn_ratio(),
+            leak_fail_ratio: default_leak_fail_ratio(),
         }
     }
 }

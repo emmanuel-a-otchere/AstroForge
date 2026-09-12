@@ -15,6 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::image::F32Image;
+use crate::masks::Mask;
 use crate::quality_gates::{gates, GateFinding, GateId, GateThresholds, Severity};
 
 /// Overall verdict. Mirrors `Severity` but applies
@@ -79,11 +80,15 @@ pub fn verdict(findings: &[GateFinding]) -> QualityVerdict {
 /// pair and return the aggregate report. P6 ships
 /// the orchestrator + the per-gate helpers; the
 /// Tauri command layer (P6 task 3) calls this after
-/// every `enhancement_apply_operation` round.
+/// every `enhancement_apply_operation` round. P5.1
+/// threads the operation mask through so the
+/// `SegmentationLeakage` gate compares real
+/// included/excluded region deltas.
 pub fn run(
     source: &F32Image,
     result: &F32Image,
     thresholds: &GateThresholds,
+    mask: Option<&Mask>,
     source_image_version_id: String,
     result_image_version_id: String,
     operation_id: String,
@@ -97,7 +102,7 @@ pub fn run(
         gates::false_structures(source, result, thresholds),
         gates::color_shifts(source, result, thresholds),
         gates::edge_artifacts(source, result, thresholds),
-        gates::segmentation_leakage(source, result, thresholds),
+        gates::segmentation_leakage(source, result, mask, thresholds),
         gates::excessive_smoothing(source, result, thresholds),
     ];
     let verdict = verdict(&findings);
@@ -165,7 +170,15 @@ mod tests {
         let src = flat(0.5);
         let res = flat(0.5);
         let t = GateThresholds::default();
-        let report = run(&src, &res, &t, "src".into(), "res".into(), "op".into());
+        let report = run(
+            &src,
+            &res,
+            &t,
+            None,
+            "src".into(),
+            "res".into(),
+            "op".into(),
+        );
         assert_eq!(report.verdict, QualityVerdict::Ok);
     }
 
@@ -174,7 +187,15 @@ mod tests {
         let src = noisy();
         let res = flat(0.5);
         let t = GateThresholds::default();
-        let report = run(&src, &res, &t, "src".into(), "res".into(), "op".into());
+        let report = run(
+            &src,
+            &res,
+            &t,
+            None,
+            "src".into(),
+            "res".into(),
+            "op".into(),
+        );
         // Excessive smoothing fires because the
         // noisy source was flattened.
         assert!(matches!(
@@ -188,7 +209,15 @@ mod tests {
         let src = flat(0.5);
         let res = flat(1.0);
         let t = GateThresholds::default();
-        let report = run(&src, &res, &t, "src".into(), "res".into(), "op".into());
+        let report = run(
+            &src,
+            &res,
+            &t,
+            None,
+            "src".into(),
+            "res".into(),
+            "op".into(),
+        );
         // Clipping fires hard: every pixel pushed to
         // the rail.
         assert_eq!(report.verdict, QualityVerdict::Failure);
@@ -199,7 +228,15 @@ mod tests {
         let src = flat(0.5);
         let res = flat(0.5);
         let t = GateThresholds::default();
-        let report = run(&src, &res, &t, "src".into(), "res".into(), "op".into());
+        let report = run(
+            &src,
+            &res,
+            &t,
+            None,
+            "src".into(),
+            "res".into(),
+            "op".into(),
+        );
         assert_eq!(report.findings.len(), 10);
     }
 
@@ -208,7 +245,15 @@ mod tests {
         let src = flat(0.5);
         let res = flat(0.5);
         let t = GateThresholds::default();
-        let report = run(&src, &res, &t, "src".into(), "res".into(), "op".into());
+        let report = run(
+            &src,
+            &res,
+            &t,
+            None,
+            "src".into(),
+            "res".into(),
+            "op".into(),
+        );
         let (ok, info, warn, fail) = count_by_severity(&report.findings);
         assert_eq!(ok + info + warn + fail, 10);
     }
@@ -218,7 +263,15 @@ mod tests {
         let src = noisy();
         let res = flat(0.5);
         let t = GateThresholds::default();
-        let report = run(&src, &res, &t, "src".into(), "res".into(), "op".into());
+        let report = run(
+            &src,
+            &res,
+            &t,
+            None,
+            "src".into(),
+            "res".into(),
+            "op".into(),
+        );
         assert!(gate_fired(&report.findings, GateId::ExcessiveSmoothing));
     }
 

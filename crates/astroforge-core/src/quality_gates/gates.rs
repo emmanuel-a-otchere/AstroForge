@@ -13,6 +13,7 @@
 //! gradient statistics if needed.
 
 use crate::image::F32Image;
+use crate::masks::Mask;
 use crate::quality_gates::{GateFinding, GateId, GateThresholds, Severity};
 
 /// CR-06 §37 — `Clipping`. Sudden loss of
@@ -384,22 +385,122 @@ fn border_energy(image: &F32Image) -> f32 {
 
 /// CR-06 §37 — `SegmentationLeakage`. Brightness
 /// in mask-excluded regions changes more than in
-/// the included regions. P6 ships the function
-/// signature; the segmentation leakage comparison
-/// becomes meaningful when masks are attached
-/// (CR-06 P5 wired the mask engine). With no mask
-/// the gate is a no-op.
+/// the included regions (the operation bled past
+/// the mask).
+///
+/// P6 shipped the signature as a no-op; P5.1 wires
+/// the real comparison. The score is the ratio of
+/// mean absolute change outside the mask (weight
+/// <= 0.5) to the change inside it (weight > 0.5);
+/// an absolute floor keeps the gate quiet when the
+/// outside change is negligible even if the ratio
+/// is large (a fully-inclusive mask makes the
+/// inside delta dominate and the ratio noisy).
 pub fn segmentation_leakage(
-    _source: &F32Image,
-    _result: &F32Image,
-    _t: &GateThresholds,
+    source: &F32Image,
+    result: &F32Image,
+    mask: Option<&Mask>,
+    t: &GateThresholds,
 ) -> GateFinding {
+    let Some(mask) = mask else {
+        return GateFinding {
+            gate: GateId::SegmentationLeakage,
+            severity: Severity::Ok,
+            message: "No mask attached — segmentation leakage check is a no-op".to_string(),
+            score: 0.0,
+            recommendation: None,
+        };
+    };
+    let w = source.width();
+    let h = source.height();
+    let c = source.channels();
+    let mut inside_sum = 0.0_f64;
+    let mut inside_n = 0_u64;
+    let mut outside_sum = 0.0_f64;
+    let mut outside_n = 0_u64;
+    for y in 0..h {
+        for x in 0..w {
+            // Nearest-neighbour resample when the mask raster dims
+            // differ from the image dims (masks authored against a
+            // downscaled preview still apply).
+            let mx = ((x as u64 * mask.width as u64) / w.max(1) as u64) as u32;
+            let my = ((y as u64 * mask.height as u64) / h.max(1) as u64) as u32;
+            let weight = mask.get(
+                mx.min(mask.width.saturating_sub(1)),
+                my.min(mask.height.saturating_sub(1)),
+            );
+            let mut delta = 0.0_f64;
+            for ch in 0..c {
+                delta += (result[(ch, y, x)] - source[(ch, y, x)]).abs() as f64;
+            }
+            let delta = delta / c.max(1) as f64;
+            if weight > 0.5 {
+                inside_sum += delta;
+                inside_n += 1;
+            } else {
+                outside_sum += delta;
+                outside_n += 1;
+            }
+        }
+    }
+    if inside_n == 0 || outside_n == 0 {
+        // The mask covers everything or nothing — there is no
+        // excluded region to leak into (or no included region to
+        // compare against). Either way the gate has no opinion.
+        return GateFinding {
+            gate: GateId::SegmentationLeakage,
+            severity: Severity::Ok,
+            message: "Mask covers the whole frame — no exclusion region to compare".to_string(),
+            score: 0.0,
+            recommendation: None,
+        };
+    }
+    let inside_delta = (inside_sum / inside_n as f64) as f32;
+    let outside_delta = (outside_sum / outside_n as f64) as f32;
+    if outside_delta <= t.leak_abs_floor {
+        return GateFinding {
+            gate: GateId::SegmentationLeakage,
+            severity: Severity::Ok,
+            message: "Excluded region untouched".to_string(),
+            score: 0.0,
+            recommendation: None,
+        };
+    }
+    let score = outside_delta / inside_delta.max(1e-6);
+    let (severity, msg, recommendation) = if score >= t.leak_fail_ratio {
+        (
+            Severity::Failure,
+            format!(
+                "Operation bled past the mask (outside change {:.4} vs inside {:.4})",
+                outside_delta, inside_delta
+            ),
+            Some("Tighten the mask or feather its boundary, then re-apply".to_string()),
+        )
+    } else if score >= t.leak_warn_ratio {
+        (
+            Severity::Warning,
+            format!(
+                "Moderate change outside the masked region ({:.2}x the inside change)",
+                score
+            ),
+            Some("Review the mask boundary before accepting".to_string()),
+        )
+    } else {
+        (
+            Severity::Info,
+            format!(
+                "Slight change outside the masked region ({:.4} absolute)",
+                outside_delta
+            ),
+            None,
+        )
+    };
     GateFinding {
         gate: GateId::SegmentationLeakage,
-        severity: Severity::Ok,
-        message: "No mask attached — segmentation leakage check is a no-op".to_string(),
-        score: 0.0,
-        recommendation: None,
+        severity,
+        message: msg,
+        score,
+        recommendation,
     }
 }
 
@@ -615,7 +716,60 @@ mod tests {
     fn segmentation_leakage_is_a_no_op_without_mask() {
         let img = flat_image(8, 8, 0.5);
         let t = GateThresholds::default();
-        let finding = segmentation_leakage(&img, &img, &t);
+        let finding = segmentation_leakage(&img, &img, None, &t);
+        assert_eq!(finding.severity, Severity::Ok);
+    }
+
+    #[test]
+    fn segmentation_leakage_quiet_when_excluded_region_untouched() {
+        use crate::masks::{Mask, MaskKind};
+        let src = flat_image(8, 8, 0.4);
+        let mut res = flat_image(8, 8, 0.4);
+        // Change only the left half (the included region).
+        for y in 0..8 {
+            for x in 0..4 {
+                res[(0, y, x)] = 0.6;
+            }
+        }
+        let mut mask = Mask::zeros(8, 8, MaskKind::User, "test".into());
+        for y in 0..8 {
+            for x in 0..4 {
+                mask.set(x, y, 1.0);
+            }
+        }
+        let t = GateThresholds::default();
+        let finding = segmentation_leakage(&src, &res, Some(&mask), &t);
+        assert_eq!(finding.severity, Severity::Ok);
+        assert_eq!(finding.score, 0.0);
+    }
+
+    #[test]
+    fn segmentation_leakage_fires_when_change_bleeds_past_mask() {
+        use crate::masks::{Mask, MaskKind};
+        let src = flat_image(8, 8, 0.4);
+        // Result brightens everywhere: the operation ignored the mask.
+        let res = flat_image(8, 8, 0.8);
+        let mut mask = Mask::zeros(8, 8, MaskKind::User, "test".into());
+        for y in 0..8 {
+            for x in 0..4 {
+                mask.set(x, y, 1.0);
+            }
+        }
+        let t = GateThresholds::default();
+        let finding = segmentation_leakage(&src, &res, Some(&mask), &t);
+        // Inside delta == outside delta (0.4) → ratio 1.0 → Failure.
+        assert_eq!(finding.severity, Severity::Failure);
+        assert!(finding.recommendation.is_some());
+    }
+
+    #[test]
+    fn segmentation_leakage_no_op_on_full_coverage_mask() {
+        use crate::masks::{Mask, MaskKind};
+        let src = flat_image(8, 8, 0.4);
+        let res = flat_image(8, 8, 0.8);
+        let mask = Mask::from_pixels(8, 8, MaskKind::User, "test".into(), &[1.0; 64]);
+        let t = GateThresholds::default();
+        let finding = segmentation_leakage(&src, &res, Some(&mask), &t);
         assert_eq!(finding.severity, Severity::Ok);
     }
 

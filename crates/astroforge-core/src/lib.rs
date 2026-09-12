@@ -50,6 +50,7 @@ pub mod project;
 pub mod quality;
 pub mod quality_gates;
 pub mod recipe;
+pub mod recipe_feed;
 pub mod recipe_store;
 pub mod recommendation;
 pub mod registration;

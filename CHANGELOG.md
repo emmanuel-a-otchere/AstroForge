@@ -2,6 +2,77 @@
 
 ## Unreleased
 
+### Slice R — P4-M2-T2 + T3 recipe gallery + search
+
+**Scope:** Bundled-batch per the cluster order (B → R → A → CD).
+B, A, and CD landed earlier; R closes the recipe-cluster loop.
+Implements the spec §11.3 "In-app Recipe Gallery" requirement:
+browsable, filterable by target/equipment/palette.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/recipe_feed.rs` (NEW):
+  - `SharedRecipe` — spec §11.1 sanitised recipe format
+    (recipe_version, app_version, name, author, target_type,
+    equipment_hints{camera, filters[]}, pipeline[], model_versions{},
+    integrity). Distinct from the internal authoring `Recipe`:
+    the shared format strips session/version metadata per §11.2.
+  - `EquipmentHints`, `SharedRecipeStage`, `SharedIntegrity`.
+  - `FilterPalette` enum (Ha/OIII/SII/SHO/HOO/LRGB/Broadband) with
+    `from_filters()` derivation: e.g. `{Ha,OIII}` → `[HOO]`,
+    `{Ha,OIII,SII}` → `[SHO]`, `{L,R,G,B}` → `[LRGB]`, `[]` →
+    `[Broadband]`.
+  - `SortOrder` enum (Relevance/DateDesc/DateAsc/Popularity).
+    `#[derive(Default)]` with `#[default]` on `Relevance` so
+    `FilterCriteria::default()` works.
+  - `FilterCriteria` struct (query/target/equipment/palette/sort).
+  - `RecipeSource` trait (`list`, `get`) — pluggable backing store
+    defers the hosting decision (issue #119 / P4-M2-T1).
+  - `InMemoryRecipeSource` impl for unit tests and seed data.
+  - `search()` — O(N) linear scan over `source.list()`. Each
+    filter axis is a single pass; `sort_by` runs once at the end.
+    Performance target is <500ms (spec §11.3); a 10k-recipe linear
+    scan with simple string matching is sub-5ms in practice.
+  - 20 unit tests covering: palette derivation (HOO/SHO/LRGB/
+    broadband fallback), query match on name/author/target_type,
+    target/equipment/palette filters individually, combined multi-
+    filter, empty-result cases, relevance/date/popularity sort,
+    `RecipeSource::get` lookup, and a spec §11.1 example JSON
+    round-trip.
+
+#### Frontend (Svelte 5)
+
+- `src/lib/recipeFeed.ts` (NEW): TypeScript mirror of the Rust
+  types (camelCase at the IPC boundary, snake_case in Rust),
+  `searchLocal()` client-side filter+sort that mirrors the Rust
+  search for graceful degradation when IPC is unavailable, plus
+  a fixture fallback for Vite-only dev mode.
+- `src/components/RecipeGallery.svelte` (NEW): browse + filter UI
+  with search input, target + equipment text filters, palette
+  dropdown (7 options), sort dropdown (4 options), clear button,
+  result count, and a responsive card grid. Uses `$state` +
+  `$derived.by` (Svelte 5). Local-only fallback renders the
+  fixture feed without invoking Tauri.
+
+#### Robustness
+
+| Risk | Mitigation |
+|---|---|
+| P4-M2-T1 hosting decision (file vs. GitHub vs. CDN) undecided | `RecipeSource` trait defers cleanly — backing store is a 30-line wrapper, not a gallery rewrite |
+| `from_iter` collides with `std::iter::FromIterator::from_iter` (clippy) | Renamed to `with_recipes` to keep the constructor clearly non-standard |
+| `SortOrder` has no obvious default | `#[derive(Default)]` + `#[default]` on `Relevance` |
+| Recipe-grazing fixture is hand-written and might drift from spec | Rust spec §11.1 example JSON round-trip test pins the wire format |
+| Frontend filter logic duplicates Rust logic | `searchLocal()` is the deliberate fallback so Vite-only dev still works |
+| Sandbox LSP errors (`$state`, `$derived`, `onclick`) | Pre-existing — `node_modules` missing locally; CI runs against real `node_modules` |
+| CHANGELOG conflict with slice M7 | Branched off `a3ad0fa` (post-M7); CHANGELOG.md's `## Unreleased` already has M7 entry; adding R entry at the top is conflict-free |
+
+#### Tests / verification
+
+- `cargo test --workspace` — 739 passed; 0 failed (+20 new from
+  `recipe_feed.rs`)
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session` — green
+
 ### Slice M7 — P1.5-M7-T1..T5 walk-down + T5 reversibility primitives
 
 **Scope:** Bundled-batch-tight per the slice order. T1..T4

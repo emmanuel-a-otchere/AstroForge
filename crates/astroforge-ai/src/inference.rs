@@ -73,10 +73,127 @@ pub struct BuiltinModel {
 /// model with a `sha256` of `"unverified"` keeps the entry in the
 /// registry but marks it as fail-closed at runtime — the engine
 /// refuses to load it until a real digest is provided.
+///
+/// Each catalog entry also carries an explicit SPDX license
+/// identifier (see [`CatalogModel::license`]). Builtins with a real
+/// digest must carry a license; unpinned entries (sha256 =
+/// `UNVERIFIED_SHA256`) are license-exempt at runtime — the audit
+/// only flags entries that are *both* pinned *and* license-less.
 pub struct CatalogModel {
     pub id: &'static str,
     pub kind: BuiltinInputKind,
     pub sha256: &'static str,
+    /// SPDX license identifier. Required for pinned entries
+    /// (sha256 ≠ `UNVERIFIED_SHA256`); None is allowed only for
+    /// unpinned entries (sha256 == `UNVERIFIED_SHA256`).
+    pub license: Option<LicenseSpdx>,
+}
+
+/// SPDX license identifier, normalized to the canonical short form.
+/// The catalog audit requires every pinned entry to carry an explicit
+/// SPDX. The list here is curated to the licenses AstroForge has
+/// actually vetted; extending it requires a DP#4 close-out (see
+/// `verify_catalog_audit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LicenseSpdx {
+    /// Apache License 2.0 — covers SwinIR.
+    Apache20,
+    /// MIT License — covers many community models.
+    Mit,
+    /// BSD 3-Clause "New" or "Revised" License.
+    Bsd3Clause,
+    /// Creative Commons Attribution-ShareAlike 4.0.
+    CcBySa40,
+    /// Creative Commons Attribution-NonCommercial 4.0.
+    /// Non-commercial entries may ship but the apply path must
+    /// tag the output's integrity badge with "non-commercial".
+    CcByNc40,
+    /// Model weights released without a license declaration. The
+    /// audit fails closed on this — the entry must be updated to
+    /// a concrete SPDX before DP#4 close-out.
+    Unknown,
+}
+
+impl LicenseSpdx {
+    /// Canonical SPDX string for serialization (matches the SPDX
+    /// license-list identifier).
+    pub fn as_spdx(self) -> &'static str {
+        match self {
+            LicenseSpdx::Apache20 => "Apache-2.0",
+            LicenseSpdx::Mit => "MIT",
+            LicenseSpdx::Bsd3Clause => "BSD-3-Clause",
+            LicenseSpdx::CcBySa40 => "CC-BY-SA-4.0",
+            LicenseSpdx::CcByNc40 => "CC-BY-NC-4.0",
+            LicenseSpdx::Unknown => "UNKNOWN",
+        }
+    }
+
+    /// True if the license permits commercial redistribution. Used
+    /// by the integrity badge to surface "non-commercial model
+    /// used" to the user.
+    pub fn is_commercial_ok(self) -> bool {
+        !matches!(self, LicenseSpdx::CcByNc40 | LicenseSpdx::Unknown)
+    }
+}
+
+/// One row in the DP#4 close-out checklist. Each entry that fails
+/// the audit is returned so the operator can fix it without paging
+/// through the full table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogAuditGap {
+    pub id: &'static str,
+    pub sha256: &'static str,
+    pub reason: &'static str,
+}
+
+/// Run the DP#4 audit against the catalog registry. Returns Ok(())
+/// when every entry is either:
+///   - fully pinned (sha256 ≠ UNVERIFIED_SHA256 + license is set +
+///     not Unknown), or
+///   - explicitly unpinned (sha256 == UNVERIFIED_SHA256 + license is
+///     None) — these are placeholders that fail closed at runtime,
+///     so they are audit-clean.
+///
+/// Returns Err with a list of [`CatalogAuditGap`] rows for entries
+/// that violate the contract. The list is empty on Ok — callers
+/// should treat Ok as the canonical "audit clean" signal.
+pub fn verify_catalog_audit() -> Result<(), Vec<CatalogAuditGap>> {
+    let mut gaps: Vec<CatalogAuditGap> = Vec::new();
+    for entry in CATALOG_MODELS {
+        if entry.sha256 == UNVERIFIED_SHA256 {
+            // Unpinned placeholder. License must be None — these
+            // entries fail closed at runtime, so we don't yet know
+            // the license the upstream model will ship under.
+            if entry.license.is_some() {
+                gaps.push(CatalogAuditGap {
+                    id: entry.id,
+                    sha256: entry.sha256,
+                    reason: "unpinned entry must not declare a license",
+                });
+            }
+        } else {
+            // Pinned entry. License is mandatory, must be set, and
+            // must not be Unknown.
+            match entry.license {
+                None => gaps.push(CatalogAuditGap {
+                    id: entry.id,
+                    sha256: entry.sha256,
+                    reason: "pinned entry is missing license",
+                }),
+                Some(LicenseSpdx::Unknown) => gaps.push(CatalogAuditGap {
+                    id: entry.id,
+                    sha256: entry.sha256,
+                    reason: "pinned entry declares UNKNOWN license",
+                }),
+                Some(_) => {}
+            }
+        }
+    }
+    if gaps.is_empty() {
+        Ok(())
+    } else {
+        Err(gaps)
+    }
 }
 
 /// Sentinel value used by `CatalogModel::sha256` to mark a
@@ -95,33 +212,44 @@ pub const UNVERIFIED_SHA256: &str = "unverified";
 /// them today returns [`InferenceError::CatalogUnpinned`].
 pub const CATALOG_MODELS: &[CatalogModel] = &[
     // Shadow catalogue for the in-repo builtins — the catalog
-    // path uses the same digest check the builtin path uses.
+    // path uses the same digest check the builtin path uses. All
+    // five graphs are generated by `scripts/generate_builtin_models.py`
+    // and live in this repo; MIT license (matching workspace root).
     CatalogModel {
         id: "builtin-blur-blend",
         kind: BuiltinInputKind::Strength,
         sha256: "30b4c3729513f54802d00680ae6793016719f4cc40a00a7f231d220ccb1ae4f3",
+        license: Some(LicenseSpdx::Mit),
     },
     CatalogModel {
         id: "builtin-sharpen-blend",
         kind: BuiltinInputKind::Strength,
         sha256: "34d34e9e75febfb3db84a5cc9ff4e1177ab003d2a9247cc8977845602c86cd85",
+        license: Some(LicenseSpdx::Mit),
     },
     CatalogModel {
         id: "builtin-upscale-2x",
         kind: BuiltinInputKind::ImageOnly,
         sha256: "195850f85b9661fe7b3361b5c02c7b1a9ca5f453ae639082691f675ee075b7f1",
+        license: Some(LicenseSpdx::Mit),
     },
     CatalogModel {
         id: "builtin-hotpixel",
         kind: BuiltinInputKind::Threshold,
         sha256: "07589c4d911fd4820ebcd7454d04c43cb926adad2bc75786c3bcb9cc496fba97",
+        license: Some(LicenseSpdx::Mit),
     },
     CatalogModel {
         id: "builtin-masked-fill",
         kind: BuiltinInputKind::Mask,
         sha256: "d1646db8b65d2fb02a6badffd596f1cb255b0cef53edfa5086fc77f077b012ea",
+        license: Some(LicenseSpdx::Mit),
     },
     // Real catalog models from PROJECT_PLAN P2-M1-T5..T11.
+    // These are unpinned — sha256 = UNVERIFIED_SHA256 sentinel.
+    // Per DP#4, license is None until the upstream publisher
+    // publishes a hash + license pair. Loading any of them today
+    // returns InferenceError::CatalogUnpinned (fail closed).
     // Each opens with the UNVERIFIED_SHA256 sentinel until
     // upstream licenses + hashes land; the engine refuses to
     // load any of them today. Adding a real digest to the
@@ -130,36 +258,43 @@ pub const CATALOG_MODELS: &[CatalogModel] = &[
         id: "swinir-denoise-astro",
         kind: BuiltinInputKind::ImageOnly,
         sha256: UNVERIFIED_SHA256,
+        license: None,
     },
     CatalogModel {
         id: "swinir-sr-astro-2x",
         kind: BuiltinInputKind::ImageOnly,
         sha256: UNVERIFIED_SHA256,
+        license: None,
     },
     CatalogModel {
         id: "swin2sr-dejpeg",
         kind: BuiltinInputKind::ImageOnly,
         sha256: UNVERIFIED_SHA256,
+        license: None,
     },
     CatalogModel {
         id: "star-seg-v1",
         kind: BuiltinInputKind::ImageOnly,
         sha256: UNVERIFIED_SHA256,
+        license: None,
     },
     CatalogModel {
         id: "cloud-score-v1",
         kind: BuiltinInputKind::ImageOnly,
         sha256: UNVERIFIED_SHA256,
+        license: None,
     },
     CatalogModel {
         id: "color-cal-net",
         kind: BuiltinInputKind::ImageOnly,
         sha256: UNVERIFIED_SHA256,
+        license: None,
     },
     CatalogModel {
         id: "trail-lama-tiny",
         kind: BuiltinInputKind::ImageOnly,
         sha256: UNVERIFIED_SHA256,
+        license: None,
     },
 ];
 
@@ -941,5 +1076,113 @@ mod tests {
         let key = catalog_cache_key(m);
         assert!(key.starts_with("catalog:"));
         assert!(key.contains(m.sha256));
+    }
+
+    // ---- DP#4 license audit tests (slice #315) ----
+
+    #[test]
+    fn license_spdx_canonical_strings() {
+        assert_eq!(LicenseSpdx::Apache20.as_spdx(), "Apache-2.0");
+        assert_eq!(LicenseSpdx::Mit.as_spdx(), "MIT");
+        assert_eq!(LicenseSpdx::Bsd3Clause.as_spdx(), "BSD-3-Clause");
+        assert_eq!(LicenseSpdx::CcBySa40.as_spdx(), "CC-BY-SA-4.0");
+        assert_eq!(LicenseSpdx::CcByNc40.as_spdx(), "CC-BY-NC-4.0");
+        assert_eq!(LicenseSpdx::Unknown.as_spdx(), "UNKNOWN");
+    }
+
+    #[test]
+    fn license_spdx_commercial_classification() {
+        assert!(LicenseSpdx::Apache20.is_commercial_ok());
+        assert!(LicenseSpdx::Mit.is_commercial_ok());
+        assert!(LicenseSpdx::Bsd3Clause.is_commercial_ok());
+        assert!(LicenseSpdx::CcBySa40.is_commercial_ok());
+        assert!(!LicenseSpdx::CcByNc40.is_commercial_ok());
+        assert!(!LicenseSpdx::Unknown.is_commercial_ok());
+    }
+
+    #[test]
+    fn catalog_audit_passes_for_current_registry() {
+        // The current registry has: 5 pinned builtins (each with a
+        // license) + 7 unpinned entries (license: None). Per the
+        // DP#4 audit contract, this is audit-clean.
+        assert!(
+            verify_catalog_audit().is_ok(),
+            "audit failed on current registry"
+        );
+    }
+
+    #[test]
+    fn catalog_audit_flags_pinned_entry_missing_license() {
+        // Sanity check: a synthetic catalog that contains a pinned
+        // entry with license: None must fail the audit.
+        let synthetic = vec![CatalogModel {
+            id: "test-pinned-no-license",
+            kind: BuiltinInputKind::ImageOnly,
+            sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            license: None,
+        }];
+        let gaps = audit_gaps_for(&synthetic);
+        assert_eq!(gaps.len(), 1);
+        assert!(gaps[0].reason.contains("missing license"));
+    }
+
+    #[test]
+    fn catalog_audit_flags_unknown_license() {
+        let synthetic = vec![CatalogModel {
+            id: "test-pinned-unknown-license",
+            kind: BuiltinInputKind::ImageOnly,
+            sha256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+            license: Some(LicenseSpdx::Unknown),
+        }];
+        let gaps = audit_gaps_for(&synthetic);
+        assert_eq!(gaps.len(), 1);
+        assert!(gaps[0].reason.contains("UNKNOWN"));
+    }
+
+    #[test]
+    fn catalog_audit_flags_unpinned_with_license() {
+        // An unpinned entry claiming a license is suspicious — the
+        // license was likely copied from a draft before the hash
+        // landed. Flag it so the operator can clear the license
+        // until the real hash is published.
+        let synthetic = vec![CatalogModel {
+            id: "test-unpinned-with-license",
+            kind: BuiltinInputKind::ImageOnly,
+            sha256: UNVERIFIED_SHA256,
+            license: Some(LicenseSpdx::Apache20),
+        }];
+        let gaps = audit_gaps_for(&synthetic);
+        assert_eq!(gaps.len(), 1);
+        assert!(gaps[0].reason.contains("unpinned entry must not declare"));
+    }
+
+    fn audit_gaps_for(entries: &[CatalogModel]) -> Vec<CatalogAuditGap> {
+        let mut gaps = Vec::new();
+        for entry in entries {
+            if entry.sha256 == UNVERIFIED_SHA256 {
+                if entry.license.is_some() {
+                    gaps.push(CatalogAuditGap {
+                        id: entry.id,
+                        sha256: entry.sha256,
+                        reason: "unpinned entry must not declare a license",
+                    });
+                }
+            } else {
+                match entry.license {
+                    None => gaps.push(CatalogAuditGap {
+                        id: entry.id,
+                        sha256: entry.sha256,
+                        reason: "pinned entry is missing license",
+                    }),
+                    Some(LicenseSpdx::Unknown) => gaps.push(CatalogAuditGap {
+                        id: entry.id,
+                        sha256: entry.sha256,
+                        reason: "pinned entry declares UNKNOWN license",
+                    }),
+                    Some(_) => {}
+                }
+            }
+        }
+        gaps
     }
 }

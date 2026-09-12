@@ -18,8 +18,9 @@ ndarray = { workspace = true }
 # `tls-native` would require system OpenSSL headers, which minimal
 # CI/dev images do not carry). `ndarray` interop is off: the engine
 # builds tensors from (shape, Vec) directly. GPU execution providers
-# stay disabled in P5.1 (compile-time features; CUDA / DirectML /
-# Metal enablement is P5.2 work gated on per-platform CI runners).
+# are P5.2 (slice #315) — gated on per-platform CI runners via the
+# features below. Default `cargo build` remains CPU-only; users opt in
+# via `cargo build --features gpu-cuda` (etc.) on a per-platform basis.
 ort = { version = "2.0.0-rc.13", default-features = false, features = [
     "std",
     "download-binaries",
@@ -27,6 +28,25 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = [
     "copy-dylibs",
     "api-27",
 ] }
+
+[features]
+# CR-06 P5.2 — GPU execution providers. All four are OFF by default;
+# enabling any of them adds the matching `ort` feature flag, which in
+# turn pulls the respective ONNX Runtime binary at build time.
+# - `gpu-cuda`       : NVIDIA CUDA 13+ (Linux x86_64, Windows x86_64).
+#                      Note: ort 2.0.0-rc.13 ships CUDA 13 binaries only;
+#                      CUDA 12 is no longer supported by upstream.
+# - `gpu-directml`   : Microsoft DirectML (Windows x86_64, DX12 GPUs).
+# - `gpu-coreml`     : Apple CoreML / Metal (macOS arm64 + x86_64).
+# - `gpu-openvino`   : Intel OpenVINO (x86_64 CPUs and iGPUs).
+# - `gpu-tensorrt`   : NVIDIA TensorRT (Linux x86_64; requires CUDA 13+).
+# The CI matrix is CPU-only today; per-platform GPU runners are a
+# follow-up tracked in CHANGELOG (slice #315).
+gpu-cuda = ["ort/cuda"]
+gpu-directml = ["ort/directml"]
+gpu-coreml = ["ort/coreml"]
+gpu-openvino = ["ort/openvino"]
+gpu-tensorrt = ["ort/tensorrt"]
 
 [dev-dependencies]
 serde_json = { workspace = true }

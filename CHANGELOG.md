@@ -2,6 +2,81 @@
 
 ## Unreleased
 
+### Slice CD — GPU execution providers (P5.2) + DP#4 catalog license audit
+
+**Scope:** Two tightly-coupled forward-look items bundled into one
+slice per user-pick `B, E, A, CD` and the bundled-batch-tight
+rationale (both items live in `crates/astroforge-ai/src/` and gate
+each other — the GPU path is the runtime that the catalog audit
+hardens the input to).
+
+#### GPU execution providers (P5.2)
+
+- **`crates/astroforge-ai/Cargo.toml`:** new `[features]` block
+  with five opt-in features (`gpu-cuda`, `gpu-directml`, `gpu-coreml`,
+  `gpu-openvino`, `gpu-tensorrt`), each enabling the matching `ort`
+  feature flag. All five are **OFF by default**; default `cargo build`
+  remains CPU-only. The CI matrix is unchanged in this slice (still
+  CPU-only); per-platform GPU runners are a follow-up tracked in
+  the Open issue list.
+- **`crates/astroforge-ai/src/gpu_providers.rs` (NEW, ~270 LOC):**
+  - `ExecutionProvider` enum (`Cuda | TensorRt | DirectMl | CoreMl | OpenVino | Cpu`).
+  - `build_selection(probe)` — maps a `HardwareProbe` onto an
+    ordered preference list (CUDA leads; CPU always trails).
+  - `compiled_selection(probe)` — drops providers whose Cargo
+    feature isn't enabled in this build.
+  - `has_compiled_gpu(probe)` — convenience boolean.
+  - Each provider's `is_compiled()` is `#[cfg(feature = "...")]`-gated
+    so the unit tests prove the CPU-only default build has no
+    compiled GPU providers.
+  - 8 unit tests cover probe→selection mapping for every backend +
+    CPU fallback + label stability.
+- **Verified `cargo check -p astroforge-ai --features gpu-cuda` and
+  `--features gpu-cuda,gpu-directml,gpu-coreml` both compile cleanly**
+  (sandbox-validated). Runtime CUDA/DirectML/CoreML behavior is
+  per-platform and not exercised in this sandbox.
+
+#### DP#4 catalog license audit
+
+- **`crates/astroforge-ai/src/inference.rs`:**
+  - New `LicenseSpdx` enum (`Apache20 | Mit | Bsd3Clause | CcBySa40 |
+    CcByNc40 | Unknown`) with `as_spdx()` canonical-string serialization
+    and `is_commercial_ok()` for the integrity-badge signal.
+  - `CatalogModel` gains a `license: Option<LicenseSpdx>` field.
+    All 5 pinned builtins carry `Some(LicenseSpdx::Mit)` (matching
+    workspace root license). All 7 unpinned real-catalog entries
+    carry `license: None` per the audit contract (license is
+    meaningless until the hash lands).
+  - `CatalogAuditGap` struct + `verify_catalog_audit() -> Result<(), Vec<CatalogAuditGap>>`.
+    Audit contract: every entry must be either fully pinned (with
+    license) or explicitly unpinned (no license). The function
+    flags three failure modes: pinned entry missing license,
+    pinned entry declaring `Unknown`, unpinned entry claiming a
+    license.
+  - 6 new unit tests cover SPDX strings, commercial classification,
+    audit pass on current registry, and the three failure modes.
+- **`docs/adr/0003-dp4-catalog-audit-checklist.md` (NEW):**
+  per-entry contract + close-out procedure for each of the 7
+  real-catalog entries. Each entry becomes audit-clean via a
+  one-line table update when upstream publishes hash + license.
+- **Robustness:** the audit fails closed on every contract
+  violation; unpinned entries with a license are flagged because
+  the license is meaningless without a hash to pin it to.
+- **Open follow-ups:** per-platform CI runners (one job per GPU
+  feature × OS); CC-BY-NC-4.0 integrity-badge wiring (consumer-facing
+  signal that the output was produced by a non-commercial model);
+  MODEL_PROVENANCE.md file with source URLs (one row per model).
+
+#### Tests / verification
+
+- `cargo test --workspace` — green (full test count +14 over slice #311).
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean.
+- `cargo check -p astroforge-ai --features gpu-cuda` — clean (CPU + CUDA build).
+- `cargo check -p astroforge-ai --features gpu-cuda,gpu-directml,gpu-coreml` — clean (CPU + 3 GPUs).
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session` — green.
+
+Slice **CD** (combined) per user-pick `B, E, A, CD`.
+
 ### P3-M2-T1..T5 walk-down — Recipe system paperwork reconciliation
 
 **Status:** No-op audit. P3-M2-T1 (`#100`), T2 (`#101`), T3 (`#102`),

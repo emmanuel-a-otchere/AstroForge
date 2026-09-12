@@ -1,3 +1,4 @@
+pub mod gpu_providers;
 pub mod hardware;
 pub mod hub;
 pub mod inference;
@@ -9,12 +10,13 @@ pub mod service;
 pub mod target_classify;
 pub mod tiling;
 
+pub use gpu_providers::{build_selection, compiled_selection, has_compiled_gpu, ExecutionProvider};
 pub use hardware::{GpuBackend, HardwareProbe, QualityTier};
 pub use hub::{get_model, get_models_for_stage, model_catalog, ModelInfo};
 pub use inference::{
-    builtin_cache_key, builtin_model, catalog_cache_key, catalog_model, BuiltinInputKind,
-    BuiltinModel, CatalogModel, InferenceError, OnnxEngine, SessionCache, BUILTIN_MODELS,
-    CATALOG_MODELS, UNVERIFIED_SHA256,
+    builtin_cache_key, builtin_model, catalog_cache_key, catalog_model, verify_catalog_audit,
+    BuiltinInputKind, BuiltinModel, CatalogAuditGap, CatalogModel, InferenceError, LicenseSpdx,
+    OnnxEngine, SessionCache, BUILTIN_MODELS, CATALOG_MODELS, UNVERIFIED_SHA256,
 };
 pub use models::*;
 pub use operations::{

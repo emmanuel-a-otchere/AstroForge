@@ -439,11 +439,30 @@ packaged for Windows (.msix) and macOS (.dmg).
 
 | ID | Task | Spec ref | Status | Depends on |
 |---|---|---|---|---|
-| P3-M2-T1 | [#100](https://github.com/emmanuel-a-otchere/AstroForge/issues/100) | Define and implement recipe JSON schema (v1.0) | §11.1 | pending | Phase 2 |
-| P3-M2-T2 | [#101](https://github.com/emmanuel-a-otchere/AstroForge/issues/101) | Implement recipe export (sanitized: strip paths, GPS, machine info) | §11.2 | pending | T1 |
-| P3-M2-T3 | [#102](https://github.com/emmanuel-a-otchere/AstroForge/issues/102) | Implement recipe import (validate compatibility, check required models) | §11.3 | pending | T1 |
-| P3-M2-T4 | [#103](https://github.com/emmanuel-a-otchere/AstroForge/issues/103) | Implement recipe application (set parameters, prompt model download) | §11.3, §11.4 | pending | T3 |
-| P3-M2-T5 | [#104](https://github.com/emmanuel-a-otchere/AstroForge/issues/104) | Implement integrity badge (tag exports/recipes with perceptual model usage) | §10.6 | pending | T1 |
+| P3-M2-T1 | [#100](https://github.com/emmanuel-a-otchere/AstroForge/issues/100) | Define and implement recipe JSON schema (v1.0) | §11.1 | **done** (`4405218`) | Phase 2 |
+| P3-M2-T2 | [#101](https://github.com/emmanuel-a-otchere/AstroForge/issues/101) | Implement recipe export (sanitized: strip paths, GPS, machine info) | §11.2 | **done** (`4405218`) | T1 |
+| P3-M2-T3 | [#102](https://github.com/emmanuel-a-otchere/AstroForge/issues/102) | Implement recipe import (validate compatibility, check required models) | §11.3 | **done** (`4405218`) | T1 |
+| P3-M2-T4 | [#103](https://github.com/emmanuel-a-otchere/AstroForge/issues/103) | Implement recipe application (set parameters, prompt model download) | §11.3, §11.4 | **done** (`2a9c566`, `ad9b052`) | T3 |
+| P3-M2-T5 | [#104](https://github.com/emmanuel-a-otchere/AstroForge/issues/104) | Implement integrity badge (tag exports/recipes with perceptual model usage) | §10.6 | **done** (`4405218`) | T1 |
+
+> **Walk-down note (2026-09-12):** All five P3-M2 tasks shipped across
+> three commits. `4405218` ("Phase 3 M3.2: Recipe system — JSON schema
+> v1.0, sanitized export (strip paths/GPS/machine info), import with
+> compatibility validation, recipe application with model download
+> prompting, integrity badge") shipped T1+T2+T3+T5 in one slice.
+> `2a9c566` ("Phase 1.5 PR-A — Recipe v2 schema + RecipeStore + DwarfII
+> seed") added versioning (parent_version, branch, linear version
+> counter) and persisted it. `ad9b052` ("Phase 1.5 PR-B —
+> applyProfileToPipeline + InitialDialog dropdown") wired the apply
+> path into the UI. Implementation lives in
+> `crates/astroforge-core/src/recipe.rs` (566 LOC: Recipe,
+> RecipeStage, IntegrityBadge, ModelUsage, ModelType, migrate_recipe,
+> migrate_v1_to_v2, sanitize_recipe, validate_compatibility,
+> apply_recipe, to_json, from_json, from_json_migrated,
+> SCHEMA_VERSION_V1 + SCHEMA_VERSION_CURRENT) and
+> `crates/astroforge-core/src/recipe_store.rs` (452 LOC: persistence
+> + versioning). The PROJECT_PLAN status column was not updated when
+> the milestone landed; this entry corrects the drift.
 
 ### Milestone 3.3 — Cross-Platform Packaging
 

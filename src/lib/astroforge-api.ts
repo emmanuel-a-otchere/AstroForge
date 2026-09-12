@@ -400,6 +400,29 @@ export const imageVersionGet = (
     ImageVersionJson | null
   >;
 
+/**
+ * CR-07 — read an applied Image Version's primary artifact as
+ * base64-encoded 16-bit TIFF bytes plus dimensions. The Zone B
+ * canvas decodes the bytes in a Web Worker so the main thread
+ * stays responsive. Path-confined to the project's applied
+ * directory; the backend refuses artifacts outside that dir.
+ */
+export interface ImageArtifactResponse {
+  base64_data: string;
+  mime_type: string;
+  byte_size: number;
+  width: number;
+  height: number;
+  channels: number;
+}
+
+export const readImageArtifact = (
+  versionId: string,
+): Promise<ImageArtifactResponse> =>
+  invoke("read_image_artifact", { versionId }) as Promise<
+    ImageArtifactResponse
+  >;
+
 // CR-06 P5 — region-aware mask system. The mask
 // engine in `astroforge-core::masks` produces JSON
 // payloads via `astroforge_core::masks::encoding`;

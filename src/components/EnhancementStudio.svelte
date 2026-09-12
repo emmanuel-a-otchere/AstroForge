@@ -45,6 +45,7 @@
     listImageVersions,
   } from "../state/ai-enhancement";
   import EnhancementOperationCard from "./EnhancementOperationCard.svelte";
+  import ImageCanvas from "./ImageCanvas.svelte";
   import MaskEditor from "./MaskEditor.svelte";
   import QualityGatePanel from "./QualityGatePanel.svelte";
   import type {
@@ -313,7 +314,7 @@
     {/if}
   </aside>
 
-  <!-- Zone B — Image Canvas (metadata placeholder) -->
+  <!-- Zone B — Image Canvas (CR-07 pixel render) -->
   <section class="zone zone-b" aria-label="Image canvas">
     {#if analysis}
       <header>
@@ -323,13 +324,12 @@
           <code>{(analysis as { engine_version?: string }).engine_version}</code>
         </p>
       </header>
-      <div class="canvas-placeholder">
-        <p>
-          Pixel rendering lands with the CR-07 Compare surface.
-          The Studio today shows the metadata of the active
-          Image Version + the operation stack on the left and
-          the operation picker on the right.
-        </p>
+      <div class="canvas-mount" data-testid="studio-canvas">
+        {#if imageVersionId}
+          <ImageCanvas {imageVersionId} />
+        {:else}
+          <p class="empty">No active Image Version.</p>
+        {/if}
       </div>
     {:else}
       <p class="empty">
@@ -550,11 +550,21 @@
     color: var(--color-text-muted, #9aa3b2);
     cursor: not-allowed;
   }
-  .canvas-placeholder {
-    padding: var(--sp-md, 1rem);
-    border: 1px dashed var(--color-border, #2a2f3a);
-    border-radius: 4px;
-    color: var(--color-text-muted, #9aa3b2);
-    font-size: 0.9rem;
-  }
+  .canvas-mount {
+      width: 100%;
+      flex: 1 1 auto;
+      min-height: 360px;
+      border: 1px solid var(--outline-variant);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: #000;
+    }
+
+    .canvas-placeholder {
+      padding: 16px;
+      border: 1px dashed var(--outline-variant);
+      border-radius: var(--radius-md);
+      color: var(--on-surface-variant);
+      background: var(--surface-container-low);
+    }
 </style>

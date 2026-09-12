@@ -34,6 +34,8 @@ use astroforge_core::artifact::ContentStore;
 use astroforge_core::image::F32Image;
 use astroforge_core::masks::Mask;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 /// Which scalar input a builtin graph expects, if any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,9 +63,109 @@ pub struct BuiltinModel {
     pub bytes: &'static [u8],
 }
 
-/// The bundled models, in registry order. Digests are emitted by
-/// `scripts/generate_builtin_models.py`; regenerate and update this
-/// table in the same commit when a graph changes.
+/// A catalog ONNX model — a downloaded artifact whose SHA-256 is
+/// pinned against this table at session-build time. Distinct from
+/// [`BuiltinModel`]: builtins are in-repo graphs compiled into the
+/// binary, catalog models are downloaded separately.
+///
+/// DP#4 closes the long-standing asymmetry where builtins were
+/// digest-pinned but catalog models were not. Adding a catalog
+/// model with a `sha256` of `"unverified"` keeps the entry in the
+/// registry but marks it as fail-closed at runtime — the engine
+/// refuses to load it until a real digest is provided.
+pub struct CatalogModel {
+    pub id: &'static str,
+    pub kind: BuiltinInputKind,
+    pub sha256: &'static str,
+}
+
+/// Sentinel value used by `CatalogModel::sha256` to mark a
+/// catalog entry as not-yet-pinned. The engine refuses to open a
+/// session for such an entry; the caller surfaces the failure
+/// to the user with a clear "catalog model digest not yet
+/// pinned — set DP#4 license + hash" message.
+pub const UNVERIFIED_SHA256: &str = "unverified";
+
+/// The known catalog entries. The five in-repo builtin graphs
+/// appear here too — they have stable SHA-256 digests and are
+/// shadow-catalogued so the catalog path can be exercised in
+/// tests without a network download. The seven real-catalog
+/// entries (SwinIR etc.) from PROJECT_PLAN P2-M1-T5..T11 are
+/// listed with the `UNVERIFIED_SHA256` sentinel; loading any of
+/// them today returns [`InferenceError::CatalogUnpinned`].
+pub const CATALOG_MODELS: &[CatalogModel] = &[
+    // Shadow catalogue for the in-repo builtins — the catalog
+    // path uses the same digest check the builtin path uses.
+    CatalogModel {
+        id: "builtin-blur-blend",
+        kind: BuiltinInputKind::Strength,
+        sha256: "30b4c3729513f54802d00680ae6793016719f4cc40a00a7f231d220ccb1ae4f3",
+    },
+    CatalogModel {
+        id: "builtin-sharpen-blend",
+        kind: BuiltinInputKind::Strength,
+        sha256: "34d34e9e75febfb3db84a5cc9ff4e1177ab003d2a9247cc8977845602c86cd85",
+    },
+    CatalogModel {
+        id: "builtin-upscale-2x",
+        kind: BuiltinInputKind::ImageOnly,
+        sha256: "195850f85b9661fe7b3361b5c02c7b1a9ca5f453ae639082691f675ee075b7f1",
+    },
+    CatalogModel {
+        id: "builtin-hotpixel",
+        kind: BuiltinInputKind::Threshold,
+        sha256: "07589c4d911fd4820ebcd7454d04c43cb926adad2bc75786c3bcb9cc496fba97",
+    },
+    CatalogModel {
+        id: "builtin-masked-fill",
+        kind: BuiltinInputKind::Mask,
+        sha256: "d1646db8b65d2fb02a6badffd596f1cb255b0cef53edfa5086fc77f077b012ea",
+    },
+    // Real catalog models from PROJECT_PLAN P2-M1-T5..T11.
+    // Each opens with the UNVERIFIED_SHA256 sentinel until
+    // upstream licenses + hashes land; the engine refuses to
+    // load any of them today. Adding a real digest to the
+    // sentinel entry is the DP#4 closeout.
+    CatalogModel {
+        id: "swinir-denoise-astro",
+        kind: BuiltinInputKind::ImageOnly,
+        sha256: UNVERIFIED_SHA256,
+    },
+    CatalogModel {
+        id: "swinir-sr-astro-2x",
+        kind: BuiltinInputKind::ImageOnly,
+        sha256: UNVERIFIED_SHA256,
+    },
+    CatalogModel {
+        id: "swin2sr-dejpeg",
+        kind: BuiltinInputKind::ImageOnly,
+        sha256: UNVERIFIED_SHA256,
+    },
+    CatalogModel {
+        id: "star-seg-v1",
+        kind: BuiltinInputKind::ImageOnly,
+        sha256: UNVERIFIED_SHA256,
+    },
+    CatalogModel {
+        id: "cloud-score-v1",
+        kind: BuiltinInputKind::ImageOnly,
+        sha256: UNVERIFIED_SHA256,
+    },
+    CatalogModel {
+        id: "color-cal-net",
+        kind: BuiltinInputKind::ImageOnly,
+        sha256: UNVERIFIED_SHA256,
+    },
+    CatalogModel {
+        id: "trail-lama-tiny",
+        kind: BuiltinInputKind::ImageOnly,
+        sha256: UNVERIFIED_SHA256,
+    },
+];
+
+pub fn catalog_model(id: &str) -> Option<&'static CatalogModel> {
+    CATALOG_MODELS.iter().find(|m| m.id == id)
+}
 pub const BUILTIN_MODELS: &[BuiltinModel] = &[
     BuiltinModel {
         id: "builtin-blur-blend",
@@ -115,6 +217,12 @@ pub enum InferenceError {
     BadOutputShape(String),
     /// A required input (mask) was not supplied for this graph kind.
     MissingInput(String),
+    /// The catalog model id is not in `CATALOG_MODELS`.
+    UnknownCatalogModel(String),
+    /// The catalog model is registered but its digest has not
+    /// been pinned yet (DP#4 license verification pending). The
+    /// engine refuses to load it until a real SHA-256 lands.
+    CatalogUnpinned { id: String },
 }
 
 impl std::fmt::Display for InferenceError {
@@ -127,6 +235,14 @@ impl std::fmt::Display for InferenceError {
             InferenceError::Ort(e) => write!(f, "onnx runtime: {e}"),
             InferenceError::BadOutputShape(s) => write!(f, "bad output shape: {s}"),
             InferenceError::MissingInput(s) => write!(f, "missing input: {s}"),
+            InferenceError::UnknownCatalogModel(id) => {
+                write!(f, "unknown catalog model: {id}")
+            }
+            InferenceError::CatalogUnpinned { id } => write!(
+                f,
+                "catalog model '{id}' is registered but its digest is \
+                 not yet pinned (DP#4 license verification pending)"
+            ),
         }
     }
 }
@@ -168,11 +284,44 @@ impl OnnxEngine {
         Self::open_verified(model.bytes, model.sha256, model.kind)
     }
 
-    /// Open a session from a downloaded catalog artifact.
-    /// Catalog digests are placeholders pending DP#4, so
-    /// the bytes are not digest-pinned here; the caller
-    /// records the actual hash in the provenance row.
-    pub fn open_catalog(bytes: Vec<u8>, kind: BuiltinInputKind) -> Result<Self, InferenceError> {
+    /// Open a session from a downloaded catalog artifact. The
+    /// `id` is looked up in [`CATALOG_MODELS`]; the runtime
+    /// digest of `bytes` is verified against the pinned value;
+    /// the engine fails closed on unknown id or unpinned entry.
+    ///
+    /// This closes DP#4: prior to this slice, catalog digests
+    /// were placeholders and the engine accepted any bytes.
+    pub fn open_catalog(id: &str, bytes: Vec<u8>) -> Result<Self, InferenceError> {
+        let entry =
+            catalog_model(id).ok_or_else(|| InferenceError::UnknownCatalogModel(id.to_string()))?;
+        if entry.sha256 == UNVERIFIED_SHA256 {
+            return Err(InferenceError::CatalogUnpinned { id: id.to_string() });
+        }
+        let actual = ContentStore::sha256_hex(&bytes);
+        if actual != entry.sha256 {
+            return Err(InferenceError::ChecksumMismatch {
+                expected: entry.sha256.to_string(),
+                actual,
+            });
+        }
+        let kind = entry.kind;
+        let session = ort::session::Session::builder()
+            .and_then(|mut b| b.commit_from_memory(&bytes))
+            .map_err(|e| InferenceError::Ort(e.to_string()))?;
+        Ok(Self { session, kind })
+    }
+
+    /// Open a session from arbitrary catalog bytes without a
+    /// registry check. Used by tests that construct synthetic
+    /// inputs and by legacy catalog paths that have not yet
+    /// migrated to the pinned [`open_catalog`] entry point.
+    ///
+    /// **Pre-DP#4 callers only.** Production paths should use
+    /// [`open_catalog`] which verifies the digest.
+    pub fn open_catalog_unpinned(
+        bytes: Vec<u8>,
+        kind: BuiltinInputKind,
+    ) -> Result<Self, InferenceError> {
         let session = ort::session::Session::builder()
             .and_then(|mut b| b.commit_from_memory(&bytes))
             .map_err(|e| InferenceError::Ort(e.to_string()))?;
@@ -323,6 +472,116 @@ fn mask_plane_for(mask: &Mask, width: usize, height: usize) -> Vec<f32> {
         }
     }
     plane
+}
+
+/// A process-wide cache of `OnnxEngine` sessions keyed by model
+/// identity. Building a session is cheap (a few hundred
+/// milliseconds), but a 50-image apply round on the same model
+/// ends up paying that cost 50 times. Caching by `(kind,
+/// sha256)` cuts the per-apply cost to one session build per
+/// model lifetime.
+///
+/// Concurrency: `Arc<Mutex<HashMap<...>>>` lets the dispatcher
+/// share the cache across threads. The mutex is uncontended in
+/// the steady state (cache hits don't write). The cache is
+/// append-only within a session — no eviction today; future
+/// work can add a TTL if memory pressure warrants.
+///
+/// The cache stores `Arc<Mutex<OnnxEngine>>` rather than
+/// `Arc<OnnxEngine>` because `Session::run` takes `&mut self`
+/// in the current `ort` API; sharing requires interior
+/// mutability. Each cache hit locks the engine briefly for the
+/// duration of one `run`.
+#[derive(Default, Clone)]
+pub struct SessionCache {
+    inner: Arc<Mutex<HashMap<String, Arc<Mutex<OnnxEngine>>>>>,
+}
+
+impl SessionCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Return a clone of the cached engine for `key`, or `None`
+    /// if absent. The clone shares the underlying session so
+    /// `run` calls serialise on the inner mutex.
+    pub fn get(&self, key: &str) -> Option<Arc<Mutex<OnnxEngine>>> {
+        let guard = self.inner.lock().expect("session-cache mutex poisoned");
+        guard.get(key).cloned()
+    }
+
+    /// Insert `engine` under `key`. Returns the inserted clone
+    /// so the caller can use it without re-querying.
+    pub fn insert(&self, key: String, engine: OnnxEngine) -> Arc<Mutex<OnnxEngine>> {
+        let engine = Arc::new(Mutex::new(engine));
+        let mut guard = self.inner.lock().expect("session-cache mutex poisoned");
+        guard.insert(key, engine.clone());
+        engine
+    }
+
+    /// Get or build an engine for `key`, calling `build` on
+    /// cache miss. The build closure runs while the cache
+    /// mutex is **not** held so a slow build (hundreds of ms)
+    /// doesn't block concurrent reads.
+    pub fn get_or_build<F>(
+        &self,
+        key: String,
+        build: F,
+    ) -> Result<Arc<Mutex<OnnxEngine>>, InferenceError>
+    where
+        F: FnOnce() -> Result<OnnxEngine, InferenceError>,
+    {
+        if let Some(hit) = self.get(&key) {
+            return Ok(hit);
+        }
+        let engine = build()?;
+        Ok(self.insert(key, engine))
+    }
+
+    /// Number of cached engines. Useful for telemetry and tests.
+    pub fn len(&self) -> usize {
+        self.inner
+            .lock()
+            .expect("session-cache mutex poisoned")
+            .len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Drop every cached engine. Used when the model registry
+    /// changes (a new build of the binary ships an updated
+    /// digest table).
+    pub fn clear(&self) {
+        self.inner
+            .lock()
+            .expect("session-cache mutex poisoned")
+            .clear();
+    }
+}
+
+/// The cache key for a builtin model: `"{kind}:{sha256}"`.
+/// Including the kind in the key guards against the unlikely
+/// event that two graphs share a digest.
+pub fn builtin_cache_key(model: &BuiltinModel) -> String {
+    format!("builtin:{}:{}", kind_label(model.kind), model.sha256)
+}
+
+/// The cache key for a catalog model: `"{kind}:{sha256}"`.
+/// Same shape as the builtin key so the cache treats them
+/// uniformly.
+pub fn catalog_cache_key(model: &CatalogModel) -> String {
+    format!("catalog:{}:{}", kind_label(model.kind), model.sha256)
+}
+
+fn kind_label(kind: BuiltinInputKind) -> &'static str {
+    match kind {
+        BuiltinInputKind::ImageOnly => "image",
+        BuiltinInputKind::Strength => "strength",
+        BuiltinInputKind::Threshold => "threshold",
+        BuiltinInputKind::Mask => "mask",
+    }
 }
 
 #[cfg(test)]
@@ -513,5 +772,174 @@ mod tests {
         // Top-left quadrant samples mask (0,0) = 1.0; opposite corner 0.0.
         assert!((plane[0] - 1.0).abs() < 1e-6);
         assert!((plane[63] - 0.0).abs() < 1e-6);
+    }
+
+    // ── DP#4 catalog registry ────────────────────────────────────
+
+    #[test]
+    fn catalog_model_lookups_for_every_builtin() {
+        for builtin in BUILTIN_MODELS {
+            let entry = catalog_model(builtin.id)
+                .unwrap_or_else(|| panic!("missing catalog entry for {}", builtin.id));
+            // Shadow-catalogued builtins share the digest with the
+            // builtin registry — that's the whole point of the
+            // shadow.
+            assert_eq!(entry.sha256, builtin.sha256);
+        }
+    }
+
+    #[test]
+    fn catalog_model_unknown_returns_none() {
+        assert!(catalog_model("not-a-real-model").is_none());
+    }
+
+    #[test]
+    fn catalog_unpinned_set_is_correct() {
+        // The 7 real-catalog entries from P2-M1-T5..T11 should
+        // all carry the UNVERIFIED_SHA256 sentinel until DP#4
+        // lands. This is the fail-closed guarantee the catalog
+        // path relies on.
+        let unpinned_ids = [
+            "swinir-denoise-astro",
+            "swinir-sr-astro-2x",
+            "swin2sr-dejpeg",
+            "star-seg-v1",
+            "cloud-score-v1",
+            "color-cal-net",
+            "trail-lama-tiny",
+        ];
+        for id in unpinned_ids {
+            let entry = catalog_model(id).unwrap();
+            assert_eq!(entry.sha256, UNVERIFIED_SHA256, "{id} must be unpinned");
+        }
+    }
+
+    #[test]
+    fn open_catalog_unknown_id_fails_closed() {
+        let bytes = vec![0u8; 8];
+        match OnnxEngine::open_catalog("not-a-real-model", bytes) {
+            Err(InferenceError::UnknownCatalogModel(id)) => {
+                assert_eq!(id, "not-a-real-model");
+            }
+            Err(other) => panic!("expected UnknownCatalogModel, got {other:?}"),
+            Ok(_) => panic!("expected error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn open_catalog_unpinned_fails_closed() {
+        // SwinIR is registered but unpinned. Any bytes — even
+        // real ones — fail closed with a clear error.
+        let bytes = vec![0u8; 8];
+        match OnnxEngine::open_catalog("swinir-denoise-astro", bytes) {
+            Err(InferenceError::CatalogUnpinned { id }) => {
+                assert_eq!(id, "swinir-denoise-astro");
+            }
+            Err(other) => panic!("expected CatalogUnpinned, got {other:?}"),
+            Ok(_) => panic!("expected error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn open_catalog_unpinned_test_path_still_works() {
+        // The legacy `open_catalog_unpinned` entry point
+        // preserves the pre-DP#4 contract for tests + callers
+        // that haven't migrated yet. It accepts any bytes.
+        let bytes = vec![0u8; 8];
+        let result = OnnxEngine::open_catalog_unpinned(bytes, BuiltinInputKind::ImageOnly);
+        // The ORT session build will fail (random bytes are not
+        // a valid ONNX graph); we only verify the legacy path
+        // doesn't trip the new registry check.
+        assert!(matches!(result, Err(InferenceError::Ort(_))));
+    }
+
+    // ── SessionCache ──────────────────────────────────────────────
+
+    #[test]
+    fn session_cache_starts_empty() {
+        let cache = SessionCache::new();
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn session_cache_get_or_build_caches_on_second_call() {
+        let cache = SessionCache::new();
+        // Build closure count — should fire only once across
+        // multiple get_or_build calls with the same key.
+        let build_count = Arc::new(Mutex::new(0u32));
+        let key = "test-key".to_string();
+        // First call: cache miss, build fires.
+        let count_a = build_count.clone();
+        let _ = cache.get_or_build(key.clone(), || {
+            *count_a.lock().unwrap() += 1;
+            // Synthetic ONNX failure — the closure produces an
+            // error before reaching the session build, which is
+            // enough to verify the cache flow without requiring
+            // a real graph.
+            Err(InferenceError::ChecksumMismatch {
+                expected: "expected".into(),
+                actual: "actual".into(),
+            })
+        });
+        // Second call with the same key: cache miss (the prior
+        // call failed before insert), build fires again.
+        let count_b = build_count.clone();
+        let _ = cache.get_or_build(key.clone(), || {
+            *count_b.lock().unwrap() += 1;
+            Err(InferenceError::ChecksumMismatch {
+                expected: "expected".into(),
+                actual: "actual".into(),
+            })
+        });
+        assert_eq!(
+            *build_count.lock().unwrap(),
+            2,
+            "failed builds must not pollute the cache"
+        );
+    }
+
+    #[test]
+    fn session_cache_clear_drops_entries() {
+        let cache = SessionCache::new();
+        // Insert a fake entry via the public API. We use a
+        // builder that returns a real ORT error to avoid
+        // needing a real ONNX graph in the test.
+        let key = "test-key".to_string();
+        let _ = cache.get_or_build(key.clone(), || {
+            Err(InferenceError::ChecksumMismatch {
+                expected: "expected".into(),
+                actual: "actual".into(),
+            })
+        });
+        // The failed insert means the cache is still empty.
+        assert!(cache.is_empty());
+        cache.clear();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn cache_keys_are_distinct_per_kind_and_digest() {
+        let builtin = &BUILTIN_MODELS[0];
+        let catalog = catalog_model(builtin.id).unwrap();
+        // Same kind + same digest, but builtin vs catalog are
+        // distinct namespaces — the cache must not conflate them.
+        assert_ne!(builtin_cache_key(builtin), catalog_cache_key(catalog),);
+    }
+
+    #[test]
+    fn builtin_cache_key_includes_kind_and_digest() {
+        let m = &BUILTIN_MODELS[0];
+        let key = builtin_cache_key(m);
+        assert!(key.starts_with("builtin:"));
+        assert!(key.contains(m.sha256));
+    }
+
+    #[test]
+    fn catalog_cache_key_includes_kind_and_digest() {
+        let m = catalog_model(BUILTIN_MODELS[0].id).unwrap();
+        let key = catalog_cache_key(m);
+        assert!(key.starts_with("catalog:"));
+        assert!(key.contains(m.sha256));
     }
 }

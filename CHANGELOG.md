@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### CR-07 — Zone B Canvas, Image Rendering & Compare Surfaces (drafting)
+
+- Closes M9 §35 criteria U2 (preview rendering), U3 (before/after
+  surface), U4 (split comparison) on top of the real pixels P5.1's
+  apply round now produces. Adds `read_image_artifact` Tauri
+  command (16-bit TIFF served as base64, path-confined to
+  `~/.astroforge/applied/<project>/`), the `ImageCanvas.svelte`
+  component (zoom / pan / fit / 1:1 / mask overlay / blink /
+  clipping / histogram), and the per-toolbar toggle
+  (compare-before-after, split-slider, difference-map).
+- Spec bump target: AstroForge v1.4.0 (U-turn on the 1.3.0 row once
+  P5.1 closes; 1.3.0 lands now with P5.1; CR-07 → 1.4.0).
+
 ### CR-06 P5.1 — Real ONNX Inference, Tile Execution, Mask-Aware Apply
 
 - New `crates/astroforge-ai/src/inference.rs` (~700 lines) wires

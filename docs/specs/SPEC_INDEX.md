@@ -8,7 +8,8 @@ truth for the project's behavior, architecture, and feature set.
 
 | Version | File | Status | Date |
 |---|---|---|---|
-| **1.2.0** | [AstroForge_Spec_v1.2.0.md](./AstroForge_Spec_v1.2.0.md) | ✅ Active | 2026-09-11 |
+| **1.3.0** | [AstroForge_Spec_v1.3.0.md](./AstroForge_Spec_v1.3.0.md) | 🟡 Pending bump (P5.1 merged PR #307) | 2026-09-12 |
+| **1.2.0** | [AstroForge_Spec_v1.2.0.md](./AstroForge_Spec_v1.2.0.md) | ✅ Active (becomes superseded on the 1.3.0 bump) | 2026-09-11 |
 
 > CR-06 landed in 1.2.0 (PRs #293–#299). The bump is backward-compatible:
 > existing recipes remain valid. The 1.2.0 spec rolls CR-06 (AI Enhancement

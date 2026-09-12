@@ -56,9 +56,9 @@ The findings below mirror the §35 Acceptance Criteria checklist. Each row is a 
 | # | Criterion | Status | Evidence | Severity |
 |---|---|---|---|---|
 | U1 | AI Enhancement Studio is image-first | **shipped** | `EnhancementStudio.svelte` (P4) — Zone B canvas + Zone A context + Zone C intelligence. The Zone B canvas is a placeholder pending CR-07; the layout is image-first. | — |
-| U2 | Preview exists before high-impact AI application | **partial** | `EnhancementPreview` schema + state machine (P1 + P4) — `Pending → Running → Completed / Failed`. **But** the preview artifact storage (PNG / TIFF bytes) is a CR-07 surface; P4's apply round persists the preview row but the visual preview rendering in Zone B ships in CR-07. | MEDIUM |
-| U3 | Before / after comparison is available | **partial** | `CompareWorkspace` consumes Image Versions via P4 lineage tracking. The before/after surface is the Zone B canvas (CR-07). | MEDIUM |
-| U4 | Split comparison is available | **missing** | Split comparison (slider / side-by-side) is a CR-07 surface. The data model is in place (Image Versions + lineage); only the surface is missing. | MEDIUM |
+| U2 | Preview exists before high-impact AI application | **shipped** | `EnhancementPreview` schema + state machine (P1 + P4) — `Pending → Running → Completed / Failed`. PR #308 (CR-07) ships the visual preview rendering: `read_image_artifact` IPC + `ImageCanvas` consumes the apply-round TIFF and renders it in Zone B. |
+| U3 | Before / after comparison is available | **shipped** | `CompareWorkspace` side-by-side layout (PR #308) + `CompareTools` split / blink / difference (CR-07 follow-on) consume Image Versions via P4 lineage tracking. The before/after surface lives in the Compare workspace and the Studio's Zone B. |
+| U4 | Split comparison is available | **shipped** | CR-07 follow-on ships `CompareTools` split-slider (clip-path based, keyboard-accessible). Blink comparator and difference map (4× gain) ship in the same follow-on. The data model (Image Versions + lineage) was in place from P4. |
 | U5 | AI operations are understandable without technical knowledge | **shipped** | `EnhancementOperationCard.svelte` — display name + plain description + category badge + safety chip. | — |
 | U6 | Expert controls are available through progressive disclosure | **shipped** | Each operation card has a `<details>` block exposing `default_parameters` + `parameters_schema`. | — |
 
@@ -96,10 +96,15 @@ The findings below mirror the §35 Acceptance Criteria checklist. Each row is a 
 
 ### Summary
 
-- **34 of 39 criteria shipped**
-- **5 partial** (E4 tiled inference, U2 preview rendering, U3 before/after surface, U4 split comparison, RM3/4 enforcement at apply time)
+- **39 of 39 criteria shipped**
+- **0 partial**
 - **0 missing**
 - **0 critical**
+
+**CR-07 status (2026-09-12, PR #308 + follow-on):** All three Zone B
+gaps (U2 preview rendering, U3 before/after surface, U4 split
+comparison) now ship. The M9 §35 walk-through closes with 39/39
+criteria shipped.
 
 The strongest pieces are the **schema + provenance + safety classification chain** (P1) — every operation records the model id, model hash, params, seed, source + result Image Version ids, and the safety classification survives restart + export. The **region-aware mask system** (P5) + the **§37 quality-gate engine** (P6) close the post-operation validation loop.
 
@@ -183,8 +188,7 @@ Local src-tauri build is gated on `javascriptcoregtk-4.1` + `libsoup-3.0` not be
 Every criterion in §35 is covered above. The CR-06 status:
 
 - **Status (2026-09-11 audit):** Partial — 34/39 shipped, 5 partial (concentrated in the Zone B canvas + real ONNX inference swap).
-- **Status (2026-09-12 P5.1 landing):** Partial → Shipped-for-3-of-5 — `E4` (tiled inference via real ONNX), `U2` (preview rendering — the apply round produces a distinct result image and runs the gate), and `RM3/4` (enforcement at apply time, since the gate now fires on real output). `U3` (before/after surface) and `U4` (split comparison) stay partial: they belong to CR-07 (active slice).
-- **Recommended active slice (2026-09-12):** CR-07 (Zone B canvas + before/after + split comparison) — the canvas now has real pixels to render because P5.1 (PR #307) shipped. Forward-look from §108 is a finished slice; the §37 verdict fires on real output across every operation in the registry.
+- **Status (2026-09-12 P5.1 + CR-07 landing):** Shipped — 39/39 criteria. The five partials from P5.1 (E4, U2, U3, U4, RM3/4) all closed across PR #307 (real ONNX + tile + gate) and PR #308 + follow-on (Zone B canvas + compare tools). Zone B now renders the real pixels P5.1's apply round produces.
 
 ## P5.1 forward-look (closed, 2026-09-12)
 

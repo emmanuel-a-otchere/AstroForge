@@ -63,6 +63,11 @@
 
   let dragStart: { x: number; y: number; panX: number; panY: number } | null = null;
   let regionStart: { x: number; y: number } | null = null;
+  // Live region readout (screen-pixel rect from the last
+  // shift-drag). ImageCanvas emits the rect to the parent via
+  // onRegion; the component also stores a copy for the local
+  // readout so users can see what they just drew.
+  let regionRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
 
   // Re-fetch on version change.
   $: if (versionId) loadArtifact(versionId);
@@ -324,7 +329,9 @@
       const y0 = Math.min(regionStart.y, ev.offsetY);
       const x1 = Math.max(regionStart.x, ev.offsetX);
       const y1 = Math.max(regionStart.y, ev.offsetY);
-      onRegion({ x0, y0, x1, y1 });
+      const rect = { x0, y0, x1, y1 };
+      regionRect = rect;
+      onRegion(rect);
       regionStart = null;
     }
     dragStart = null;
@@ -392,6 +399,19 @@
         aria-label="Clip high"
       />
     </label>
+    {#if regionRect}
+      <span class="region-readout" data-testid="region-readout">
+        Region: {regionRect.x0},{regionRect.y0} →
+        {regionRect.x1},{regionRect.y1}
+      </span>
+      <button
+        type="button"
+        on:click={() => (regionRect = null)}
+        aria-label="Clear region readout"
+      >
+        Clear
+      </button>
+    {/if}
   </div>
   <div class="viewport" data-testid="image-canvas-viewport">
     {#if loading}
@@ -502,5 +522,12 @@
     font-size: 12px;
     color: #a0a6b3;
     min-width: 4em;
+  }
+  .region-readout {
+    font-size: 12px;
+    color: #ffd166;
+    font-family: var(--font-data, monospace);
+    padding: 0 8px;
+    border-left: 1px solid #2a2f3a;
   }
 </style>

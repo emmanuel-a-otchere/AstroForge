@@ -21,10 +21,17 @@
 <script lang="ts">
   import WorkspaceScreen from "./WorkspaceScreen.svelte";
   import ImageCanvas from "./ImageCanvas.svelte";
+  import CompareTools from "./CompareTools.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
 
   let aId = $state<string | null>(null);
   let bId = $state<string | null>(null);
+  // CR-07 follow-on: toggle between the basic side-by-side
+  // metadata+canvas layout and the CompareTools surface
+  // (split / blink / difference). The basic layout is the
+  // default; CompareTools requires both versions to have a
+  // primary_artifact_id (otherwise the canvas can't render).
+  let useCompareTools = false;
 
   // R4: the project lifecycle module loads the version
   // timeline on project open. The remaining reactive
@@ -140,6 +147,38 @@
       </label>
     </div>
 
+    {#if versionA?.primary_artifact_id && versionB?.primary_artifact_id}
+      <div class="mode-toggle">
+        <button
+          type="button"
+          class="mode-button"
+          class:active={!useCompareTools}
+          on:click={() => (useCompareTools = false)}
+          aria-pressed={!useCompareTools}
+        >
+          Side by side
+        </button>
+        <button
+          type="button"
+          class="mode-button"
+          class:active={useCompareTools}
+          on:click={() => (useCompareTools = true)}
+          aria-pressed={useCompareTools}
+          data-testid="compare-tools-toggle"
+        >
+          Compare tools
+        </button>
+      </div>
+    {/if}
+
+    {#if useCompareTools && versionA?.primary_artifact_id && versionB?.primary_artifact_id}
+      <div class="compare-tools-mount" data-testid="compare-tools-mount">
+        <CompareTools
+          versionIdA={versionA.version_id}
+          versionIdB={versionB.version_id}
+        />
+      </div>
+    {:else}
     <div class="canvas-area" aria-label="Side-by-side compare cards">
       <article class="canvas-pane" data-side="A">
         <header class="pane-header">
@@ -254,6 +293,7 @@
         {/if}
       </article>
     </div>
+    {/if}
 
     <p class="hint font-body">
       Both cards reflect the project's durable event log. The
@@ -463,6 +503,37 @@
     border-radius: var(--radius-md);
     overflow: hidden;
     background: #000;
+  }
+
+  .compare-tools-mount {
+    width: 100%;
+    height: 480px;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin-top: var(--sp-md);
+  }
+
+  .mode-toggle {
+    display: flex;
+    gap: 4px;
+    margin-top: var(--sp-md);
+  }
+
+  .mode-button {
+    background: var(--surface-container-low);
+    color: var(--on-surface-variant);
+    border: 1px solid var(--outline-variant);
+    padding: var(--sp-xs) var(--sp-md);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+
+  .mode-button.active {
+    background: var(--primary);
+    color: var(--on-primary);
+    border-color: var(--primary);
   }
 
   .artifact-note {

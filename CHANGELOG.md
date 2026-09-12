@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### P3-M2-T1..T5 walk-down — Recipe system paperwork reconciliation
+
+**Status:** No-op audit. P3-M2-T1 (`#100`), T2 (`#101`), T3 (`#102`),
+T4 (`#103`), T5 (`#104`) all shipped across three commits
+(`4405218` + `2a9c566` + `ad9b052`). The PROJECT_PLAN status column
+was not updated when the milestone landed; this slice corrects the
+drift.
+
+- `crates/astroforge-core/src/recipe.rs` (566 LOC) — Recipe,
+  RecipeStage, IntegrityBadge, ModelUsage, ModelType, migrate_recipe,
+  migrate_v1_to_v2, sanitize_recipe, validate_compatibility,
+  apply_recipe, to_json, from_json, from_json_migrated,
+  SCHEMA_VERSION_V1 + SCHEMA_VERSION_CURRENT.
+- `crates/astroforge-core/src/recipe_store.rs` (452 LOC) —
+  persistence + versioning (parent_version, branch, linear version
+  counter).
+- `src/components/RecipesScreen.svelte` — Recipe gallery UI.
+- `docs/PROJECT_PLAN.md` § Milestone 3.2 — P3-M2-T1..T5 status
+  flipped from `pending` to **done** (with the canonical commit SHA
+  for each row) plus a walk-down note capturing the reconciliation
+  rationale.
+- **No Rust changes**; no CI gates needed beyond `mvp_smoke` for
+  correctness confirmation.
+
 ### P3-M4-T1..T4 walk-down — Bayer detection paperwork reconciliation
 
 **Status:** No-op audit. P3-M4-T1 (`#110`), T2 (`#111`), T3 (`#112`), T4

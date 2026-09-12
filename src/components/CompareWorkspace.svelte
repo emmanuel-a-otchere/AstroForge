@@ -20,6 +20,7 @@
 -->
 <script lang="ts">
   import WorkspaceScreen from "./WorkspaceScreen.svelte";
+  import ImageCanvas from "./ImageCanvas.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
 
   let aId = $state<string | null>(null);
@@ -172,14 +173,26 @@
               <dd><code>{versionA.source_version_id}</code></dd>
             {/if}
           </dl>
-          <p class="artifact-note font-body">
-            <span class="material-symbols-outlined" aria-hidden="true">
-              image_not_supported
-            </span>
-            Pixel rendering ships with the canonical
-            <code>image_versions</code> table; the card above is
-            the durable truth today.
-          </p>
+          {#if versionA.primary_artifact_id}
+            <div class="canvas-mount" data-testid="compare-canvas-a">
+              <ImageCanvas versionId={versionA.version_id} />
+            </div>
+            <p class="artifact-note font-body">
+              <span class="material-symbols-outlined" aria-hidden="true">
+                image
+              </span>
+              Rendering the applied artifact bytes. Drag to pan,
+              scroll to zoom, shift-drag to inspect a region.
+            </p>
+          {:else}
+            <p class="artifact-note font-body">
+              <span class="material-symbols-outlined" aria-hidden="true">
+                image_not_supported
+              </span>
+              This version has no primary artifact yet — pixel
+              rendering needs the P5.1 apply round to write a TIFF.
+            </p>
+          {/if}
         {:else}
           <p class="muted font-body">Select a version for side A.</p>
         {/if}
@@ -216,14 +229,26 @@
               <dd><code>{versionB.source_version_id}</code></dd>
             {/if}
           </dl>
-          <p class="artifact-note font-body">
-            <span class="material-symbols-outlined" aria-hidden="true">
-              image_not_supported
-            </span>
-            Pixel rendering ships with the canonical
-            <code>image_versions</code> table; the card above is
-            the durable truth today.
-          </p>
+          {#if versionB.primary_artifact_id}
+            <div class="canvas-mount" data-testid="compare-canvas-b">
+              <ImageCanvas versionId={versionB.version_id} />
+            </div>
+            <p class="artifact-note font-body">
+              <span class="material-symbols-outlined" aria-hidden="true">
+                image
+              </span>
+              Rendering the applied artifact bytes. Drag to pan,
+              scroll to zoom, shift-drag to inspect a region.
+            </p>
+          {:else}
+            <p class="artifact-note font-body">
+              <span class="material-symbols-outlined" aria-hidden="true">
+                image_not_supported
+              </span>
+              This version has no primary artifact yet — pixel
+              rendering needs the P5.1 apply round to write a TIFF.
+            </p>
+          {/if}
         {:else}
           <p class="muted font-body">Select a version for side B.</p>
         {/if}
@@ -231,9 +256,9 @@
     </div>
 
     <p class="hint font-body">
-      Both cards reflect the project's durable event log. When the
-      <code>image_versions</code> table lands, the same picker will
-      surface real pixel artifacts side by side.
+      Both cards reflect the project's durable event log. The
+      canvas renders the primary artifact TIFF written by the
+      P5.1 apply round; pre-P5.1 versions show only metadata.
     </p>
   {/if}
 </WorkspaceScreen>
@@ -429,6 +454,15 @@
   .status-pill[data-status="in_review"] {
     background: rgba(33, 150, 243, 0.2);
     color: #64b5f6;
+  }
+
+  .canvas-mount {
+    width: 100%;
+    height: 360px;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: #000;
   }
 
   .artifact-note {

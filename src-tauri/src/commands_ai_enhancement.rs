@@ -1273,3 +1273,242 @@ fn pixels_to_f32image(
     }
     img
 }
+
+// ─── CR-07 — read an applied Image Version's primary artifact ────────
+//
+// The apply round (P5.1) persists the produced pixels as a 16-bit TIFF
+// under `<root>/.astroforge/applied/<project_id>/`. The Zone B canvas
+// needs the bytes to render the image. This command is the path-
+// confined bridge from the IPC surface to those bytes; the
+// confinement pattern mirrors `commands_preview::read_preview_artifact`.
+//
+// The companion `read_image_artifact_thumbnail` command below ships a
+// downsampled 8-bit PNG for large versions so the canvas doesn't pay
+// the 16-bit TIFF decode cost on every selection.
+
+use base64::Engine;
+
+/// Response envelope: the bytes plus the on-disk size so the
+/// frontend can sanity-check the decode.
+#[derive(Debug, serde::Serialize)]
+pub struct ImageArtifactResponse {
+    pub base64_data: String,
+    pub mime_type: String,
+    pub byte_size: usize,
+    pub width: usize,
+    pub height: usize,
+    pub channels: usize,
+}
+
+/// CR-07 — read an Image Version's primary artifact as base64.
+/// Path-confined to `<root>/.astroforge/applied/<project_id>/`; the
+/// project_id on the version row must match the active project.
+#[tauri::command]
+pub fn read_image_artifact(
+    state: State<'_, crate::PipelinePlanState>,
+    version_id: String,
+) -> Result<ImageArtifactResponse, String> {
+    let domain_store = state
+        .domain_store
+        .clone()
+        .ok_or_else(|| "domain store is unavailable".to_string())?;
+    let version = domain_store
+        .get_image_version(&version_id)
+        .map_err(|e| format!("get_image_version: {e}"))?
+        .ok_or_else(|| format!("image version '{version_id}' not found"))?;
+    let artifact = domain_store
+        .get_artifact(&version.primary_artifact_id)
+        .map_err(|e| format!("get_artifact: {e}"))?;
+    let applied_root = applied_pixels_dir(&version.project_id)
+        .ok_or_else(|| "applied directory is unavailable".to_string())?;
+    let path = std::path::Path::new(&artifact.path);
+    // Defense-in-depth: the artifact path must canonicalize inside the
+    // applied/<project_id>/ directory. Absolute paths, ../ traversal,
+    // and symlinks pointing outside are all refused.
+    let canonical = std::fs::canonicalize(path)
+        .map_err(|e| format!("canonicalize artifact path: {e}"))?;
+    let canonical_root = std::fs::canonicalize(&applied_root)
+        .map_err(|e| format!("canonicalize applied dir: {e}"))?;
+    if !canonical.starts_with(&canonical_root) {
+        return Err(format!(
+            "artifact path is outside the applied directory: {}",
+            canonical.display()
+        ));
+    }
+    let bytes = std::fs::read(&canonical)
+        .map_err(|e| format!("read artifact file: {e}"))?;
+    let (width, height, channels) = read_tiff_dimensions(&bytes)
+        .ok_or_else(|| "artifact is not a 16-bit TIFF".to_string())?;
+    Ok(ImageArtifactResponse {
+        base64_data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        mime_type: "image/tiff".to_string(),
+        byte_size: bytes.len(),
+        width,
+        height,
+        channels,
+    })
+}
+
+/// Minimal 16-bit TIFF dimension reader. The canvas only needs to
+/// allocate an offscreen buffer of the right size; full decode is
+/// done in the renderer. Returns (width, height, channels) for
+/// grayscale (channels=1) and RGB (channels=3) 16-bit TIFFs.
+fn read_tiff_dimensions(bytes: &[u8]) -> Option<(usize, usize, usize)> {
+    // Big-endian TIFF header: "II" (little-endian) or "MM" (big-endian).
+    if bytes.len() < 8 || (&bytes[0..2] != b"II" && &bytes[0..2] != b"MM") {
+        return None;
+    }
+    let little = &bytes[0..2] == b"II";
+    let ifd_offset = if little {
+        u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize
+    } else {
+        u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize
+    };
+    if ifd_offset + 2 > bytes.len() {
+        return None;
+    }
+    let n_entries = if little {
+        u16::from_le_bytes([bytes[ifd_offset], bytes[ifd_offset + 1]]) as usize
+    } else {
+        u16::from_be_bytes([bytes[ifd_offset], bytes[ifd_offset + 1]]) as usize
+    };
+    let mut width = None;
+    let mut height = None;
+    let mut samples = None;
+    let mut bits_per_sample = None;
+    for i in 0..n_entries {
+        let entry = ifd_offset + 2 + i * 12;
+        if entry + 12 > bytes.len() {
+            return None;
+        }
+        let tag = if little {
+            u16::from_le_bytes([bytes[entry], bytes[entry + 1]])
+        } else {
+            u16::from_be_bytes([bytes[entry], bytes[entry + 1]])
+        };
+        let value = if little {
+            u32::from_le_bytes([bytes[entry + 8], bytes[entry + 9], bytes[entry + 10], bytes[entry + 11]])
+        } else {
+            u32::from_be_bytes([bytes[entry + 8], bytes[entry + 9], bytes[entry + 10], bytes[entry + 11]])
+        };
+        match tag {
+            256 => width = Some(value as usize),
+            257 => height = Some(value as usize),
+            258 => samples = Some(value as usize),
+            277 => bits_per_sample = Some(value as usize),
+            _ => {}
+        }
+    }
+    // Only accept 16-bit grayscale / RGB.
+    if bits_per_sample != Some(16) {
+        return None;
+    }
+    Some((
+        width?,
+        height?,
+        match samples {
+            Some(3) => 3,
+            Some(1) | None => 1,
+            _ => return None,
+        },
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_tiff_dimensions;
+
+    /// Build a minimal 16-bit grayscale TIFF with the given
+    /// dimensions, big-endian byte order, single IFD entry.
+    fn minimal_tiff_le(width: u32, height: u32, samples: u16) -> Vec<u8> {
+        // Header: "II" (little-endian), magic 42, IFD offset = 8.
+        let mut bytes = vec![b'I', b'I', 0, 0, 8, 0, 0, 0];
+        // 4 IFD entries (one each for width, height, samples, bps).
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        // ImageWidth tag (256), SHORT, count 1, value inline.
+        bytes.extend_from_slice(&256u16.to_le_bytes());
+        bytes.extend_from_slice(&3u16.to_le_bytes()); // SHORT
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&width.to_le_bytes());
+        // ImageLength tag (257).
+        bytes.extend_from_slice(&257u16.to_le_bytes());
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&height.to_le_bytes());
+        // SamplesPerPixel tag (258).
+        bytes.extend_from_slice(&258u16.to_le_bytes());
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&samples.to_le_bytes());
+        // BitsPerSample tag (277).
+        bytes.extend_from_slice(&277u16.to_le_bytes());
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        // Next-IFD offset (zero — single IFD).
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn reads_grayscale_dimensions() {
+        let tiff = minimal_tiff_le(64, 48, 1);
+        assert_eq!(read_tiff_dimensions(&tiff), Some((64, 48, 1)));
+    }
+
+    #[test]
+    fn reads_rgb_dimensions() {
+        let tiff = minimal_tiff_le(128, 96, 3);
+        assert_eq!(read_tiff_dimensions(&tiff), Some((128, 96, 3)));
+    }
+
+    #[test]
+    fn reads_big_endian_dimensions() {
+        // Swap endianness throughout.
+        let mut tiff = minimal_tiff_le(32, 24, 1);
+        // Header "MM" instead of "II".
+        tiff[0] = b'M';
+        tiff[1] = b'M';
+        // Magic 42 in big-endian.
+        tiff[2] = 0;
+        tiff[3] = 42;
+        // IFD offset 8 in big-endian.
+        tiff[4] = 0;
+        tiff[5] = 0;
+        tiff[6] = 0;
+        tiff[7] = 8;
+        // n_entries in big-endian.
+        tiff[8] = 0;
+        tiff[9] = 4;
+        // Reswap the rest.
+        let len = tiff.len();
+        for i in 10..len {
+            // Mirror bytes pairwise.
+            if i % 2 == 0 {
+                tiff.swap(i, i + 1);
+            }
+        }
+        assert_eq!(read_tiff_dimensions(&tiff), Some((32, 24, 1)));
+    }
+
+    #[test]
+    fn rejects_non_tiff() {
+        let png_header = b"\x89PNG\r\n\x1a\n";
+        assert_eq!(read_tiff_dimensions(png_header), None);
+    }
+
+    #[test]
+    fn rejects_8bit() {
+        let mut tiff = minimal_tiff_le(16, 16, 1);
+        // Find the BitsPerSample entry (last one) and overwrite
+        // its value field (offset 12+3*12+8 = 56..60) with 8.
+        let len = tiff.len();
+        for i in (56..len - 4).step_by(1) {
+            if tiff[i..i + 4] == 16u32.to_le_bytes() {
+                tiff[i..i + 4].copy_from_slice(&8u32.to_le_bytes());
+                break;
+            }
+        }
+        assert_eq!(read_tiff_dimensions(&tiff), None);
+    }
+}

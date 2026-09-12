@@ -695,6 +695,10 @@ fn main() {
             commands_ai_enhancement::operations_registry_list,
             commands_ai_enhancement::image_version_list_for_project,
             commands_ai_enhancement::image_version_get,
+            // CR-07 — read the applied Image Version's primary
+            // artifact bytes for the Zone B canvas. Path-confined
+            // to <root>/.astroforge/applied/<project_id>/.
+            commands_ai_enhancement::read_image_artifact,
             // CR-06 P5 — region-aware masks. The mask
             // engine is pure logic in
             // `astroforge-core::masks`; the create /

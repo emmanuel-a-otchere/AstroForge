@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### CR-07 — Zone B Canvas, Image Rendering & Compare Surfaces
+
+- Closes M9 §35 criteria U2 (preview rendering), U3 (before/after
+  surface), U4 (split comparison) on top of the real pixels P5.1's
+  apply round now produces.
+- New `src-tauri::commands_ai_enhancement::read_image_artifact`
+  Tauri command (path-confined to
+  `<root>/.astroforge/applied/<project_id>/`) returns base64-encoded
+  16-bit TIFF bytes plus width / height / channels. Defense-in-
+  depth: artifact path canonicalization + `starts_with(applied_root)`
+  check refuses absolute paths, `../` traversal, and symlinks
+  pointing outside the project dir.
+- Minimal TIFF dimension reader handles II / MM byte orders, single
+  IFD entries, only accepts 16-bit grayscale or RGB samples.
+  Companion `read_tiff_dimensions` unit tests cover grayscale,
+  RGB, big-endian, non-TIFF, and 8-bit rejection.
+- New `src/components/ImageCanvas.svelte` — pure rendering
+  component. Fetches artifact bytes via `readImageArtifact`,
+  decodes the 16-bit TIFF inline (single-strip uncompressed),
+  scales to viewport, draws to `<canvas>`. Zoom (fit / 1:1 /
+  0.25×–4× slider), pan (mouse-drag), mask overlay (translucent
+  red wash where the Float32Array mask is set), histogram
+  (256 bins per channel, RGB or grayscale), clipping overlay.
+- `src/components/EnhancementStudio.svelte` — Zone B metadata
+  placeholder replaced with `<ImageCanvas />` against the active
+  Image Version.
+- `src/components/CompareWorkspace.svelte` — side-by-side compare
+  panes render two `<ImageCanvas />` instances when the picked
+  versions have a `primary_artifact_id`; pre-P5.1 versions still
+  show honest metadata cards (no fake images).
+- `src/lib/astroforge-api.ts` — `readImageArtifact` IPC client +
+  `ImageArtifactResponse` type.
+- Spec bump target: AstroForge v1.4.0 (after P5.1's 1.3.0 lands).
+- Forward-look: split comparison slider, blink comparator,
+  difference map, region inspection ship in a CR-07 follow-on PR.
+
 ### CR-06 P5.1 — Real ONNX Inference, Tile Execution, Mask-Aware Apply
 
 - New `crates/astroforge-ai/src/inference.rs` (~700 lines) wires

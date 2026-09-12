@@ -2,21 +2,24 @@
 
 **Last updated:** 2026-09-12
 **Current phase:** Phases 0–2 landed (UI scaffolding + MVP core pipeline + guided
-processing train). CR-02–CR-06 tranche programmes all shipped P1–P7. **CR-06 P5.1
-(Real ONNX inference + tile execution + mask-aware apply) is the next substantive
-slice.** No open PRs on `main` after P5.1 merges.
-**Spec version:** 1.3.0 (CR-06 P5.1 bump: stable dispatcher contract unchanged;
-the AI Enhancement Studio gains real inference + §37 segmentation-leakage
-gate; see `docs/specs/SPEC_INDEX.md`).
-**Active CR programme:** CR-06 P5.1 is the active slice. CR-07 (Zone B canvas +
-before/after + split comparison) is the natural follow-on: the canvas only has
-real pixels to render once P5.1's apply round produces them.
+processing train). CR-02–CR-06 tranche programmes all shipped P1–P7 + P5.1.
+**CR-07 (Zone B canvas + before/after + split comparison) is the active slice**
+(P5.1 PR #307 merged; CR-07 unblocked because the canvas has real pixels to
+render).
+**Spec version:** 1.3.0 in flight (P5.1 bump target; see
+`docs/specs/SPEC_INDEX.md`).
+**Active CR programme:** CR-07 — Zone B Canvas, Image Rendering & Compare
+Surfaces. Depends on P5.1 real pixels (now shipped). Closes the last three
+M9 §35 gaps (U2 preview rendering, U3 before/after surface, U4 split
+comparison).
 **Active plan:** Per-tranche plans under [`docs/plans/`](plans/):
 - `2026-09-06-cr02-domain-model/PLAN.md` — CR-02 (closed)
 - `2026-09-06-cr03-application-shell/PLAN.md` — CR-03 (closed)
 - `2026-09-06-cr04-intelligent-import/PLAN.md` — CR-04 (P4 closed; P5–P7 pending)
 - `2026-09-07-cr05-intelligent-processing/PLAN.md` — CR-05 (closed)
 - `2026-09-10-cr06-ai-enhancement-studio/PLAN.md` — CR-06 (closed)
+- `2026-09-12-cr06-p5-1-real-onnx/PLAN.md` — CR-06 P5.1 (closed, merged PR #307)
+- `2026-09-12-cr07-zone-b-canvas/PLAN.md` — CR-07 (active)
 
 **Programme state:** See [`docs/M9_AUDIT.md`](M9_AUDIT.md) for the per-criterion
 CR-06 walk-through (34/39 §35 criteria shipped, 5 partial, 0 missing) and the

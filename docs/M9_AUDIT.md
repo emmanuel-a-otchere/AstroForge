@@ -183,8 +183,8 @@ Local src-tauri build is gated on `javascriptcoregtk-4.1` + `libsoup-3.0` not be
 Every criterion in §35 is covered above. The CR-06 status:
 
 - **Status (2026-09-11 audit):** Partial — 34/39 shipped, 5 partial (concentrated in the Zone B canvas + real ONNX inference swap).
-- **Status (2026-09-12 P5.1 landing):** Partial → Shipped-for-3-of-5 — `E4` (tiled inference via real ONNX), `U2` (preview rendering — the apply round produces a distinct result image and runs the gate), and `RM3/4` (enforcement at apply time, since the gate now fires on real output). `U3` (before/after surface) and `U4` (split comparison) stay partial: they belong to CR-07.
-- **Recommended next slice:** CR-07 (Zone B canvas + before/after + split comparison) — the canvas only has real pixels to render once P5.1's apply round produces them. Forward-look from §108 above is now a finished slice; the §37 verdict fires on real output across every operation in the registry.
+- **Status (2026-09-12 P5.1 landing):** Partial → Shipped-for-3-of-5 — `E4` (tiled inference via real ONNX), `U2` (preview rendering — the apply round produces a distinct result image and runs the gate), and `RM3/4` (enforcement at apply time, since the gate now fires on real output). `U3` (before/after surface) and `U4` (split comparison) stay partial: they belong to CR-07 (active slice).
+- **Recommended active slice (2026-09-12):** CR-07 (Zone B canvas + before/after + split comparison) — the canvas now has real pixels to render because P5.1 (PR #307) shipped. Forward-look from §108 is a finished slice; the §37 verdict fires on real output across every operation in the registry.
 
 ## P5.1 forward-look (closed, 2026-09-12)
 

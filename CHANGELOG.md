@@ -2,6 +2,101 @@
 
 ## Unreleased
 
+### Slice B1 — CR-07 Foundation data model + ADRs
+
+**Scope:** Paperwork + types only. Implements CR-07 §25 data model +
+§33 ADRs (ADR-07.1..07.8). No behaviour change.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/comparison.rs` (NEW, ~700 LOC):
+  - `ComparisonSession` — user's active comparison activity.
+  - `ComparisonMode` — 8 variants (SideBySide / Split / Blink /
+    DifferenceAbsolute / DifferenceSigned / DifferenceAmplified /
+    DifferenceStructural / Overlay).
+  - `ComparisonItem` + `ComparisonSlot` (A / B / C / D) — references
+    to ImageVersions.
+  - `ComparisonRegion` + `ComparisonScope` (WholeImage /
+    SelectedRegion / SpecificFeature) + `RegionShape` (Rectangle /
+    Circle / Polygon in normalized 0..1 coordinates).
+  - `ComparisonMetric` — measured characteristics keyed by metric
+    kind (BTreeMap<String, f64>).
+  - `ComparisonDelta` + `DeltaDirection` (Improved / Degraded /
+    Unchanged / Inconclusive) + `compute()` helper that classifies
+    deltas by direction (improvement_sign) + materiality threshold.
+  - `QualityAssessment` + `AssessmentFinding` + `AssessmentSeverity`
+    (Info / Warn / Fail) + `IntegrityCheck` + `QualityVerdict`
+    (StrongImprovement / ImprovementWithTradeoffs / Neutral /
+    Degradation / Inconclusive).
+  - `ImageDecision` + `ImageDecisionState` (Working / Candidate /
+    Preferred / Final / Rejected / Reference) + `DecisionHistoryEntry`
+    + `PromotionError`. State machine: Working → Candidate → Preferred
+    → Final; Reject allowed from any non-terminal; Final / Rejected /
+    Reference are terminal.
+  - `ComparisonSet` — reusable collection of candidate versions.
+  - `now_iso8601()` helper — RFC 3339 UTC timestamp without a new
+    `chrono` dependency (matches codebase `String` convention).
+  - 13 unit tests covering promotion flow, history preservation,
+    invalid transitions, reject from non-terminal, final can't be
+    rejected, delta direction (improvement_sign + materiality +
+    zero-baseline + ambiguous-metric), session construction,
+    comparison set round-trip, mode labels, region shape.
+- `crates/astroforge-core/src/lib.rs`: `pub mod comparison;`
+
+#### Documentation (8 ADRs + index update)
+
+- `docs/adr/0004-cr07-comparison-primitive.md` (NEW) — ADR-07.1
+  Image Version Is the Comparison Primitive.
+- `docs/adr/0005-cr07-visual-comparison-primary.md` (NEW) — ADR-07.2
+  Visual Comparison Is Primary.
+- `docs/adr/0006-cr07-metrics-contextual.md` (NEW) — ADR-07.3
+  Metrics Are Contextual.
+- `docs/adr/0007-cr07-comparison-non-destructive.md` (NEW) — ADR-07.4
+  Comparison Is Non-Destructive.
+- `docs/adr/0008-cr07-provenance-always-available.md` (NEW) — ADR-07.5
+  Provenance Is Always Available.
+- `docs/adr/0009-cr07-ai-explicit-in-comparison.md` (NEW) — ADR-07.6
+  AI Processing Is Explicit in Comparison.
+- `docs/adr/0010-cr07-decision-user-owned.md` (NEW) — ADR-07.7
+  Decision Is User-Owned.
+- `docs/adr/0011-cr07-comparison-feedback-loop.md` (NEW) — ADR-07.8
+  Comparison Is a Feedback Loop.
+- `docs/adr/README.md`: index updated with 8 new entries.
+
+#### Robustness
+
+| Risk | Mitigation |
+|---|---|
+| Adding `chrono` dependency for timestamps | `now_iso8601()` helper hand-rolls RFC 3339 from `SystemTime`; matches the codebase `String` convention used by `domain.rs::ImageVersion::created_at` |
+| `String` not `Copy` in `ImageDecision` constructor + `transition_to` | `.clone()` the timestamp used in `history` so `decided_at` retains its own copy |
+| Clippy `manual_pattern_char_comparison` for `matches!(c, ':' \| '-' \| 'T' \| 'Z')` | Use `[':', '-', 'T', 'Z']` array form (Rust 1.98 `Pattern` impl) |
+| `can_promote_to` initially did not allow Reject from non-terminal states | Added Reject paths from Working / Candidate / Preferred to Rejected (terminal, but reachable) |
+| Decisions auto-promoted by pipeline completion | No code path mutates `ImageDecision::state` outside the explicit `promote()` / `transition_to()` / `reject()` methods (ADR-07.7) |
+| Rejected version accidentally un-rejected | B1 does not implement `Rejected -> Working` direct transition; restoring requires a new decision row (intentional friction per ADR-07.7) |
+
+#### Tests / verification
+
+- `cargo build -p astroforge-core` — clean
+- `cargo test -p astroforge-core comparison::` — 13 passed, 0 failed
+- `cargo test --workspace` — 752 passed, 0 failed (+13 new)
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean
+- `cargo fmt --all` — clean
+
+#### Out of scope (deferred to later bundles)
+
+- B2 Metrics + Delta: per-metric registry + materiality thresholds
+  encoded on `ComparisonMetric`. B1 carries the shape; B2 fills the
+  registry.
+- B3 Decisions: persistence of `ImageDecision` + `ComparisonSet` to
+  sqlite (per CR-07 audit, piggybacks on existing `db.rs`).
+- B4 UX: `CompareWorkspace` extension for overlay mode + sync nav
+  + region selection + version tree (DAG).
+- B5 Provenance + AI: `ProvenanceRecord` + `ProvenanceEdge`
+  aggregate types + UI surface.
+- B6 Polish: beginner / expert profiles + expert-mode inspector.
+- B7 Perf + tests: hardware matrix + visual regression + version
+  integrity tests.
+
 ### Slice R — P4-M2-T2 + T3 recipe gallery + search
 
 **Scope:** Bundled-batch per the cluster order (B → R → A → CD).

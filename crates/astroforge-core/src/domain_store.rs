@@ -446,6 +446,45 @@ CREATE INDEX idx_ai_quality_reports_operation
     ON ai_quality_reports(operation_id);
 "#,
     ),
+    // ─── CR-07 B3 — image decisions, decision history, comparison sets
+    (
+        10,
+        r#"
+CREATE TABLE image_decisions (
+    version_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    decided_at TEXT NOT NULL DEFAULT (datetime('now')),
+    reason TEXT
+);
+
+CREATE INDEX idx_image_decisions_state
+    ON image_decisions(state);
+
+CREATE TABLE decision_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version_id TEXT NOT NULL,
+    from_state TEXT,
+    to_state TEXT NOT NULL,
+    at TEXT NOT NULL DEFAULT (datetime('now')),
+    reason TEXT
+);
+
+CREATE INDEX idx_decision_history_version
+    ON decision_history(version_id, id);
+
+CREATE TABLE comparison_sets (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    version_ids_json TEXT NOT NULL,
+    slot_labels_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_comparison_sets_project
+    ON comparison_sets(project_id, created_at DESC);
+"#,
+    ),
 ];
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -518,6 +557,15 @@ impl DomainStore {
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// Lock the underlying sqlite connection for direct access. Used
+    /// by sibling modules (e.g. `decision_store`) that need to issue
+    /// raw SQL within the same transaction model. The lock guard is
+    /// `Send` only inside a transaction; the caller is responsible
+    /// for the standard `DomainStoreError` mapping.
+    pub fn lock_conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+        self.conn.lock().expect("DomainStore mutex poisoned")
     }
 
     /// Highest applied migration version (0 = none).
@@ -2515,10 +2563,12 @@ mod tests {
         // target_provenance ALTER TABLE migration.
         // CR-06 P5.1 — schema_version() bumped to 9 by the
         // ai_quality_reports migration.
-        assert_eq!(s.schema_version(), 9);
+        // CR-07 B3 — schema_version() bumped to 10 by the
+        // image_decisions + comparison_sets migration.
+        assert_eq!(s.schema_version(), 10);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 9);
+        assert_eq!(s2.schema_version(), 10);
     }
 
     #[test]

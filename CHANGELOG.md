@@ -2,6 +2,122 @@
 
 ## Unreleased
 
+### Slice B2 — CR-07 Metrics + Delta + Assessment
+
+**Scope:** Codifies the per-metric registry (B1 deferred this) +
+CR-07 §10 delta analysis + §11 quality assessment aggregation from
+existing `quality_gates` findings. Builds directly on B1.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/metric_registry.rs` (NEW, ~700 LOC):
+  - `MetricKind` enum — all 27 CR-07 §8 metric variants
+    (NoiseLuminance / NoiseChrominance / NoiseRegional /
+    SharpnessFwhm / SharpnessLocal / SharpnessEdgeResponse /
+    StarCount / StarSize / StarEccentricity / StarFwhmDistribution /
+    StarSaturation / StarBackgroundContrast / BackgroundMean /
+    BackgroundVariance / BackgroundGradient / BackgroundColorGradient /
+    DynamicRangeBlackClipping / DynamicRangeHighlightClipping /
+    DynamicRangeSaturationPct / SignalEstimatedSnr / SignalLocalSnr /
+    SignalStructuralContrast / AiSegmentationConfidence /
+    AiArtifactIndicator / AiReconstructionRisk / AiModelConfidence).
+  - `MetricDirection` enum (LowerIsBetter / HigherIsBetter /
+    Ambiguous) + `improvement_sign()` returning the `i8` value
+    consumed by `ComparisonDelta::compute` from B1.
+  - `MetricSpec` — direction + materiality_pct + label + §9
+    contextual explanation + unit. The contextual strings preserve
+    the CR-07 §9 example verbatim ("Lower generally indicates tighter
+    stars, but values depend on seeing, focal length, and pixel
+    scale.").
+  - `METRIC_REGISTRY` — one `MetricSpec` per `MetricKind`. Adding a
+    new metric requires updating both the enum and the table; the
+    `metric_registry_is_complete` test enforces this.
+  - `MetricDeltaRow` — one row of the §10 delta table (kind /
+    baseline_value / compared_value / direction / percent_change /
+    materiality_threshold / label / unit / context).
+  - `compute_deltas(baseline, compared)` — produces a `Vec<MetricDeltaRow>`
+    covering every registered metric. Missing values classify as
+    `Inconclusive`.
+  - `compute_delta_for(kind, baseline, compared)` — single-metric
+    variant.
+  - 11 unit tests: round-trip via `as_str()`, uniqueness of keys,
+    registry completeness, direction-to-sign mapping, missing-values
+    handling, low-noise-is-improvement, materiality threshold,
+    ambiguous-metric-is-inconclusive, partial coverage, context
+    lookup, value formatting.
+- `crates/astroforge-core/src/assessment.rs` (NEW, ~550 LOC):
+  - `from_gate_findings(session_id, findings, deltas, baseline, compared)`
+    produces a `QualityAssessment` (B1 type) populated from existing
+    `quality_gates::GateFinding` rows.
+  - `natural_language_summary(deltas, findings, baseline, compared)`
+    produces the CR-07 §11 assessment summary in the spec's exact
+    format:
+    ```text
+    Comparison: A (Natural) vs B (AI Enhanced)
+    [+] Noise (luminance) reduced
+    [-] Highlight clipping increased
+    [!] Clipping warning
+    Overall:
+    2 improved, 1 degraded
+    1 quality warning(s)
+    ```
+  - Verdict logic: `StrongImprovement` (3+ improved + no failures),
+    `ImprovementWithTradeoffs` (1+ improved), `Neutral` (no net
+    change), `Degradation` (failure-level gate present).
+  - Severity mapping: `Ok / Info` -> `Info`, `Warning` -> `Warn`,
+    `Failure` -> `Fail` (from `quality_gates::Severity`).
+  - Verdict aggregation: aggregates findings into a `GateVerdict` and
+    combines with metric delta net direction.
+  - 7 unit tests: findings + integrity checks, summary mentions
+    improved + degraded, verdict variants (improvement-with-tradeoffs
+    / strong-improvement / degradation), empty inputs.
+- `crates/astroforge-core/src/lib.rs`: `pub mod metric_registry;`,
+  `pub mod assessment;`
+
+#### Reuses existing modules
+
+- `image_analysis::metrics` — luminance_noise, chromatic_noise,
+  background_gradient, highlight_clipping, local_contrast (5/27
+  metric kinds ship with measurements).
+- `quality::QualityMetricSnapshot` — mean, stddev, snr_db, fwhm,
+  star_count, background_gradient.
+- `quality_gates::GateFinding` + `GateId` + `Severity` + `GateVerdict`
+  — 10 §12 astronomical integrity checks reused for the comparison
+  assessment.
+
+#### Robustness
+
+| Risk | Mitigation |
+|---|---|
+| Per-metric Materiality hard-coded per metric kind | `MetricSpec.materiality_pct` is `&'static`, locked at registry definition; overridable per call via `ComparisonDelta::compute(..., threshold)` |
+| `MetricKind::from_str` collides with `std::str::FromStr` (clippy) | Renamed to `MetricKind::parse` to keep the API explicit-non-trait |
+| Unknown metric kinds at consumer site | `metric_spec(kind)` returns `Option<&'static MetricSpec>`; consumers should treat `None` as `Ambiguous` (the convenience fns default to this) |
+| `GateFinding::severity` is private enum, not a `String` | Local `severity_as_str()` helper uses `format!("{:?}", severity).to_lowercase()` — fine for a debug-grade label since the public `Severity::as_str()` API is also lowercase |
+| Empty findings + empty deltas -> Neutral verdict | Covered by test `assessment_handles_empty_findings_and_deltas` |
+| `AssessmentVerdict::StrongImprovement` requires 3+ improvements | Logged in the test that only 1 improved gives `ImprovementWithTradeoffs` |
+| Duplicate `#[test]` attributes from earlier patch | Removed in final round |
+| Stub `format!` placeholders left in natural-language loop | Removed; single-loop implementation |
+
+#### Tests / verification
+
+- `cargo build -p astroforge-core` — clean
+- `cargo test -p astroforge-core metric_registry::` — 11/11 pass
+- `cargo test -p astroforge-core assessment::` — 7/7 pass
+- `cargo test --workspace` — 901 passed, 0 failed (+18 new)
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean
+- `cargo fmt --all` — clean
+- `bash scripts/mvp_smoke.sh` — green
+
+#### Out of scope (later bundles)
+
+- B3 Decisions: persistence of `ImageDecision` + `ComparisonSet`
+  via `db.rs` sqlite.
+- B4 UX: `ComputeMetricsTable.svelte` + `AssessmentPanel.svelte`
+  consuming the new APIs.
+- B5 Provenance + AI: `ProvenanceRecord` + `ProvenanceEdge`.
+- B6 Polish: beginner / expert profiles + expert inspector.
+- B7 Perf + tests: hardware matrix + visual regression.
+
 ### Slice B1 — CR-07 Foundation data model + ADRs
 
 **Scope:** Paperwork + types only. Implements CR-07 §25 data model +

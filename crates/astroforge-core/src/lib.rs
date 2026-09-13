@@ -1,6 +1,7 @@
 pub mod adaptive;
 pub mod ai_boundary;
 pub mod artifact;
+pub mod assessment;
 pub mod background;
 pub mod bayer_detection;
 pub mod bayer_intelligence;
@@ -31,6 +32,7 @@ pub mod import_scan;
 pub mod import_understanding;
 pub mod ingest;
 pub mod masks;
+pub mod metric_registry;
 pub mod mvp_pipeline;
 pub mod narrowband;
 pub mod narrowband_image;

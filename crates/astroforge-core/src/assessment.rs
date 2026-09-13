@@ -81,8 +81,9 @@ pub fn from_gate_findings(
 
     QualityAssessment {
         id: format!(
-            "qa-{}",
-            crate::comparison::now_iso8601().replace([':', '-', 'T', 'Z'], "")
+            "qa-{}-{}",
+            crate::comparison::now_iso8601().replace([':', '-', 'T', 'Z'], ""),
+            crate::comparison::next_nonce()
         ),
         session_id: session_id.into(),
         summary,

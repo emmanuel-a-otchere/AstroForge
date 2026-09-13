@@ -2,6 +2,115 @@
 
 ## Unreleased
 
+### Slice B3 — CR-07 Decision persistence + Comparison sets
+
+**Scope:** Persists B1's `ImageDecision` and `ComparisonSet` types
+to sqlite via the existing `DomainStore` connection (per CR-07
+audit recommendation, no new persistence crate). Adds 8 IPC
+commands. Builds on B1 (data model) + B2 (registry).
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/decision_store.rs` (NEW, ~600 LOC):
+  - `save_decision(store, decision)` — UPSERT the `image_decisions`
+    row + rewrite `decision_history` atomically.
+  - `load_decision(store, version_id)` — fetch the current decision
+    + full append-only history. Returns `NotFound` if missing.
+  - `list_decisions_for_project(store, project_id)` — join on
+    `image_versions` to scope by project.
+  - `apply_and_save_decision(store, version_id, new_state, reason)`
+    — high-level helper that loads + applies the B1 state-machine
+    transition + persists the result. Returns `InvalidTransition` on
+    state-machine violations.
+  - `save_comparison_set` / `load_comparison_set` /
+    `list_comparison_sets_for_project` / `delete_comparison_set` —
+    CRUD on the new `comparison_sets` table.
+  - 12 unit tests covering round-trips, history preservation,
+    missing-row error paths, project filtering, transition
+    rejection, slot-label preservation, and ordering.
+- `crates/astroforge-core/src/domain_store.rs`:
+  - Migration 10: `image_decisions` (version_id PK + state +
+    decided_at + reason + index on state) + `decision_history`
+    (id PK + version_id + from_state + to_state + at + reason +
+    index on version_id) + `comparison_sets` (id PK + project_id +
+    name + version_ids_json + slot_labels_json + created_at +
+    project_id/created_at index).
+  - New `pub fn lock_conn(&self) -> MutexGuard<Connection>` so
+    sibling modules can issue raw SQL within the same transaction
+    model.
+- `crates/astroforge-core/src/comparison.rs`:
+  - `pub fn next_nonce() -> u64` — process-wide monotonic counter
+    used to disambiguate ids that share a wall-clock second
+    (ComparisonSession / ComparisonSet / QualityAssessment).
+  - `ComparisonSession::new` / `ComparisonSet::new` /
+    `QualityAssessment::new` (assessment.rs) append the nonce to
+    the id so two constructs in the same second are still
+    distinguishable (avoids `INSERT OR REPLACE` clobbering on the
+    test fixtures).
+- `crates/astroforge-core/src/lib.rs`: `pub mod decision_store;`
+- `crates/astroforge-core/src/project.rs`: `schema_version()`
+  expected value bumped to 10 (matches the new migration).
+
+#### Tauri IPC commands (8 new)
+
+- `src-tauri/src/commands_comparison.rs` (NEW):
+  - `save_image_decision(decision)` — persist full B1 type.
+  - `load_image_decision(version_id)` — returns `ImageDecision` or
+    error.
+  - `list_image_decisions_for_project(project_id)` — newest first.
+  - `apply_image_decision(request)` — transition + persist in one
+    call. `ApplyDecisionRequest { version_id, new_state, reason }`.
+  - `save_comparison_set(set)` / `load_comparison_set(set_id)` /
+    `list_comparison_sets_for_project(project_id)` /
+    `delete_comparison_set(set_id)`.
+- `src-tauri/src/main.rs`: `mod commands_comparison;` + 8 entries in
+  `tauri::generate_handler!`.
+- Global `DomainStore` opens at `~/.astroforge/cr-07.sqlite` (B3
+  scope). Per-project wiring is deferred to B4 alongside the rest
+  of the UX surface.
+
+#### Bug fixed in B1 (carryover from B3 testing)
+
+- `ComparisonSet::new` produced duplicate ids when called twice in
+  the same wall-clock second (both timestamp and id are derived
+  from `now_iso8601()`). `INSERT OR REPLACE` then clobbered the
+  first row. Fixed by appending a process-wide nonce.
+- Same fix applied to `ComparisonSession::new` and
+  `QualityAssessment::new` for consistency.
+
+#### Robustness
+
+| Risk | Mitigation |
+|---|---|
+| `DomainStore.conn` is private | New public `lock_conn()` accessor with documented contract (caller is responsible for the standard `DomainStoreError` mapping) |
+| `INSERT OR REPLACE` on `image_decisions` clobbers prior history | `save_decision` deletes the prior `decision_history` rows + re-inserts from the in-memory `ImageDecision` snapshot atomically. The B1 type is the source of truth; the store mirrors it. |
+| Duplicate ids from same-second `now_iso8601()` | `next_nonce()` counter; applied to all three id-producing constructors |
+| Pre-existing schema_version() test hardcoded `9` | Updated to `10`; comment added explaining the migration path |
+| `query_row` closure returning serde_json::Error (clippy) | JSON parsing moved outside the closure into a `ComparisonSetRow` builder; closures now return plain `String` types |
+| `Connection` field in `DomainStore` kept private but a sibling module needs it | Public `lock_conn()` returns `MutexGuard` with the same locking semantics as the existing internal calls |
+| `apply_and_save_decision` double-`map_err` (clippy) | Reduced to a single `_e`-discarding closure |
+| `stmt.query` borrow conflicts with `drop(stmt)` | Wrapped the iteration in a `{ ... }` block to scope the borrow |
+| Global `DomainStore` is not per-project | Out of B3 scope; per-project wiring ships in B4 alongside the rest of the UX surface |
+
+#### Tests / verification
+
+- `cargo build -p astroforge-core` — clean
+- `cargo test -p astroforge-core decision_store::` — 12/12 pass
+- `cargo test --workspace` — 913 passed, 0 failed (+12 new)
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean
+- `cargo fmt --all` — clean
+- `cargo check -p astroforge-app` — clean (Tauri binary compiles)
+- `bash scripts/mvp_smoke.sh` — green
+
+#### Out of scope (later bundles)
+
+- **B4 UX** — `DecisionPanel.svelte` + `ComparisonSetList.svelte`
+  consuming the new IPC commands; per-project DB wiring.
+- **B5 Provenance + AI** — `ProvenanceRecord` + `ProvenanceEdge`
+  aggregate; AI metric implementations.
+- **B6 Polish** — beginner / expert profiles + expert inspector.
+- **B7 Perf + tests** — hardware matrix + visual regression.
+
 ### Slice B2 — CR-07 Metrics + Delta + Assessment
 
 **Scope:** Codifies the per-metric registry (B1 deferred this) +

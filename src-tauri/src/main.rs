@@ -17,6 +17,7 @@ use tauri::{Manager, State};
 
 mod commands_ai_enhancement;
 mod commands_ai_models;
+mod commands_comparison;
 mod commands_image_versions;
 mod commands_import;
 mod commands_pipeline_plan;
@@ -782,6 +783,15 @@ fn main() {
             commands_resource::derive_execution_budget,
             // CR-05 P5 slice 2 — stage-parameter pre-flight budget.
             commands_resource::stage_execution_budget,
+            // CR-07 B3 — image decisions + comparison sets.
+            commands_comparison::save_image_decision,
+            commands_comparison::load_image_decision,
+            commands_comparison::list_image_decisions_for_project,
+            commands_comparison::apply_image_decision,
+            commands_comparison::save_comparison_set,
+            commands_comparison::load_comparison_set,
+            commands_comparison::list_comparison_sets_for_project,
+            commands_comparison::delete_comparison_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

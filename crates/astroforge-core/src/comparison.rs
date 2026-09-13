@@ -58,6 +58,16 @@ pub fn now_iso8601() -> String {
     format_iso8601_utc(secs)
 }
 
+/// Process-wide monotonic counter used to disambiguate ids that
+/// share a wall-clock second. Each `new()` call (session, set,
+/// assessment) bumps the counter; consumers should treat the
+/// generated ids as opaque.
+pub fn next_nonce() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NONCE: AtomicU64 = AtomicU64::new(0);
+    NONCE.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Format a Unix timestamp as RFC 3339 UTC (e.g. "2026-09-12T07:00:00Z").
 /// Hand-rolled to avoid a new `chrono` dependency. Valid for the
 /// range 1970-2100; beyond that, calendar arithmetic drifts (matches
@@ -109,7 +119,11 @@ impl ComparisonSession {
     /// Convenience constructor. Empty item/region/metric vectors.
     pub fn new(project_id: impl Into<String>, mode: ComparisonMode) -> Self {
         Self {
-            id: format!("cmp-{}", now_iso8601().replace([':', '-', 'T', 'Z'], "")),
+            id: format!(
+                "cmp-{}-{}",
+                now_iso8601().replace([':', '-', 'T', 'Z'], ""),
+                next_nonce()
+            ),
             project_id: project_id.into(),
             created_at: now_iso8601(),
             mode,
@@ -567,14 +581,24 @@ pub struct ComparisonSet {
     pub slot_labels: Vec<String>,
 }
 
+static COMPARISON_SET_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 impl ComparisonSet {
     pub fn new(
         project_id: impl Into<String>,
         name: impl Into<String>,
         version_ids: Vec<String>,
     ) -> Self {
+        // Add a process-wide monotonic counter so two sets created
+        // in the same wall-clock second get distinct ids. The
+        // timestamp is still useful for human-readable sorting.
+        let nonce = COMPARISON_SET_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
-            id: format!("set-{}", now_iso8601().replace([':', '-', 'T', 'Z'], "")),
+            id: format!(
+                "set-{}-{}",
+                now_iso8601().replace([':', '-', 'T', 'Z'], ""),
+                nonce
+            ),
             project_id: project_id.into(),
             name: name.into(),
             version_ids,

@@ -25,6 +25,7 @@
   import DecisionPanel from "./DecisionPanel.svelte";
   import MetricsTable from "./MetricsTable.svelte";
   import ComparisonSetList from "./ComparisonSetList.svelte";
+  import RegionPicker, { type RegionScope } from "./RegionPicker.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
 
   let aId = $state<string | null>(null);
@@ -56,6 +57,26 @@
     panX: 0,
     panY: 0,
   });
+  // CR-07 B7: Comparison Scope (§7) state.
+  let regionScope = $state<RegionScope>("whole");
+  let regionDrawMode = $state(false);
+  let selectedRegion = $state<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  let selectedFeature = $state<string | null>(null);
+
+  // Overlay regions handed to ImageCanvas. Always empty for
+  // "whole" scope (whole-image has no visual overlay); populated
+  // for "selected" and "feature".
+  const overlayRegionA = $derived(
+    regionScope !== "whole" && selectedRegion
+      ? { scope: regionScope, rect: selectedRegion }
+      : null,
+  );
+  const overlayRegionB = $derived(overlayRegionA);
 
   // R4: the project lifecycle module loads the version
   // timeline on project open. The remaining reactive
@@ -109,11 +130,47 @@
     if (!same) sharedView = view;
   }
 
-  // CR-07 B5: reset the shared view to fit-to-window. Wired
+  // CR-07 B5 — reset the shared view to fit-to-window. Wired
   // up via the toolbar button below so the user has an
   // obvious "I want both at once" affordance.
   function fitBoth() {
     sharedView = { zoomMode: "fit", zoomLevel: 1, panX: 0, panY: 0 };
+  }
+
+  // CR-07 B7: region handlers. Changing scope clears any
+  // captured region so the UI stays honest: switching from
+  // "selected" to "whole" shouldn't leave a phantom overlay.
+  function setScope(next: RegionScope) {
+    if (next !== regionScope) {
+      regionScope = next;
+      selectedRegion = null;
+      regionDrawMode = false;
+      if (next !== "feature") selectedFeature = null;
+    }
+  }
+  function toggleDrawMode() {
+    regionDrawMode = !regionDrawMode;
+  }
+  function clearRegion() {
+    selectedRegion = null;
+    regionDrawMode = false;
+  }
+  function handleCanvasRegion(rect: {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  }) {
+    if (!regionDrawMode && !regionScope) return;
+    if (regionScope !== "selected") return;
+    // Reject degenerate rects (the user just clicked without
+    // dragging); require a minimum area to make the
+    // comparison meaningful.
+    const w = rect.x1 - rect.x0;
+    const h = rect.y1 - rect.y0;
+    if (w < 8 || h < 8) return;
+    selectedRegion = rect;
+    regionDrawMode = false;
   }
 
   function formatDate(iso: string): string {
@@ -310,6 +367,9 @@
                 versionId={versionA.version_id}
                 view={syncNav ? sharedView : null}
                 onViewChange={syncNav ? handleSharedViewChange : () => {}}
+                onRegion={handleCanvasRegion}
+                regions={overlayRegionA ? [overlayRegionA] : []}
+                drawMode={regionScope === "selected" && regionDrawMode}
               />
             </div>
             <p class="artifact-note font-body">
@@ -370,6 +430,9 @@
                 versionId={versionB.version_id}
                 view={syncNav ? sharedView : null}
                 onViewChange={syncNav ? handleSharedViewChange : () => {}}
+                onRegion={handleCanvasRegion}
+                regions={overlayRegionB ? [overlayRegionB] : []}
+                drawMode={regionScope === "selected" && regionDrawMode}
               />
             </div>
             <p class="artifact-note font-body">
@@ -396,13 +459,29 @@
     {/if}
 
     {#if aId && bId}
-      <!-- CR-07 B4 — §10/§11 metrics + §17/§18 decisions + §16 sets. -->
+      <!-- CR-07 B4: §10/§11 metrics + §17/§18 decisions + §16 sets.
+           CR-07 B7: §7 region picker threads the active scope
+           into the metrics header so the user knows what
+           they're comparing. -->
       <div class="compare-extras">
+        <RegionPicker
+          scope={regionScope}
+          onScopeChange={setScope}
+          drawMode={regionDrawMode}
+          onDrawToggle={toggleDrawMode}
+          onClearRegion={clearRegion}
+          hasRegion={selectedRegion !== null}
+          selectedFeature={selectedFeature}
+          onFeatureChange={(f) => (selectedFeature = f)}
+        />
         <MetricsTable
           versionIdA={aId}
           versionIdB={bId}
           labelA={versionA?.label ?? "A"}
           labelB={versionB?.label ?? "B"}
+          scope={regionScope}
+          feature={selectedFeature}
+          hasRegion={selectedRegion !== null}
         />
         <div class="decision-row">
           <DecisionPanel

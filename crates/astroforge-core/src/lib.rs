@@ -10,6 +10,7 @@ pub mod capture_analysis;
 pub mod classification;
 pub mod color_calibration;
 pub mod comparison;
+pub mod comparison_metrics;
 pub mod cosmetic;
 pub mod crop;
 pub mod curves;

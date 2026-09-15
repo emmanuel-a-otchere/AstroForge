@@ -792,6 +792,8 @@ fn main() {
             commands_comparison::load_comparison_set,
             commands_comparison::list_comparison_sets_for_project,
             commands_comparison::delete_comparison_set,
+            // CR-07 B4 — version-pair metric comparison (§10 + §11).
+            commands_comparison::compare_version_metrics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

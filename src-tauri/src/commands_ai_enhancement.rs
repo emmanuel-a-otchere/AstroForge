@@ -860,7 +860,7 @@ fn load_or_stub_pixels(version_id: &str) -> Result<F32Image, String> {
     Ok(img)
 }
 
-fn applied_pixels_dir(project_id: &str) -> Option<std::path::PathBuf> {
+pub(crate) fn applied_pixels_dir(project_id: &str) -> Option<std::path::PathBuf> {
     let mut p = dirs_home()?;
     p.push(".astroforge");
     p.push("applied");

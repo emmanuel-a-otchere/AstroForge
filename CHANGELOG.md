@@ -2,6 +2,78 @@
 
 ## Unreleased
 
+### Slice B4 — CR-07 UX: decisions, comparison sets, metric comparison
+
+**Scope:** Surfaces the B1–B3 backend in the Compare workspace and
+wires the B3 IPC commands to the managed project store. Adds the
+§10 metric delta table + §11 summary over real pixels.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/comparison_metrics.rs` (NEW):
+  - `metric_snapshot(image)` — derives the §8 metric snapshot from
+    a decoded `F32Image` via the shipped `image_analysis::metrics`
+    detectors (luminance/chrominance noise, local contrast,
+    background gradient, highlight clipping). Only metrics with
+    shipped detectors produce values; the rest stay honest
+    inconclusive rows.
+  - `compare_version_images(baseline, compared, ...)` — assembles
+    B2's `compute_deltas` table + §11 `natural_language_summary`.
+  - `load_version_pixels(store, version_id, applied_root)` —
+    path-confined artifact decode (refuses paths outside the
+    project's applied directory), living in core so CI's
+    `cargo test --workspace` exercises it.
+  - 8 unit tests: detector coverage, registry completeness,
+    identical-image no-material-delta, noise-reduction improvement
+    classification, summary shape, TIFF round-trip, outside-root
+    refusal, missing-version error.
+- `src-tauri/src/commands_comparison.rs`:
+  - B3 commands rewired from the private `~/.astroforge/cr-07.sqlite`
+    static to the managed `ProjectState.store` (`projects.db`), the
+    same store `image_version_list` reads for this workspace.
+    Signatures unchanged. The two list commands now touch the
+    project row first so unknown project ids error clearly.
+  - New `compare_version_metrics` command: thin wrapper that
+    resolves the applied root and delegates to core.
+- `src-tauri/src/main.rs`: registers `compare_version_metrics`.
+
+#### Frontend (Svelte + TS)
+
+- `src/lib/astroforge-api.ts` — B4 types (`ImageDecision`,
+  `ComparisonSet`, `MetricDeltaRow`, `VersionMetricsComparison`)
+  and wrappers for the 8 B3 commands + `compare_version_metrics`.
+  `loadImageDecision` maps the backend's "not found" to `null` so
+  fresh versions aren't an error.
+- `src/state/comparison.ts` (NEW) — project-scoped decisions map +
+  comparison-sets list with load/reset lifecycle, wired into
+  `project-lifecycle.ts` open/close (R4 pattern).
+- `src/components/DecisionPanel.svelte` (NEW) — §17/§18 state
+  machine UI: Working → Candidate → Preferred → Final + Reject,
+  optional reason per transition, append-only history view,
+  terminal-state honesty.
+- `src/components/MetricsTable.svelte` (NEW) — §10 delta table
+  (A / B / Δ% / verdict per registry metric) + §11 summary;
+  unmeasured metrics render "—".
+- `src/components/ComparisonSetList.svelte` (NEW) — §16 set list,
+  save-current-pair, apply-back-to-pickers, two-step delete.
+- `src/components/CompareWorkspace.svelte` — mounts the three
+  panels below the existing compare surface when A and B are
+  selected.
+
+#### Known pre-existing issues (out of scope)
+
+- Store fragmentation: the AI apply round writes `image_versions`
+  rows to `~/.astroforge/cr-06-p1.sqlite` while
+  `read_image_artifact` / `image_version_list` / now the B3
+  commands use `projects.db`. Consolidating the CR-06 store into
+  the managed project store is a dedicated follow-up slice.
+- `list_decisions_for_project` joins on `image_versions`; until
+  version rows land in the project store it returns empty. The
+  DecisionPanel loads per version (`load_image_decision`) and is
+  unaffected.
+- `src-tauri/Cargo.lock` is stale relative to `Cargo.toml`
+  (astroforge-ai dep) — drift predates this slice; left untouched.
+
 ### Slice B3 — CR-07 Decision persistence + Comparison sets
 
 **Scope:** Persists B1's `ImageDecision` and `ComparisonSet` types

@@ -25,8 +25,30 @@
     versionIdB: string;
     labelA: string;
     labelB: string;
+    /** CR-07 B7: Comparison Scope. Surfaces in the panel
+     *  header so the user knows whether the metrics come
+     *  from the whole image, a drawn rectangle, or a named
+     *  feature. Backend metrics are whole-image today; the
+     *  scope is metadata, not a re-query (yet). */
+    scope?: "whole" | "selected" | "feature";
+    feature?: string | null;
+    hasRegion?: boolean;
   }
-  const { versionIdA, versionIdB, labelA, labelB }: Props = $props();
+  const {
+    versionIdA,
+    versionIdB,
+    labelA,
+    labelB,
+    scope = "whole",
+    feature = null,
+    hasRegion = false,
+  }: Props = $props();
+
+  const SCOPE_LABEL: Record<NonNullable<Props["scope"]>, string> = {
+    whole: "Whole image",
+    selected: "Selected region",
+    feature: "Specific feature",
+  };
 
   let report = $state<VersionMetricsComparison | null>(null);
   let loading = $state(false);
@@ -91,6 +113,16 @@
     <h3 class="panel-title font-display">
       {labelA} vs {labelB}
     </h3>
+    <!-- CR-07 B7: active scope chip. Shows the user what
+         the metric table actually covers. -->
+    <span class="scope-chip" data-scope={scope}>
+      {SCOPE_LABEL[scope]}
+      {#if scope === "feature" && feature}
+        · {feature}
+      {:else if scope === "selected" && !hasRegion}
+        · (no region drawn)
+      {/if}
+    </span>
   </header>
 
   {#if versionIdA === versionIdB}
@@ -175,6 +207,28 @@
   .panel-title {
     margin: 0;
     font-size: 1rem;
+    flex: 1;
+  }
+
+  .scope-chip {
+    display: inline-block;
+    padding: 2px var(--sp-xs);
+    border-radius: var(--radius-full);
+    background: var(--surface-container-high);
+    color: var(--on-surface-variant);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .scope-chip[data-scope="selected"] {
+    background: rgba(74, 144, 255, 0.18);
+    color: #4a90ff;
+  }
+
+  .scope-chip[data-scope="feature"] {
+    background: rgba(255, 144, 74, 0.18);
+    color: #ff904a;
   }
 
   .note {

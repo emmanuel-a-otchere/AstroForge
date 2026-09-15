@@ -61,6 +61,23 @@
   export let overlayCanvasEl: HTMLCanvasElement | undefined =
     undefined;
 
+  // CR-07 B7: region overlay (Comparison Scope, §7).
+  //
+  // Regions are drawn as a non-interactive outline over the
+  // canvas. The component never mutates them; the parent owns
+  // the source of truth. Coordinates are in canvas client
+  // pixels (same space as the existing shift-drag onRegion
+  // emit), so a parent that captures a rect via `onRegion`
+  // can pass it straight back as the overlay shape.
+  export let regions: ReadonlyArray<{
+    scope: "whole" | "selected" | "feature";
+    rect: { x0: number; y0: number; x1: number; y1: number };
+  }> = [];
+  /** When true, the user is in region-draw mode; clicks on
+   *  the canvas should not start a pan. The parent toggles
+   *  this when its "Draw" button is active. */
+  export let drawMode = false;
+
   // CR-07 B5: synchronized navigation (§6).
   //
   // When a parent supplies `view` AND `onViewChange`, the
@@ -514,7 +531,13 @@
   }
 
   function onMouseDown(ev: MouseEvent) {
+    // CR-07 B7: draw mode suppresses pan so a click on the
+    // canvas starts a region selection. Shift-drag always
+    // opens a region regardless of mode (existing behavior
+    // unchanged for users who haven't opted in).
     if (ev.shiftKey && canvasEl) {
+      regionStart = { x: ev.offsetX, y: ev.offsetY };
+    } else if (drawMode && canvasEl) {
       regionStart = { x: ev.offsetX, y: ev.offsetY };
     } else {
       dragStart = {
@@ -698,7 +721,7 @@
       </button>
     {/if}
   </div>
-  <div class="viewport" data-testid="image-canvas-viewport">
+  <div class="viewport" data-testid="image-canvas-viewport" data-draw-mode={drawMode ? "true" : "false"}>
     {#if loading}
       <p class="status">Loading…</p>
     {:else if loadError}
@@ -714,6 +737,20 @@
         on:mouseup={onMouseUp}
         data-testid="image-canvas-surface"
       ></canvas>
+      <!-- CR-07 B7: region overlays. Pointer-events disabled
+           so the canvas beneath still receives pan/ draw
+           input. -->
+      {#each regions as region, ri (ri)}
+        <div
+          class="region-overlay"
+          data-scope={region.scope}
+          style:left="{region.rect.x0}px"
+          style:top="{region.rect.y0}px"
+          style:width="{Math.max(0, region.rect.x1 - region.rect.x0)}px"
+          style:height="{Math.max(0, region.rect.y1 - region.rect.y0)}px"
+          aria-hidden="true"
+        ></div>
+      {/each}
       {#if showHistogram && histogram}
         <svg
           class="histogram"
@@ -786,6 +823,20 @@
   }
   .viewport canvas:active {
     cursor: grabbing;
+  }
+  .viewport[data-draw-mode="true"] canvas {
+    cursor: crosshair;
+  }
+  .region-overlay {
+    position: absolute;
+    pointer-events: none;
+    border: 2px solid #4a90ff;
+    background: rgba(74, 144, 255, 0.08);
+    border-radius: 2px;
+  }
+  .region-overlay[data-scope="feature"] {
+    border-color: #ff904a;
+    background: rgba(255, 144, 74, 0.08);
   }
   .status {
     padding: 16px;

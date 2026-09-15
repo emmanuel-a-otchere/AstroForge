@@ -35,6 +35,27 @@
   // default; CompareTools requires both versions to have a
   // primary_artifact_id (otherwise the canvas can't render).
   let useCompareTools = false;
+  // CR-07 B5: synchronized navigation (§6). When ON, the
+  // CompareWorkspace owns the shared view (zoom + pan) and
+  // passes it to both ImageCanvas instances. A drag on either
+  // canvas emits `onViewChange`, which updates the single
+  // source of truth here; both canvases re-render against it.
+  // Default ON because the basic side-by-side is the default
+  // mode, and the pain point (you zoom one and lose the other)
+  // is exactly what B5 fixes.
+  let syncNav = true;
+  type SharedView = {
+    zoomMode: "fit" | "1:1";
+    zoomLevel: number;
+    panX: number;
+    panY: number;
+  };
+  let sharedView = $state<SharedView>({
+    zoomMode: "fit",
+    zoomLevel: 1,
+    panX: 0,
+    panY: 0,
+  });
 
   // R4: the project lifecycle module loads the version
   // timeline on project open. The remaining reactive
@@ -71,6 +92,28 @@
   function applySet(versionIdA: string, versionIdB: string) {
     aId = versionIdA;
     bId = versionIdB;
+  }
+
+  // CR-07 B5: receive view changes from either canvas and
+  // store the new shared view. Both canvases re-render against
+  // it via the `view` prop, so pan/zoom on A instantly reflects
+  // on B (and vice versa). Identity check before assignment
+  // avoids the two-way binding feedback loop the skill
+  // flagged.
+  function handleSharedViewChange(view: SharedView) {
+    const same =
+      sharedView.zoomMode === view.zoomMode &&
+      sharedView.zoomLevel === view.zoomLevel &&
+      sharedView.panX === view.panX &&
+      sharedView.panY === view.panY;
+    if (!same) sharedView = view;
+  }
+
+  // CR-07 B5: reset the shared view to fit-to-window. Wired
+  // up via the toolbar button below so the user has an
+  // obvious "I want both at once" affordance.
+  function fitBoth() {
+    sharedView = { zoomMode: "fit", zoomLevel: 1, panX: 0, panY: 0 };
   }
 
   function formatDate(iso: string): string {
@@ -181,6 +224,45 @@
       </div>
     {/if}
 
+    <!-- CR-07 B5: sync-nav controls. Only meaningful in the
+         basic side-by-side mode (CompareTools renders both A
+         and B into its own composited stage, so per-canvas
+         sync isn't relevant there). -->
+    {#if !useCompareTools && versionA?.primary_artifact_id && versionB?.primary_artifact_id}
+      <div class="sync-nav-bar" role="toolbar" aria-label="Synchronized navigation">
+        <label class="sync-nav-toggle">
+          <input
+            type="checkbox"
+            bind:checked={syncNav}
+            aria-label="Synchronize zoom and pan across A and B"
+          />
+          <span class="material-symbols-outlined" aria-hidden="true">sync</span>
+          Sync zoom + pan
+        </label>
+        <button
+          type="button"
+          class="sync-nav-cta"
+          onclick={fitBoth}
+          disabled={!syncNav}
+          aria-label="Reset both A and B to fit"
+          title="Reset zoom + pan on both sides"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">fit_screen</span>
+          Fit both
+        </button>
+        {#if syncNav}
+          <span class="sync-nav-readout font-body" aria-live="polite">
+            {#if sharedView.zoomMode === "fit"}
+              Fit
+            {:else}
+              {sharedView.zoomLevel.toFixed(2)}×
+            {/if}
+            · pan ({Math.round(sharedView.panX)}, {Math.round(sharedView.panY)})
+          </span>
+        {/if}
+      </div>
+    {/if}
+
     {#if useCompareTools && versionA?.primary_artifact_id && versionB?.primary_artifact_id}
       <div class="compare-tools-mount" data-testid="compare-tools-mount">
         <CompareTools
@@ -224,7 +306,11 @@
           </dl>
           {#if versionA.primary_artifact_id}
             <div class="canvas-mount" data-testid="compare-canvas-a">
-              <ImageCanvas versionId={versionA.version_id} />
+              <ImageCanvas
+                versionId={versionA.version_id}
+                view={syncNav ? sharedView : null}
+                onViewChange={syncNav ? handleSharedViewChange : () => {}}
+              />
             </div>
             <p class="artifact-note font-body">
               <span class="material-symbols-outlined" aria-hidden="true">
@@ -280,7 +366,11 @@
           </dl>
           {#if versionB.primary_artifact_id}
             <div class="canvas-mount" data-testid="compare-canvas-b">
-              <ImageCanvas versionId={versionB.version_id} />
+              <ImageCanvas
+                versionId={versionB.version_id}
+                view={syncNav ? sharedView : null}
+                onViewChange={syncNav ? handleSharedViewChange : () => {}}
+              />
             </div>
             <p class="artifact-note font-body">
               <span class="material-symbols-outlined" aria-hidden="true">
@@ -577,6 +667,60 @@
     display: flex;
     gap: 4px;
     margin-top: var(--sp-md);
+  }
+
+  .sync-nav-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-md);
+    margin-top: var(--sp-sm);
+    padding: var(--sp-sm) var(--sp-md);
+    background: var(--surface-container-low);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+  }
+
+  .sync-nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-xs);
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--on-surface);
+  }
+
+  .sync-nav-toggle input {
+    margin: 0;
+  }
+
+  .sync-nav-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-xs);
+    padding: var(--sp-xs) var(--sp-sm);
+    background: transparent;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    color: var(--on-surface);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-family: inherit;
+  }
+
+  .sync-nav-cta:hover:not(:disabled) {
+    background: var(--surface-container);
+  }
+
+  .sync-nav-cta:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .sync-nav-readout {
+    margin-left: auto;
+    color: var(--on-surface-variant);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
   }
 
   .mode-button {

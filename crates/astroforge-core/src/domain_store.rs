@@ -910,6 +910,40 @@ impl DomainStore {
         Ok(out)
     }
 
+    /// CR-07 B9: list every `ImageVersion` row in the store,
+    /// regardless of project. Used by the legacy-DB migration
+    /// helper so historical CR-06 apply-round data can be
+    /// copied into the consolidated store. Hidden versions are
+    /// included because the user may have hidden them
+    /// intentionally in the legacy DB and we don't want to
+    /// drop them on migrate.
+    pub fn list_image_versions_all(&self) -> Result<Vec<ImageVersion>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT version_id, project_id, label, sequence, primary_artifact_id,
+                    source_version_id, created_at, hidden
+             FROM image_versions
+             ORDER BY created_at ASC, version_id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ImageVersion {
+                version_id: row.get(0)?,
+                project_id: row.get(1)?,
+                label: row.get(2)?,
+                sequence: row.get::<_, i64>(3)? as u32,
+                primary_artifact_id: row.get(4)?,
+                source_version_id: row.get(5)?,
+                created_at: row.get(6)?,
+                hidden: row.get::<_, i64>(7)? != 0,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// CR-06 P4 — fetch a single `ImageVersion` by id. Returns
     /// `Ok(None)` when the version does not exist (e.g. a
     /// branch references an id that was never persisted).
@@ -1431,6 +1465,29 @@ impl DomainStore {
              FROM ai_operations WHERE stage_run_id = ?1 ORDER BY created_at ASC, operation_id ASC",
         )?;
         let rows = stmt.query_map(params![stage_run_id], ai_operation_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// CR-07 B9: list every `AiOperation` row in the store,
+    /// regardless of stage. Used by the legacy-DB migration
+    /// helper. Pair with `list_image_versions_all`: both
+    /// tables together cover the durable apply-round output
+    /// the user sees in the compare workspace.
+    pub fn list_ai_operations_all(&self) -> Result<Vec<AiOperation>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT operation_id, stage_run_id, model_id, model_version,
+                    model_hash, runtime, backend, precision,
+                    parameters_json, seed, deterministic, safety_classification,
+                    experimental, input_artifact_id, output_artifact_id,
+                    engine_version, tile_configuration, resource_metrics
+             FROM ai_operations ORDER BY created_at ASC, operation_id ASC",
+        )?;
+        let rows = stmt.query_map([], ai_operation_row)?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
@@ -3124,5 +3181,68 @@ mod tests {
             .latest_ai_quality_report_for_version("ver_nope")
             .unwrap()
             .is_none());
+    }
+
+    /// CR-07 B9: list_image_versions_all returns every row,
+    /// regardless of project. Used by the legacy-DB migration.
+    #[test]
+    fn list_image_versions_all_returns_across_projects() {
+        let s = store();
+        let v1 = ImageVersion {
+            version_id: "ver_a".into(),
+            project_id: "proj1".into(),
+            label: "A".into(),
+            sequence: 1,
+            primary_artifact_id: String::new(),
+            source_version_id: None,
+            created_at: "2026-09-01T00:00:00Z".into(),
+            hidden: false,
+        };
+        let v2 = ImageVersion {
+            version_id: "ver_b".into(),
+            project_id: "proj2".into(),
+            label: "B".into(),
+            sequence: 1,
+            primary_artifact_id: String::new(),
+            source_version_id: None,
+            created_at: "2026-09-02T00:00:00Z".into(),
+            hidden: false,
+        };
+        s.upsert_image_version(&v1).unwrap();
+        s.upsert_image_version(&v2).unwrap();
+        let all = s.list_image_versions_all().unwrap();
+        let ids: Vec<String> = all.iter().map(|v| v.version_id.clone()).collect();
+        assert!(ids.contains(&"ver_a".to_string()));
+        assert!(ids.contains(&"ver_b".to_string()));
+    }
+
+    /// CR-07 B9: list_ai_operations_all returns every row
+    /// regardless of stage. Used by the legacy-DB migration.
+    #[test]
+    fn list_ai_operations_all_returns_across_stages() {
+        let s = store();
+        let op = AiOperation {
+            operation_id: "op_mig".into(),
+            stage_run_id: "ste_mig".into(),
+            model_id: "model_x".into(),
+            model_version: "1".into(),
+            model_hash: Some("h".into()),
+            runtime: Some("r".into()),
+            backend: Some("b".into()),
+            precision: Some("f32".into()),
+            parameters_json: Some("{}".into()),
+            seed: None,
+            deterministic: true,
+            safety_classification: AiSafetyClassification::Deterministic,
+            experimental: false,
+            input_artifact_id: None,
+            output_artifact_id: None,
+            engine_version: Some("cr-06-p5-1".into()),
+            tile_configuration: Some("{}".into()),
+            resource_metrics: Some("{}".into()),
+        };
+        s.upsert_ai_operation(&op).unwrap();
+        let all = s.list_ai_operations_all().unwrap();
+        assert!(all.iter().any(|row| row.operation_id == "op_mig"));
     }
 }

@@ -26,6 +26,7 @@
   import MetricsTable from "./MetricsTable.svelte";
   import ComparisonSetList from "./ComparisonSetList.svelte";
   import RegionPicker, { type RegionScope } from "./RegionPicker.svelte";
+  import VersionDag from "./VersionDag.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
 
   let aId = $state<string | null>(null);
@@ -77,6 +78,15 @@
       : null,
   );
   const overlayRegionB = $derived(overlayRegionA);
+
+  // CR-07 B8: VersionDag reads from versionStore reactively.
+  // We pull the `versions` field off the store in a $derived
+  // so the tree re-renders whenever the store updates (e.g.
+  // after a new stage completion).
+  const dagVersions = $derived(
+    ($versionStore as { versions?: readonly ImageVersion[] }).versions ??
+      [],
+  );
 
   // R4: the project lifecycle module loads the version
   // timeline on project open. The remaining reactive
@@ -462,8 +472,20 @@
       <!-- CR-07 B4: §10/§11 metrics + §17/§18 decisions + §16 sets.
            CR-07 B7: §7 region picker threads the active scope
            into the metrics header so the user knows what
-           they're comparing. -->
+           they're comparing.
+           CR-07 B8: §15 version tree visualization. Picking
+           two nodes here pushes the ids straight into the
+           A/B pickers above. -->
       <div class="compare-extras">
+        <VersionDag
+          versions={dagVersions}
+          presetA={aId}
+          presetB={bId}
+          onSelectPair={(a, b) => {
+            aId = a;
+            bId = b;
+          }}
+        />
         <RegionPicker
           scope={regionScope}
           onScopeChange={setScope}

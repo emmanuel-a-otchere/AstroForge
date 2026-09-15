@@ -21,6 +21,7 @@ pub mod decoders;
 pub mod detail_enhancement;
 pub mod dialog_modes;
 pub mod difference;
+pub mod difference_normalize;
 pub mod dip;
 pub mod dng_parser;
 pub mod domain;

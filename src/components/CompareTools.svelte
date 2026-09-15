@@ -47,6 +47,19 @@
   type DiffKind = "absolute" | "signed" | "amplified" | "structural";
   let diffKind: DiffKind = "absolute";
 
+  // CR-07 B11: per-channel auto-stretch normalizer applied
+  // to the diff canvas pixels. The frontend mirrors
+  // `normalize_stretch` in
+  // `crates/astroforge-core/src/difference_normalize.rs` so
+  // we don't pay an IPC round-trip per slider tick. Low and
+  // high percentiles default to the astronomy convention
+  // 0.5% / 99.5%; the user can disable the stretch via the
+  // "Off" button.
+  type StretchMode = "off" | "auto";
+  let stretchMode: StretchMode = "auto";
+  let stretchLowPct = 0.5;
+  let stretchHighPct = 99.5;
+
   let splitPercent = 50; // 0..100
   let blinkInterval = 1000; // ms
   let blinkVisible: "a" | "b" = "a";
@@ -193,7 +206,84 @@
         o[i + 3] = 255;
       }
     }
+    // CR-07 B11: per-channel auto-stretch. Mirrors the Rust
+    // `normalize_stretch` in
+    // `crates/astroforge-core/src/difference_normalize.rs`.
+    // Skipped when the user picked "Off"; the histogram is
+    // built once on the small imageData buffer (sub-millisecond
+    // on a 1-2 megapixel canvas).
+    if (stretchMode === "auto") {
+      applyStretch(out.data);
+    }
     ctx.putImageData(out, 0, 0);
+  }
+
+  // CR-07 B11: per-channel percentile histogram stretch.
+  // Builds a 256-bin histogram per channel, walks it to find
+  // v_low / v_high at the configured percentiles, then linearly
+  // remaps the in-range pixels. The alpha channel is skipped.
+  function applyStretch(pixels: Uint8ClampedArray): void {
+    const stride = 4;
+    const channelCount = (pixels.length / stride) * 3;
+    if (channelCount === 0) return;
+    // Build combined RGB histogram (channels share cutoffs).
+    const histo = new Uint32Array(256);
+    for (let i = 0; i < pixels.length; i += stride) {
+      histo[pixels[i]]++;
+      histo[pixels[i + 1]]++;
+      histo[pixels[i + 2]]++;
+    }
+    const lowThreshold = Math.ceil(
+      (stretchLowPct / 100) * channelCount,
+    );
+    const highThreshold = Math.floor(
+      (1 - stretchHighPct / 100) * channelCount,
+    );
+    // Walk low: first bin whose cumulative count >= lowThreshold.
+    let vLow = 0;
+    let cum = 0;
+    let foundLow = false;
+    for (let i = 0; i < 256; i++) {
+      cum += histo[i];
+      if (!foundLow && cum >= lowThreshold) {
+        vLow = i;
+        foundLow = true;
+      }
+    }
+    // Walk high: first bin from the top whose from-top count
+    // >= highThreshold.
+    let vHigh = 255;
+    let fromTop = 0;
+    let foundHigh = false;
+    for (let i = 255; i >= 0; i--) {
+      fromTop += histo[i];
+      if (!foundHigh && fromTop >= highThreshold) {
+        vHigh = i;
+        foundHigh = true;
+      }
+    }
+    if (!foundLow) vLow = 0;
+    if (!foundHigh) vHigh = 255;
+    if (vHigh <= vLow) {
+      // Degenerate range (single-value image); no stretch.
+      return;
+    }
+    const range = vHigh - vLow;
+    for (let i = 0; i < pixels.length; i += stride) {
+      for (let c = 0; c < 3; c++) {
+        const v = pixels[i + c];
+        if (v <= vLow) {
+          pixels[i + c] = 0;
+        } else if (v >= vHigh) {
+          pixels[i + c] = 255;
+        } else {
+          pixels[i + c] = Math.round(
+            ((v - vLow) * 255 + range / 2) / range,
+          );
+        }
+      }
+      // Alpha preserved.
+    }
   }
 
   function clamp255(v: number): number {
@@ -423,6 +513,58 @@
           <span class="readout">{diffGain}×</span>
         </label>
       {/if}
+      <div class="stretch" role="group" aria-label="Stretch normalizer">
+        <button
+          type="button"
+          class:active={stretchMode === "auto"}
+          on:click={() => {
+            stretchMode = "auto";
+            recomputeDifference();
+          }}
+          aria-pressed={stretchMode === "auto"}
+        >
+          Auto stretch
+        </button>
+        <button
+          type="button"
+          class:active={stretchMode === "off"}
+          on:click={() => {
+            stretchMode = "off";
+            recomputeDifference();
+          }}
+          aria-pressed={stretchMode === "off"}
+        >
+          Off
+        </button>
+      </div>
+      {#if stretchMode === "auto"}
+        <label class="control">
+          Low
+          <input
+            type="range"
+            min="0"
+            max="20"
+            step="0.5"
+            bind:value={stretchLowPct}
+            on:input={recomputeDifference}
+            aria-label="Auto stretch low percentile"
+          />
+          <span class="readout">{stretchLowPct.toFixed(1)}%</span>
+        </label>
+        <label class="control">
+          High
+          <input
+            type="range"
+            min="80"
+            max="100"
+            step="0.5"
+            bind:value={stretchHighPct}
+            on:input={recomputeDifference}
+            aria-label="Auto stretch high percentile"
+          />
+          <span class="readout">{stretchHighPct.toFixed(1)}%</span>
+        </label>
+      {/if}
     {/if}
     {#if mode === "overlay"}
       <label class="control">
@@ -606,6 +748,23 @@
     border-left: 1px solid #2a2e36;
   }
   .diff-kind button {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+  /* CR-07 B11: stretch normalizer sub-toolbar. Mirrors
+     .diff-kind's hairline separator + compact button sizing
+     so the three sub-toolbars (mode / gain / stretch) read
+     as a single visual cluster under the Difference
+     toggle. */
+  .stretch {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 6px;
+    margin: 0 4px;
+    border-left: 1px solid #2a2e36;
+  }
+  .stretch button {
     font-size: 11px;
     padding: 4px 8px;
   }

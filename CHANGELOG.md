@@ -2,6 +2,80 @@
 
 ## Unreleased
 
+### Slice B11 — CR-07 UX: §5.4 auto-stretch normalizer
+
+**Scope:** Surfaces the per-channel percentile histogram
+stretch as the canonical astronomy post-processing step
+on the diff canvas. Closes the B10 honesty flag about
+low-magnitude diffs reading as near-black.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/difference_normalize.rs`
+  (NEW, ~330 LOC):
+  - `StretchStats` struct: returned by `normalize_stretch`
+    so the UI can surface what range was actually
+    stretched.
+  - `normalize_stretch(pixels, low_pct, high_pct)`: single
+    in-place remap function.
+    Algorithm: build a 256-bin histogram per channel over
+    the input pixels (alpha skipped), walk it to find
+    `v_low` / `v_high` at the configured percentiles, then
+    linearly remap `[v_low, v_high]` to `[0, 255]`.
+    Pixels below `v_low` clamp to 0; above `v_high` clamp
+    to 255. Out-of-range percentiles clamp silently;
+    degenerate ranges no-op.
+    Uses `ceil` for the low cutoff and `floor` for the high
+    so a 0.5% cutoff against a small sample actually skips
+    a pixel instead of truncating to 0.
+    The denominator is the number of non-alpha pixel
+    values (3 channels per pixel), not the pixel count;
+    the histogram bins aggregate over channels.
+  - 8 unit tests: equal-image no-op, already-stretched
+    no-op, mid-range stretch, alpha bytes preserved,
+    invalid percentile pair, out-of-range clamp, stretch
+    identity on already-stretched, `StretchStats::is_noop`.
+
+- `crates/astroforge-core/src/lib.rs`: registers the new
+  module.
+
+#### Frontend (Svelte)
+
+- `src/components/CompareTools.svelte`:
+  - `StretchMode` TypeScript type (`"off" | "auto"`)
+    plus `stretchLowPct` (default 0.5) and
+    `stretchHighPct` (default 99.5) state.
+  - `applyStretch(pixels)` mirrors the Rust
+    `normalize_stretch` math on the canvas side; runs
+    after the diff blend in `recomputeDifference()` when
+    `stretchMode === "auto"`. Sub-millisecond on a 1-2
+    megapixel canvas.
+  - A new `.stretch` sub-toolbar with `Auto stretch` /
+    `Off` toggle buttons appears when Difference mode is
+    active. When `Auto stretch` is selected, two slider
+    controls (`Low` 0..20%, `High` 80..100%) appear for
+    percentile tuning.
+  - CSS adds `.stretch` and `.stretch button` styles
+    (hairline separator, compact button sizing to match
+    `.diff-kind`).
+
+#### Honesty flags
+
+- The frontend computes the stretch in TypeScript on the
+  canvas side, not via a Tauri round-trip. The Rust
+  `normalize_stretch` is the canonical reference for any
+  non-canvas consumer (CI fixtures, batch comparison).
+- The histogram is built per channel (R/G/B separately)
+  on the backend, then cutoffs are picked independently
+  per channel. The frontend currently shares cutoffs
+  across all three channels for simplicity. Per-channel
+  cutoff rendering would need three separate histograms
+  on the frontend (more code, marginal visual gain for
+  astrophoto RGB data). Documented as a future slice.
+- `v_high <= v_low` degenerate case (single-value diff
+  image, no spread) is a no-op so the canvas stays at
+  whatever the raw diff produced.
+
 ### Slice B10 — CR-07 UX: §5.4 Difference mode selector
 
 **Scope:** Surfaces the four §5.4 difference modes (Absolute,

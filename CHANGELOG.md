@@ -2,6 +2,84 @@
 
 ## Unreleased
 
+### Slice B12 — CR-07 UX: §5.4 fixed-stretch + n-sigma normalizer
+
+**Scope:** Surfaces the explicit-cutoff and n-sigma
+stretch modes alongside B11's auto-stretch. Closes the
+B10 honesty flag's second half (fixed-stretch + n-sigma).
+Fixed-stretch gives reproducible results across runs;
+n-sigma auto-computes cutoffs from the current diff
+image's mean and standard deviation.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/difference_normalize.rs`
+  (extended):
+  - `StretchStats::is_noop` semantics extended: now true
+    when `v_low == 0 && v_high == 255` (no stretch) OR
+    `v_low >= v_high` (degenerate range). This matches
+    "did the function actually remap anything".
+  - `normalize_fixed(pixels, v_low, v_high)`: in-place
+    remap using an explicit pair of cutoffs. Pixels below
+    `v_low` clamp to 0; above `v_high` clamp to 255;
+    in-range pixels linearly remap to `[0, 255]`. Alpha
+    preserved. Degenerate range (`v_low >= v_high`) is
+    a no-op.
+  - `mean_stddev(pixels) -> (mean, stddev)`: arithmetic
+    mean and population standard deviation across all
+    RGB bytes; alpha skipped.
+  - `normalize_n_sigma(pixels, k)`: stretch
+    `[mean - k*sigma, mean + k*sigma]` to `[0, 255]`.
+    Returns the resulting `StretchStats` plus the
+    computed `mean` and `stddev`. Negative or NaN `k`
+    falls back to `k = 1.0`. Degenerate range is a
+    no-op.
+  - 9 new unit tests: fixed-stretch remap / clamp /
+    alpha preservation / invalid range, mean_stddev
+    uniform / known distribution, n-sigma uniform no-op
+    / known-distribution clamps / invalid-k fallback.
+
+#### Frontend (Svelte)
+
+- `src/components/CompareTools.svelte`:
+  - `StretchMode` type extended: `"off" | "auto" | "manual"`.
+    New state: `vLowFixed` (default 32), `vHighFixed`
+    (default 220), `nSigmaK` (default 3).
+  - `applyFixedStretch(pixels, vLow, vHigh)` mirrors the
+    Rust `normalize_fixed` math on the canvas side.
+  - `computeMeanStddev(pixels)` mirrors the Rust
+    `mean_stddev` helper.
+  - `applyNSigmaToFixed()` reads the current diff canvas,
+    computes mean+stddev, writes `mean ± k*sigma` (clamped
+    to `[0, 255]`) back into `vLowFixed` / `vHighFixed`,
+    then triggers a recompute.
+  - A new `Manual` toggle button appears in the stretch
+    sub-toolbar. When active, two number inputs (`vLow`,
+    `vHigh`), an n-sigma `k` slider (1..6), and an `Apply
+    n-sigma` button appear.
+  - CSS adds `.nsigma-apply` styles (slight tint so the
+    action button stands out from the mode toggles).
+
+#### Honesty flags
+
+- Same pattern as B11: frontend computes on the canvas
+  side; Rust `normalize_fixed` / `mean_stddev` /
+  `normalize_n_sigma` are the canonical reference for
+  any non-canvas consumer.
+- `n_sigma_clamps_to_byte_extents` test confirms the
+  expected behavior when `mean ± k*sigma` extends beyond
+  `[0, 255]`: the cutoffs clamp and the function no-ops
+  (the pixels stay at their pre-stretch values). This is
+  intentional: a flat histogram with a wide standard
+  deviation shouldn't be squashed into a single bucket.
+- `StretchStats::is_noop` semantics change is a soft
+  behavior change: existing callers that relied on
+  `v_low == 0 && v_high == 255` for "no stretch"
+  detection will now also see degenerate ranges as no-op.
+  This is more accurate but should be audited by any
+  caller of `StretchStats`. Currently no other caller
+  exists in the repo.
+
 ### Slice B11 — CR-07 UX: §5.4 auto-stretch normalizer
 
 **Scope:** Surfaces the per-channel percentile histogram

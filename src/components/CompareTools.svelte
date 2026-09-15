@@ -38,6 +38,15 @@
   type CompareMode = "side-by-side" | "split" | "blink" | "difference" | "overlay";
   let mode: CompareMode = "side-by-side";
 
+  // CR-07 B10: §5.4's four difference modes (Absolute, Signed,
+  // Amplified, Structural). The frontend mirrors the
+  // `DiffKind` enum in `crates/astroforge-core/src/difference.rs`
+  // so the on-canvas math stays in 8-bit canvas space; the
+  // backend enum is the canonical reference for any Rust
+  // consumer (CI fixtures, server-side batch comparison, etc.).
+  type DiffKind = "absolute" | "signed" | "amplified" | "structural";
+  let diffKind: DiffKind = "absolute";
+
   let splitPercent = 50; // 0..100
   let blinkInterval = 1000; // ms
   let blinkVisible: "a" | "b" = "a";
@@ -108,27 +117,89 @@
     else if (mode === "overlay") recomputeOverlay();
   }
 
+  // CR-07 B10: dispatch the four §5.4 difference modes. The
+  // structural path uses a Sobel-style neighbour diff on the
+  // captured ImageData buffers; the others stay linear.
+  // Implementation mirrors `compute_diff` in
+  // `crates/astroforge-core/src/difference.rs`.
   function recomputeDifference() {
     if (!diffCanvasEl || !canvasAImageData || !canvasBImageData) return;
     const ctx = diffCanvasEl.getContext("2d");
     if (!ctx) return;
-    const out = ctx.createImageData(
-      canvasAImageData.width,
-      canvasAImageData.height,
-    );
+    const w = canvasAImageData.width;
+    const h = canvasAImageData.height;
+    const out = ctx.createImageData(w, h);
     const a = canvasAImageData.data;
     const b = canvasBImageData.data;
     const o = out.data;
-    for (let i = 0; i < a.length; i += 4) {
-      const dr = Math.abs(a[i] - b[i]) * diffGain;
-      const dg = Math.abs(a[i + 1] - b[i + 1]) * diffGain;
-      const db = Math.abs(a[i + 2] - b[i + 2]) * diffGain;
-      o[i] = Math.min(255, dr);
-      o[i + 1] = Math.min(255, dg);
-      o[i + 2] = Math.min(255, db);
-      o[i + 3] = 255;
+    const stride = 4;
+    if (diffKind === "structural") {
+      // Greyscale edge map of A abs-diff edge map of B. The
+      // boundary pixels (row 0, column 0, last row, last col)
+      // fall back to absolute diff so the user still sees a
+      // meaningful render when the structural path has no
+      // interior neighbours.
+      const edgeA = new Uint8ClampedArray(o.length);
+      const edgeB = new Uint8ClampedArray(o.length);
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const i = (y * w + x) * stride;
+          const left = i - stride;
+          const up = i - w * stride;
+          for (let c = 0; c < 3; c++) {
+            const ea = Math.max(
+              Math.abs(a[i + c] - a[left + c]),
+              Math.abs(a[i + c] - a[up + c]),
+            );
+            const eb = Math.max(
+              Math.abs(b[i + c] - b[left + c]),
+              Math.abs(b[i + c] - b[up + c]),
+            );
+            edgeA[i + c] = ea;
+            edgeB[i + c] = eb;
+          }
+        }
+      }
+      for (let i = 0; i < o.length; i += stride) {
+        o[i] = Math.abs(edgeA[i] - edgeB[i]);
+        o[i + 1] = Math.abs(edgeA[i + 1] - edgeB[i + 1]);
+        o[i + 2] = Math.abs(edgeA[i + 2] - edgeB[i + 2]);
+        o[i + 3] = 255;
+      }
+    } else if (diffKind === "signed") {
+      // A - B shifted by 128 so equal pixels read grey; brighter
+      // means B is brighter than A, darker means A is brighter
+      // than B. gain is ignored on this path.
+      for (let i = 0; i < o.length; i += stride) {
+        o[i] = clamp255(a[i] - b[i] + 128);
+        o[i + 1] = clamp255(a[i + 1] - b[i + 1] + 128);
+        o[i + 2] = clamp255(a[i + 2] - b[i + 2] + 128);
+        o[i + 3] = 255;
+      }
+    } else if (diffKind === "amplified") {
+      // |A - B| * gain, clamped to 0..255.
+      for (let i = 0; i < o.length; i += stride) {
+        o[i] = clamp255(Math.abs(a[i] - b[i]) * diffGain);
+        o[i + 1] = clamp255(Math.abs(a[i + 1] - b[i + 1]) * diffGain);
+        o[i + 2] = clamp255(Math.abs(a[i + 2] - b[i + 2]) * diffGain);
+        o[i + 3] = 255;
+      }
+    } else {
+      // absolute (default). |A - B|, clamped to 8-bit.
+      for (let i = 0; i < o.length; i += stride) {
+        o[i] = Math.abs(a[i] - b[i]);
+        o[i + 1] = Math.abs(a[i + 1] - b[i + 1]);
+        o[i + 2] = Math.abs(a[i + 2] - b[i + 2]);
+        o[i + 3] = 255;
+      }
     }
     ctx.putImageData(out, 0, 0);
+  }
+
+  function clamp255(v: number): number {
+    if (v < 0) return 0;
+    if (v > 255) return 255;
+    return v;
   }
 
   // CR-07 B6: overlay composite. Draw A opaque, then B on top
@@ -291,19 +362,67 @@
       </button>
     {/if}
     {#if mode === "difference"}
-      <label class="control">
-        Gain
-        <input
-          type="range"
-          min="1"
-          max="16"
-          step="1"
-          bind:value={diffGain}
-          on:input={recomputeDifference}
-          aria-label="Difference gain"
-        />
-        <span class="readout">{diffGain}×</span>
-      </label>
+      <div class="diff-kind" role="group" aria-label="Difference mode">
+        <button
+          type="button"
+          class:active={diffKind === "absolute"}
+          on:click={() => {
+            diffKind = "absolute";
+            recomputeDifference();
+          }}
+          aria-pressed={diffKind === "absolute"}
+        >
+          Absolute
+        </button>
+        <button
+          type="button"
+          class:active={diffKind === "signed"}
+          on:click={() => {
+            diffKind = "signed";
+            recomputeDifference();
+          }}
+          aria-pressed={diffKind === "signed"}
+        >
+          Signed
+        </button>
+        <button
+          type="button"
+          class:active={diffKind === "amplified"}
+          on:click={() => {
+            diffKind = "amplified";
+            recomputeDifference();
+          }}
+          aria-pressed={diffKind === "amplified"}
+        >
+          Amplified
+        </button>
+        <button
+          type="button"
+          class:active={diffKind === "structural"}
+          on:click={() => {
+            diffKind = "structural";
+            recomputeDifference();
+          }}
+          aria-pressed={diffKind === "structural"}
+        >
+          Structural
+        </button>
+      </div>
+      {#if diffKind === "amplified"}
+        <label class="control">
+          Gain
+          <input
+            type="range"
+            min="1"
+            max="16"
+            step="1"
+            bind:value={diffGain}
+            on:input={recomputeDifference}
+            aria-label="Amplified difference gain"
+          />
+          <span class="readout">{diffGain}×</span>
+        </label>
+      {/if}
     {/if}
     {#if mode === "overlay"}
       <label class="control">
@@ -472,6 +591,23 @@
   .toolbar button.active {
     background: #4a90ff;
     color: #fff;
+  }
+  /* CR-07 B10: sub-toolbar for the §5.4 difference modes.
+     Inherits button styles from .toolbar; only needs to lay
+     out the 4 mode buttons in a tight group with a hairline
+     separator so the difference toolbar doesn't blend into
+     the rest of the controls. */
+  .diff-kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 6px;
+    margin: 0 4px;
+    border-left: 1px solid #2a2e36;
+  }
+  .diff-kind button {
+    font-size: 11px;
+    padding: 4px 8px;
   }
   .control {
     display: inline-flex;

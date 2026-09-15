@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+### Slice B10 — CR-07 UX: §5.4 Difference mode selector
+
+**Scope:** Surfaces the four §5.4 difference modes (Absolute,
+Signed, Amplified, Structural) in the Compare workspace's
+Difference sub-toolbar. The audit flagged the workspace as
+showing "absolute difference" only; this slice ships the
+canonical four and wires them through both the on-canvas
+renderer and a canonical backend enum.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/difference.rs` (NEW, ~330 LOC):
+  - `DiffKind` enum with the four §5.4 modes
+    (`Absolute`, `Signed`, `Amplified`, `Structural`).
+    Serde-friendly kebab-case serialisation so the same
+    labels can be reused by any Tauri command or server-side
+    consumer.
+  - `compute_diff(kind, a, b, gain, width)`: single dispatch
+    function; `width` is required by `Structural` (neighbour
+    diff needs image dimensions) and ignored by the other
+    three.
+  - `Signed` shifts `(A - B) + 128` per channel so equal
+    pixels read grey; brighter means B brighter than A.
+  - `Amplified` multiplies by a positive `gain` (negative or
+    NaN falls back to 1.0 for safety).
+  - `Structural` uses a Sobel-style left/up neighbour diff on
+    A and B; boundary pixels fall back to absolute so
+    single-row / single-column buffers still render.
+  - 12 unit tests: equal-image behaviour per mode, per-channel
+    clamping, anti-symmetry of signed mode, NaN/negative
+    gain fallback, structural quadrant-swap detection,
+    small-buffer fallback, serde roundtrip.
+
+- `crates/astroforge-core/src/lib.rs`: registers the new
+  module.
+
+#### Frontend (Svelte)
+
+- `src/components/CompareTools.svelte`:
+  - `DiffKind` TypeScript type mirrors the Rust enum
+    (kebab-case strings: "absolute", "signed", "amplified",
+    "structural").
+  - `recomputeDifference()` becomes a dispatcher over the
+    four modes; `clamp255` helper extracted. The math
+    matches the Rust backend's behaviour so the on-canvas
+    output is the canonical reference.
+  - A new `.diff-kind` sub-toolbar appears when the user
+    picks `Difference` mode, with four toggle buttons.
+    Switching modes triggers an immediate recompute.
+  - The Gain slider is now mode-aware: only visible when
+    `Amplified` is active (other modes either have no gain
+    or use fixed gain = 1).
+  - CSS adds `.diff-kind` and `.diff-kind button` styles
+    (hairline separator, smaller font for the sub-toolbar).
+
+#### Honesty flags
+
+- The frontend computes the diff in TypeScript on the canvas
+  side, not via a Tauri round-trip. This matches the existing
+  B6 overlay renderer and avoids an extra IPC call on every
+  slider tick. The Rust `compute_diff` is the canonical
+  reference for any non-canvas consumer (CI fixtures, batch
+  comparison, AI-quality scoring).
+- `Structural` uses a left/up neighbour diff, not a full
+  Sobel kernel. Edge sharpness in astrophotos is mostly
+  spatial; a true Sobel adds ~30 LOC and a reference test
+  fixture for marginal accuracy gain. Documented as a
+  future slice.
+- The B11 backend auto-stretch normalizer is not wired yet.
+  Until then, low-magnitude diffs in low-bit-depth regions
+  may read as near-black; this is a known display-side
+  limitation of the canonical §5.4 modes.
+
 ### Slice B4 — CR-07 UX: decisions, comparison sets, metric comparison
 
 **Scope:** Surfaces the B1–B3 backend in the Compare workspace and

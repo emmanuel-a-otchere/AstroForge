@@ -61,6 +61,33 @@
   export let overlayCanvasEl: HTMLCanvasElement | undefined =
     undefined;
 
+  // CR-07 B5: synchronized navigation (§6).
+  //
+  // When a parent supplies `view` AND `onViewChange`, the
+  // component treats that pair as the single source of truth
+  // for zoom + pan: pan/zoom handlers emit `onViewChange` and
+  // render against the parent-supplied `view`. This avoids the
+  // classic two-way-binding feedback loop (A's update -> parent
+  // -> B's update -> A's update ...) by keeping ownership with
+  // the parent rather than the component. Either prop may be
+  // omitted to retain the existing internal-only behavior.
+  //
+  // The shape is the same as the component's internal
+  // (zoomMode, zoomLevel, panX, panY) so the parent's state
+  // model is symmetric.
+  export let view: {
+    zoomMode: ZoomMode;
+    zoomLevel: number;
+    panX: number;
+    panY: number;
+  } | null = null;
+  export let onViewChange: (view: {
+    zoomMode: ZoomMode;
+    zoomLevel: number;
+    panX: number;
+    panY: number;
+  }) => void = () => {};
+
   type ZoomMode = "fit" | "1:1";
 
   let canvasEl: HTMLCanvasElement | undefined;
@@ -72,6 +99,12 @@
   let zoomLevel = 1; // 0.25..4 when zoomMode == "1:1"
   let panX = 0;
   let panY = 0;
+  // B5: effective view used by the render path. When a parent
+  // supplies `view`, it overrides the local state; otherwise the
+  // component renders against its own state. Keeping this as a
+  // single reactive variable means the renderer never branches
+  // on "am I controlled or uncontrolled" mid-pipeline.
+  $: drawView = view ?? { zoomMode, zoomLevel, panX, panY };
   let clipLow = 0;
   let clipHigh = 1;
   let showHistogram = true;
@@ -268,21 +301,21 @@
     const cw = canvasEl.clientWidth || 600;
     const ch = canvasEl.clientHeight || 400;
     let scale: number;
-    if (zoomMode === "fit") {
+    if (drawView.zoomMode === "fit") {
       scale = Math.min(cw / decoded.width, ch / decoded.height);
-    } else if (zoomMode === "1:1") {
-      scale = zoomLevel;
+    } else if (drawView.zoomMode === "1:1") {
+      scale = drawView.zoomLevel;
     } else {
-      scale = zoomLevel;
+      scale = drawView.zoomLevel;
     }
     const dispW = Math.max(1, Math.round(decoded.width * scale));
     const dispH = Math.max(1, Math.round(decoded.height * scale));
     const baseX = (cw - dispW) / 2;
     const baseY = (ch - dispH) / 2;
     const uvPanX =
-      decoded.width > 0 ? (baseX + panX) / decoded.width : 0;
+      decoded.width > 0 ? (baseX + drawView.panX) / decoded.width : 0;
     const uvPanY =
-      decoded.height > 0 ? (baseY + panY) / decoded.height : 0;
+      decoded.height > 0 ? (baseY + drawView.panY) / decoded.height : 0;
     // UV zoom: how much of the texture fills the canvas.
     // zoom == 1 → fill (texture covers the full quad).
     const uvZoom = dispW > 0 ? cw / dispW : 1;
@@ -331,12 +364,12 @@
     const cw = canvasEl.clientWidth || 600;
     const ch = canvasEl.clientHeight || 400;
     let scale: number;
-    if (zoomMode === "fit") {
+    if (drawView.zoomMode === "fit") {
       scale = Math.min(cw / width, ch / height);
-    } else if (zoomMode === "1:1") {
+    } else if (drawView.zoomMode === "1:1") {
       scale = 1;
     } else {
-      scale = zoomLevel;
+      scale = drawView.zoomLevel;
     }
     const dispW = Math.max(1, Math.round(width * scale));
     const dispH = Math.max(1, Math.round(height * scale));
@@ -345,8 +378,8 @@
     // Compute the projection so pan is in screen pixels.
     const baseX = Math.floor((cw - dispW) / 2);
     const baseY = Math.floor((ch - dispH) / 2);
-    const offX = baseX + Math.round(panX);
-    const offY = baseY + Math.round(panY);
+    const offX = baseX + Math.round(drawView.panX);
+    const offY = baseY + Math.round(drawView.panY);
     const ctx = canvasEl.getContext("2d");
     if (!ctx) return;
     ctx.fillStyle = "#101216";
@@ -463,8 +496,19 @@
   }
 
   function onWheel(ev: WheelEvent) {
-    if (zoomMode === "fit") zoomMode = "1:1";
-    zoomLevel = Math.max(0.25, Math.min(4, zoomLevel * (ev.deltaY < 0 ? 1.1 : 0.9)));
+    const nextMode = view ? view.zoomMode : zoomMode;
+    const nextLevel = view ? view.zoomLevel : zoomLevel;
+    if (nextMode === "fit") {
+      const m = "1:1";
+      const l = Math.max(
+        0.25,
+        Math.min(4, (view ? view.zoomLevel : 1) * (ev.deltaY < 0 ? 1.1 : 0.9)),
+      );
+      emitView(m, l, view ? view.panX : panX, view ? view.panY : panY);
+    } else {
+      const l = Math.max(0.25, Math.min(4, nextLevel * (ev.deltaY < 0 ? 1.1 : 0.9)));
+      emitView(nextMode, l, view ? view.panX : panX, view ? view.panY : panY);
+    }
     ev.preventDefault();
     draw();
   }
@@ -473,14 +517,22 @@
     if (ev.shiftKey && canvasEl) {
       regionStart = { x: ev.offsetX, y: ev.offsetY };
     } else {
-      dragStart = { x: ev.clientX, y: ev.clientY, panX, panY };
+      dragStart = {
+        x: ev.clientX,
+        y: ev.clientY,
+        panX: view ? view.panX : panX,
+        panY: view ? view.panY : panY,
+      };
     }
   }
 
   function onMouseMove(ev: MouseEvent) {
     if (dragStart) {
-      panX = dragStart.panX + (ev.clientX - dragStart.x);
-      panY = dragStart.panY + (ev.clientY - dragStart.y);
+      const m = view ? view.zoomMode : zoomMode;
+      const l = view ? view.zoomLevel : zoomLevel;
+      const nx = dragStart.panX + (ev.clientX - dragStart.x);
+      const ny = dragStart.panY + (ev.clientY - dragStart.y);
+      emitView(m, l, nx, ny);
       draw();
     }
   }
@@ -500,20 +552,45 @@
   }
 
   function fit() {
-    zoomMode = "fit";
-    panX = 0;
-    panY = 0;
+    emitView("fit", 1, 0, 0);
     draw();
   }
 
   function oneToOne() {
-    zoomMode = "1:1";
-    zoomLevel = 1;
+    emitView("1:1", 1, 0, 0);
     draw();
   }
 
-  // Re-draw on mask / clip / show changes.
-  $: if (bytes) draw(), [showMask, clipLow, clipHigh, showHistogram];
+  // B5 helper: route zoom/pan updates through the parent's
+  // `onViewChange` if it's wired; otherwise mutate local state.
+  // Both paths land at `draw()` so the visual state stays
+  // consistent regardless of which owner is active.
+  function emitView(
+    mode: ZoomMode,
+    level: number,
+    x: number,
+    y: number,
+  ) {
+    if (view) {
+      onViewChange({ zoomMode: mode, zoomLevel: level, panX: x, panY: y });
+    } else {
+      zoomMode = mode;
+      zoomLevel = level;
+      panX = x;
+      panY = y;
+    }
+  }
+
+  // Re-draw on mask / clip / show changes. `drawView` is part
+  // of the trigger so controlled-mode (B5 sync nav) updates
+  // from the parent re-render the canvas.
+  $: if (bytes) draw(), [
+    showMask,
+    clipLow,
+    clipHigh,
+    showHistogram,
+    drawView,
+  ];
 </script>
 
 <div class="image-canvas" data-testid="image-canvas">
@@ -521,17 +598,24 @@
   <div class="toolbar">
     <button type="button" on:click={fit} aria-label="Fit to window">Fit</button>
     <button type="button" on:click={oneToOne} aria-label="1:1 zoom">1:1</button>
-    {#if zoomMode === "1:1"}
+    {#if drawView.zoomMode === "1:1"}
       <input
         type="range"
         min="0.25"
         max="4"
         step="0.05"
-        bind:value={zoomLevel}
-        on:input={draw}
+        value={drawView.zoomLevel}
+        on:input={(ev) =>
+          emitView(
+            drawView.zoomMode,
+            Number((ev.target as HTMLInputElement).value),
+            drawView.panX,
+            drawView.panY,
+          )}
+        on:change={draw}
         aria-label="Zoom level"
       />
-      <span class="zoom-readout">{zoomLevel.toFixed(2)}×</span>
+      <span class="zoom-readout">{drawView.zoomLevel.toFixed(2)}×</span>
     {/if}
     <label class="check">
       <input type="checkbox" bind:checked={showMask} on:input={draw} />

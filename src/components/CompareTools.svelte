@@ -55,10 +55,18 @@
   // high percentiles default to the astronomy convention
   // 0.5% / 99.5%; the user can disable the stretch via the
   // "Off" button.
-  type StretchMode = "off" | "auto";
+  type StretchMode = "off" | "auto" | "manual";
   let stretchMode: StretchMode = "auto";
   let stretchLowPct = 0.5;
   let stretchHighPct = 99.5;
+  // CR-07 B12: fixed-stretch / n-sigma state. The two
+  // inputs (vLowFixed / vHighFixed) are the explicit cutoffs
+  // used when stretchMode === "manual". nSigmaK is the
+  // multiplier used by the n-sigma button (always computes
+  // fresh stats over the current diff image).
+  let vLowFixed: number = 32;
+  let vHighFixed: number = 220;
+  let nSigmaK: number = 3;
 
   let splitPercent = 50; // 0..100
   let blinkInterval = 1000; // ms
@@ -214,6 +222,11 @@
     // on a 1-2 megapixel canvas).
     if (stretchMode === "auto") {
       applyStretch(out.data);
+    } else if (stretchMode === "manual") {
+      // CR-07 B12: fixed-stretch with the user-supplied
+      // cutoffs (or the cutoffs produced by n-sigma, if the
+      // user pressed the "Apply n-sigma" button).
+      applyFixedStretch(out.data, vLowFixed, vHighFixed);
     }
     ctx.putImageData(out, 0, 0);
   }
@@ -284,6 +297,83 @@
       }
       // Alpha preserved.
     }
+  }
+
+  // CR-07 B12: explicit-cutoff stretch. Mirrors the Rust
+  // `normalize_fixed` in
+  // `crates/astroforge-core/src/difference_normalize.rs`.
+  // Pixels below vLow clamp to 0; above vHigh clamp to 255;
+  // in-range pixels linearly remap to [0, 255]. Alpha is
+  // preserved. vLow >= vHigh is a no-op.
+  function applyFixedStretch(
+    pixels: Uint8ClampedArray,
+    vLow: number,
+    vHigh: number,
+  ): void {
+    if (vLow >= vHigh) return;
+    const range = vHigh - vLow;
+    for (let i = 0; i < pixels.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        const v = pixels[i + c];
+        if (v <= vLow) {
+          pixels[i + c] = 0;
+        } else if (v >= vHigh) {
+          pixels[i + c] = 255;
+        } else {
+          pixels[i + c] = Math.round(
+            ((v - vLow) * 255 + range / 2) / range,
+          );
+        }
+      }
+      // Alpha preserved.
+    }
+  }
+
+  // CR-07 B12: compute mean and standard deviation across
+  // all RGB bytes in the buffer (alpha skipped). Mirrors
+  // the Rust `mean_stddev` helper.
+  function computeMeanStddev(pixels: Uint8ClampedArray): {
+    mean: number;
+    stddev: number;
+  } {
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      sum += pixels[i];
+      sum += pixels[i + 1];
+      sum += pixels[i + 2];
+      count += 3;
+    }
+    if (count === 0) return { mean: 0, stddev: 0 };
+    const mean = sum / count;
+    let varSum = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        const d = pixels[i + c] - mean;
+        varSum += d * d;
+      }
+    }
+    return { mean, stddev: Math.sqrt(varSum / count) };
+  }
+
+  // CR-07 B12: read the current diff canvas, compute mean
+  // and stddev, then write `mean ± k*sigma` (clamped to
+  // [0, 255]) back into the vLowFixed / vHighFixed inputs.
+  // The recompute that follows uses those cutoffs.
+  function applyNSigmaToFixed(): void {
+    if (!diffCanvasEl) return;
+    const ctx = diffCanvasEl.getContext("2d");
+    if (!ctx) return;
+    const w = diffCanvasEl.width;
+    const h = diffCanvasEl.height;
+    const img = ctx.getImageData(0, 0, w, h);
+    const k = Number.isFinite(nSigmaK) && nSigmaK > 0 ? nSigmaK : 1;
+    const { mean, stddev } = computeMeanStddev(img.data);
+    const lo = Math.max(0, Math.min(255, mean - k * stddev));
+    const hi = Math.max(0, Math.min(255, mean + k * stddev));
+    vLowFixed = Math.round(lo);
+    vHighFixed = Math.round(hi);
+    recomputeDifference();
   }
 
   function clamp255(v: number): number {
@@ -565,6 +655,63 @@
           <span class="readout">{stretchHighPct.toFixed(1)}%</span>
         </label>
       {/if}
+      <button
+        type="button"
+        class:active={stretchMode === "manual"}
+        on:click={() => {
+          stretchMode = "manual";
+          recomputeDifference();
+        }}
+        aria-pressed={stretchMode === "manual"}
+      >
+        Manual
+      </button>
+      {#if stretchMode === "manual"}
+        <label class="control">
+          vLow
+          <input
+            type="number"
+            min="0"
+            max="255"
+            step="1"
+            bind:value={vLowFixed}
+            on:input={recomputeDifference}
+            aria-label="Fixed stretch low cutoff"
+          />
+        </label>
+        <label class="control">
+          vHigh
+          <input
+            type="number"
+            min="0"
+            max="255"
+            step="1"
+            bind:value={vHighFixed}
+            on:input={recomputeDifference}
+            aria-label="Fixed stretch high cutoff"
+          />
+        </label>
+        <label class="control">
+          n-sigma k
+          <input
+            type="range"
+            min="1"
+            max="6"
+            step="0.5"
+            bind:value={nSigmaK}
+            aria-label="n-sigma multiplier"
+          />
+          <span class="readout">{nSigmaK.toFixed(1)}×σ</span>
+        </label>
+        <button
+          type="button"
+          class="nsigma-apply"
+          on:click={applyNSigmaToFixed}
+          aria-label="Apply n-sigma cutoffs to vLow/vHigh"
+        >
+          Apply n-sigma
+        </button>
+      {/if}
     {/if}
     {#if mode === "overlay"}
       <label class="control">
@@ -767,6 +914,14 @@
   .stretch button {
     font-size: 11px;
     padding: 4px 8px;
+  }
+  /* CR-07 B12: Manual stretch apply button gets a slight
+     tint so it stands out from the mode toggles. */
+  .nsigma-apply {
+    font-size: 11px;
+    padding: 4px 8px;
+    background: #3a3f4a;
+    color: #fff;
   }
   .control {
     display: inline-flex;

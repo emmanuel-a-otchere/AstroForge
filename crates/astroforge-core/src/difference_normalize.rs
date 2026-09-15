@@ -63,10 +63,11 @@ pub struct StretchStats {
 }
 
 impl StretchStats {
-    /// No-op stretch (v_low == 0, v_high == 255). The
-    /// caller can check `is_noop` to skip the UI readout.
+    /// No-op stretch (v_low == 0, v_high == 255) or
+    /// degenerate range (v_low >= v_high). The caller can
+    /// check `is_noop` to skip the UI readout.
     pub fn is_noop(&self) -> bool {
-        self.v_low == 0 && self.v_high == 255
+        self.v_low == 0 && self.v_high == 255 || self.v_low >= self.v_high
     }
 }
 
@@ -205,6 +206,133 @@ fn walk_histogram(
     (v_low, v_high, below, above)
 }
 
+/// Stretch the input pixels in place from `[v_low, v_high]` to
+/// `[0, 255]` using an explicit pair of cutoffs.
+///
+/// * `v_low` and `v_high` are `u8` (0..=255). If `v_low >= v_high`,
+///   the function is a no-op (returns a noop `StretchStats`).
+/// * Pixels below `v_low` clamp to 0; above `v_high` clamp to 255.
+/// * Alpha bytes (every 4th byte starting at offset 3) are
+///   preserved unchanged.
+/// * This is the canonical "fixed-stretch" mode: it gives
+///   reproducible results across runs (no percentile walk),
+///   which is what threshold-style comparisons and
+///   known-noise-floor workflows need.
+pub fn normalize_fixed(pixels: &mut [u8], v_low: u8, v_high: u8) -> StretchStats {
+    if v_low >= v_high || pixels.is_empty() {
+        return StretchStats {
+            v_low,
+            v_high,
+            below_count: 0,
+            above_count: 0,
+            total: pixels.len() as u32 / 4,
+        };
+    }
+    let mut below = 0u32;
+    let mut above = 0u32;
+    let range = (v_high - v_low) as i32;
+    for (i, px) in pixels.iter_mut().enumerate() {
+        if i % 4 == 3 {
+            // Alpha bytes pass through unchanged.
+            continue;
+        }
+        if *px < v_low {
+            below += 1;
+            *px = 0;
+        } else if *px > v_high {
+            above += 1;
+            *px = 255;
+        } else {
+            let v = *px as i32;
+            *px = (((v - v_low as i32) * 255 + range / 2) / range) as u8;
+        }
+    }
+    StretchStats {
+        v_low,
+        v_high,
+        below_count: below,
+        above_count: above,
+        total: pixels.len() as u32 / 4,
+    }
+}
+
+/// Compute the arithmetic mean and population standard
+/// deviation across all bytes in `pixels`. Alpha bytes
+/// (every 4th byte starting at offset 3) are skipped so
+/// the statistics describe the diff image's luminance, not
+/// its alpha channel.
+pub fn mean_stddev(pixels: &[u8]) -> (f32, f32) {
+    let mut sum = 0.0f64;
+    let mut count = 0u32;
+    for (i, &p) in pixels.iter().enumerate() {
+        if i % 4 == 3 {
+            continue;
+        }
+        sum += p as f64;
+        count += 1;
+    }
+    if count == 0 {
+        return (0.0, 0.0);
+    }
+    let mean = sum / count as f64;
+    let mut var_sum = 0.0f64;
+    for (i, &p) in pixels.iter().enumerate() {
+        if i % 4 == 3 {
+            continue;
+        }
+        let d = p as f64 - mean;
+        var_sum += d * d;
+    }
+    let stddev = (var_sum / count as f64).sqrt();
+    (mean as f32, stddev as f32)
+}
+
+/// Stretch the input pixels in place using an "n-sigma"
+/// cutoff: remap `[mean - k*sigma, mean + k*sigma]` to
+/// `[0, 255]`. Returns the resulting `StretchStats` plus
+/// the computed `mean` and `stddev` so the caller can show
+/// the user what range was picked.
+///
+/// * `k` is the multiplier. Astronomy convention is `k = 3`
+///   (three standard deviations covers ~99.7% of a normal
+///   distribution). The UI sliders expose `k` from 1..6.
+/// * Negative or NaN `k` falls back to `k = 1.0`.
+/// * The clipped endpoints are clamped to `[0, 255]`; if
+///   the resulting range is degenerate, the function no-ops.
+pub fn normalize_n_sigma(pixels: &mut [u8], k: f32) -> (StretchStats, f32, f32) {
+    if pixels.is_empty() {
+        return (
+            StretchStats {
+                v_low: 0,
+                v_high: 255,
+                below_count: 0,
+                above_count: 0,
+                total: 0,
+            },
+            0.0,
+            0.0,
+        );
+    }
+    let k = if k.is_nan() || k <= 0.0 { 1.0 } else { k };
+    let (mean, stddev) = mean_stddev(pixels);
+    let lo = mean - k * stddev;
+    let hi = mean + k * stddev;
+    let v_low = lo.clamp(0.0, 255.0) as u8;
+    let v_high = hi.clamp(0.0, 255.0) as u8;
+    let stats = if v_low >= v_high {
+        StretchStats {
+            v_low,
+            v_high,
+            below_count: 0,
+            above_count: 0,
+            total: pixels.len() as u32 / 4,
+        }
+    } else {
+        normalize_fixed(pixels, v_low, v_high)
+    };
+    (stats, mean, stddev)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +457,164 @@ mod tests {
             total: 100,
         };
         assert!(stats.is_noop());
+    }
+
+    // CR-07 B12: fixed-stretch tests.
+
+    /// Equal images with explicit cutoffs: every pixel is at
+    /// 100, the cutoffs are [50, 150], so the output is
+    /// uniformly 127 (the midpoint of [0, 255] given the
+    /// [50, 150] input range).
+    #[test]
+    fn fixed_stretch_remaps_to_full_gamut() {
+        let mut px = vec![100u8; 4 * 4];
+        // Set alpha to 255 so we can check it's preserved.
+        for i in (3..16).step_by(4) {
+            px[i] = 255;
+        }
+        let stats = normalize_fixed(&mut px, 50, 150);
+        assert_eq!(stats.v_low, 50);
+        assert_eq!(stats.v_high, 150);
+        assert_eq!(stats.below_count, 0);
+        assert_eq!(stats.above_count, 0);
+        // All RGB should remap to roughly the midpoint: (100-50)*255/100 = 127.5.
+        // The implementation rounds half-up, so the result is 128.
+        for (i, &v) in px.iter().enumerate() {
+            if i % 4 == 3 {
+                assert_eq!(v, 255);
+            } else {
+                assert_eq!(v, 128);
+            }
+        }
+    }
+
+    /// Pixels outside the cutoff range clamp to 0 or 255.
+    #[test]
+    fn fixed_stretch_clamps_outside_range() {
+        let mut px = vec![10u8, 20, 30, 255, 200, 210, 220, 255];
+        let stats = normalize_fixed(&mut px, 50, 150);
+        assert_eq!(stats.below_count, 3); // 10, 20, 30 all below 50
+        assert_eq!(stats.above_count, 3); // 200, 210, 220 all above 150
+        assert_eq!(px[0], 0);
+        assert_eq!(px[1], 0);
+        assert_eq!(px[2], 0);
+        assert_eq!(px[4], 255);
+        assert_eq!(px[5], 255);
+        assert_eq!(px[6], 255);
+    }
+
+    /// Alpha bytes are preserved unchanged.
+    #[test]
+    fn fixed_stretch_preserves_alpha() {
+        let mut px = vec![100u8, 100, 100, 128, 100, 100, 100, 64];
+        normalize_fixed(&mut px, 50, 150);
+        assert_eq!(px[3], 128);
+        assert_eq!(px[7], 64);
+    }
+
+    /// `v_low >= v_high` is a no-op (px unchanged).
+    #[test]
+    fn fixed_stretch_invalid_range_is_noop() {
+        let mut px = vec![100u8; 8];
+        let original = px.clone();
+        let stats = normalize_fixed(&mut px, 150, 50);
+        // The function short-circuited; the pixels are unchanged.
+        assert_eq!(px, original);
+        // The returned stats record the caller's intent
+        // (v_low=150, v_high=50) so callers can see that
+        // nothing happened and why.
+        assert_eq!(stats.v_low, 150);
+        assert_eq!(stats.v_high, 50);
+    }
+
+    /// mean_stddev: equal-image -> mean = value, stddev = 0.
+    #[test]
+    fn mean_stddev_uniform_image() {
+        let mut px = vec![100u8; 4 * 4];
+        for i in (3..16).step_by(4) {
+            px[i] = 255;
+        }
+        let (mean, stddev) = mean_stddev(&px);
+        assert_eq!(mean, 100.0);
+        assert_eq!(stddev, 0.0);
+    }
+
+    /// mean_stddev: known distribution -> spot-check the
+    /// arithmetic. The test fixture is a 3-pixel RGBA image
+    /// with R/G/B at (0,100,200), (50,150,250), (255,200,100).
+    /// The first 9 RGB bytes are 0,100,200,50,150,250,255,200,100.
+    /// Sum = 1305, count = 9, mean = 145.
+    /// Variance = ((0-145)^2 + (100-145)^2 + (200-145)^2 + ...
+    ///             (50-145)^2 + (150-145)^2 + (250-145)^2 + ...
+    ///             (255-145)^2 + (200-145)^2 + (100-145)^2) / 9
+    /// The exact value is computed by the test; we just check
+    /// the rounded sum is in the right ballpark.
+    #[test]
+    fn mean_stddev_known_distribution() {
+        let px = vec![
+            0u8, 100, 200, 255, // pixel 0: R=0, G=100, B=200
+            50, 150, 250, 255, // pixel 1: R=50, G=150, B=250
+            255, 200, 100, 255, // pixel 2: R=255, G=200, B=100
+        ];
+        // Alpha is already 255 from the fixture.
+        let (mean, stddev) = mean_stddev(&px);
+        // Sum of 9 RGB values: 0+100+200+50+150+250+255+200+100 = 1305.
+        // Mean = 1305/9 = 145 exactly.
+        assert!((mean - 145.0).abs() < 0.01, "mean={}", mean);
+        // Variance: sum((x - 145)^2) / 9.
+        // We don't hand-compute the stddev; instead assert it's
+        // positive and in a reasonable range (50..120).
+        assert!(stddev > 50.0 && stddev < 120.0, "stddev={}", stddev);
+    }
+
+    /// n-sigma: degenerate (zero stddev) is a no-op.
+    #[test]
+    fn n_sigma_uniform_is_noop() {
+        let mut px = vec![100u8; 4 * 4];
+        for i in (3..16).step_by(4) {
+            px[i] = 255;
+        }
+        let original = px.clone();
+        let (stats, mean, stddev) = normalize_n_sigma(&mut px, 3.0);
+        assert_eq!(mean, 100.0);
+        assert_eq!(stddev, 0.0);
+        assert!(stats.is_noop());
+        assert_eq!(px, original);
+    }
+
+    /// n-sigma: known distribution -> mean - 3*sigma and
+    /// mean + 3*sigma are the cutoffs. With a 3-pixel RGBA
+    /// image (RGB = 0,100,200 / 50,150,250 / 255,200,100) the
+    /// mean is 145 and the stddev > 0, so 3-sigma stretch
+    /// clamps to [0, 255] (degenerate range for the clamp).
+    /// Verify the stats reflect the clamps.
+    #[test]
+    fn n_sigma_clamps_to_byte_extents() {
+        let mut px = vec![0u8, 100, 200, 255, 50, 150, 250, 255, 255, 200, 100, 255];
+        let (stats, mean, stddev) = normalize_n_sigma(&mut px, 3.0);
+        assert!((mean - 145.0).abs() < 0.01, "mean={}", mean);
+        // 3-sigma spans wider than [0, 255] for stddev > ~48,
+        // which is true here (the stddev is around 84).
+        assert_eq!(stats.v_low, 0);
+        assert_eq!(stats.v_high, 255);
+        // The function no-ops on degenerate range, so px is unchanged.
+        let expected = vec![0u8, 100, 200, 255, 50, 150, 250, 255, 255, 200, 100, 255];
+        assert_eq!(px, expected);
+        let _ = stddev;
+    }
+
+    /// n-sigma: negative or NaN k falls back to 1.
+    #[test]
+    fn n_sigma_invalid_k_to_one() {
+        let mut px = vec![100u8; 4 * 4];
+        for i in (3..16).step_by(4) {
+            px[i] = 255;
+        }
+        // Negative k -> degenerate range (stddev = 0).
+        let (stats_neg, _, _) = normalize_n_sigma(&mut px, -3.0);
+        assert!(stats_neg.is_noop());
+        // NaN k -> degenerate range.
+        let (stats_nan, _, _) = normalize_n_sigma(&mut px, f32::NAN);
+        assert!(stats_nan.is_noop());
     }
 }

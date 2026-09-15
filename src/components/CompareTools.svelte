@@ -35,7 +35,7 @@
   export let maskWidthB = 0;
   export let maskHeightB = 0;
 
-  type CompareMode = "side-by-side" | "split" | "blink" | "difference";
+  type CompareMode = "side-by-side" | "split" | "blink" | "difference" | "overlay";
   let mode: CompareMode = "side-by-side";
 
   let splitPercent = 50; // 0..100
@@ -43,6 +43,9 @@
   let blinkVisible: "a" | "b" = "a";
   let blinkPaused = false;
   let diffGain = 4;
+  // CR-07 B6: overlay mode opacity for version B (A is
+  // rendered opaque underneath). 0..100 slider percentage.
+  let overlayOpacity = 50;
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
   let diffCanvasEl: HTMLCanvasElement | undefined;
@@ -50,6 +53,10 @@
   let canvasBEl: HTMLCanvasElement | undefined;
   let canvasAImageData: ImageData | null = null;
   let canvasBImageData: ImageData | null = null;
+  // CR-07 B6: overlay mode reuses the diff stage's read-then-
+  // composite pattern. The overlay canvas holds the blended
+  // output (A + alpha-B); the two source canvases feed it.
+  let overlayCanvasEl: HTMLCanvasElement | undefined;
 
   function startBlink() {
     stopBlink();
@@ -82,15 +89,23 @@
     // version change. We can't call getImageData on a foreign
     // canvas in a single put, but we can read both into a
     // single buffer and combine.
-    if (!canvasAEl || !canvasBEl || !diffCanvasEl) return;
+    if (!canvasAEl || !canvasBEl) return;
     const ctxA = canvasAEl.getContext("2d");
     const ctxB = canvasBEl.getContext("2d");
     if (!ctxA || !ctxB) return;
-    const w = diffCanvasEl.width;
-    const h = diffCanvasEl.height;
+    // CR-07 B6: pick the target canvas based on mode. The
+    // diff stage uses a 512x512 buffer; overlay uses the same
+    // so the hidden-source ImageCanvas mounts have a fixed
+    // pixel grid to draw against.
+    const target =
+      mode === "overlay" ? overlayCanvasEl : diffCanvasEl;
+    if (!target) return;
+    const w = target.width;
+    const h = target.height;
     canvasAImageData = ctxA.getImageData(0, 0, w, h);
     canvasBImageData = ctxB.getImageData(0, 0, w, h);
-    recomputeDifference();
+    if (mode === "difference") recomputeDifference();
+    else if (mode === "overlay") recomputeOverlay();
   }
 
   function recomputeDifference() {
@@ -116,18 +131,62 @@
     ctx.putImageData(out, 0, 0);
   }
 
+  // CR-07 B6: overlay composite. Draw A opaque, then B on top
+  // with the user-controlled opacity. Pixels are read from
+  // the two hidden source canvases (which the existing
+  // ImageCanvas mount fills) once per version change; opacity
+  // changes just re-blend the cached ImageData.
+  function recomputeOverlay() {
+    if (
+      !overlayCanvasEl ||
+      !canvasAImageData ||
+      !canvasBImageData
+    )
+      return;
+    const ctx = overlayCanvasEl.getContext("2d");
+    if (!ctx) return;
+    const a = canvasAImageData.data;
+    const b = canvasBImageData.data;
+    const out = ctx.createImageData(
+      canvasAImageData.width,
+      canvasAImageData.height,
+    );
+    const o = out.data;
+    const alpha = overlayOpacity / 100;
+    const oneMinusAlpha = 1 - alpha;
+    for (let i = 0; i < a.length; i += 4) {
+      o[i] = a[i] * oneMinusAlpha + b[i] * alpha;
+      o[i + 1] = a[i + 1] * oneMinusAlpha + b[i + 1] * alpha;
+      o[i + 2] = a[i + 2] * oneMinusAlpha + b[i + 2] * alpha;
+      o[i + 3] = 255;
+    }
+    ctx.putImageData(out, 0, 0);
+  }
+
   // Resample when the source canvases have rendered.
   $: if (
-    mode === "difference" &&
+    (mode === "difference" || mode === "overlay") &&
     versionIdA &&
     versionIdB &&
     canvasAEl &&
     canvasBEl &&
-    diffCanvasEl
+    ((mode === "difference" && diffCanvasEl) ||
+      (mode === "overlay" && overlayCanvasEl))
   ) {
     // Wait one frame so the source canvases finish rendering,
     // then capture.
     requestAnimationFrame(capturePixelData);
+  }
+
+  // CR-07 B6: overlay recomputes on opacity changes (cheap,
+  // pure re-blend of cached pixels) without re-capturing.
+  $: if (
+    mode === "overlay" &&
+    overlayCanvasEl &&
+    canvasAImageData &&
+    canvasBImageData
+  ) {
+    recomputeOverlay();
   }
 
   function splitClipPath(): string {
@@ -183,6 +242,14 @@
     >
       Difference
     </button>
+    <button
+      type="button"
+      class:active={mode === "overlay"}
+      on:click={() => (mode = "overlay")}
+      aria-pressed={mode === "overlay"}
+    >
+      Overlay
+    </button>
     {#if mode === "split"}
       <label class="control">
         Split
@@ -236,6 +303,21 @@
           aria-label="Difference gain"
         />
         <span class="readout">{diffGain}×</span>
+      </label>
+    {/if}
+    {#if mode === "overlay"}
+      <label class="control">
+        B opacity
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          bind:value={overlayOpacity}
+          on:input={recomputeOverlay}
+          aria-label="Overlay opacity for version B"
+        />
+        <span class="readout">{overlayOpacity}%</span>
       </label>
     {/if}
   </div>
@@ -293,6 +375,44 @@
           height="512"
           data-testid="diff-canvas"
         ></canvas>
+      </div>
+    {:else if mode === "overlay"}
+      <div class="overlay-stage">
+        <div class="hidden-sources" aria-hidden="true">
+          <canvas
+            bind:this={canvasAEl}
+            width="512"
+            height="512"
+          ></canvas>
+          <canvas
+            bind:this={canvasBEl}
+            width="512"
+            height="512"
+          ></canvas>
+          <ImageCanvas
+            versionId={versionIdA}
+            mask={maskA}
+            maskWidth={maskWidthA}
+            maskHeight={maskHeightA}
+          />
+          <ImageCanvas
+            versionId={versionIdB}
+            mask={maskB}
+            maskWidth={maskWidthB}
+            maskHeight={maskHeightB}
+          />
+        </div>
+        <canvas
+          class="overlay-canvas"
+          bind:this={overlayCanvasEl}
+          width="512"
+          height="512"
+          data-testid="overlay-canvas"
+        ></canvas>
+        <div class="overlay-badges" aria-hidden="true">
+          <span class="badge badge-a">A</span>
+          <span class="badge badge-b">B</span>
+        </div>
       </div>
     {:else}
       <div class="split-stage" style:--clip-path={splitClipPath()}>
@@ -405,10 +525,33 @@
     pointer-events: none;
   }
   .blink-stage,
-  .diff-stage {
+  .diff-stage,
+  .overlay-stage {
     position: relative;
     width: 100%;
     height: 100%;
+  }
+  .overlay-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #000;
+  }
+  .overlay-badges {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    display: flex;
+    gap: 4px;
+    pointer-events: none;
+  }
+  .badge-a {
+    background: rgba(74, 144, 255, 0.7);
+    color: #fff;
+  }
+  .badge-b {
+    background: rgba(255, 144, 74, 0.7);
+    color: #fff;
   }
   .hidden-sources {
     position: absolute;

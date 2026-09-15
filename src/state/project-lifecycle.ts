@@ -28,6 +28,7 @@ import { projectContext } from "./project-context";
 import { studioViewport } from "./application";
 import { workspaceState } from "./workspace";
 import { versionStore } from "./versions";
+import { comparisonState } from "./comparison";
 import { resetAiEnhancement } from "./ai-enhancement";
 import {
   activePlan,
@@ -68,6 +69,9 @@ export async function openProject(project: ProjectSummary): Promise<void> {
   // store self-populates as its IPC resolves.
   void workspaceState.load(project);
   void versionStore.load(project.project_id);
+  // CR-07 B4 — comparison sets for the active project. Decisions
+  // load lazily per version via `ensureDecision`.
+  void comparisonState.load(project.project_id);
 }
 
 /**
@@ -88,6 +92,9 @@ export function closeProject(): void {
   // clean slate. Per-image-version data lands in P2+ via
   // `loadAiEnhancementFor` when the user navigates to Enhance.
   resetAiEnhancement();
+  // CR-07 B4 — decisions + comparison sets are project-scoped;
+  // reset alongside the other project stores.
+  comparisonState.reset();
   resetPipelinePlanStore();
 }
 

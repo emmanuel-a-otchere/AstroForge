@@ -423,6 +423,146 @@ export const readImageArtifact = (
     ImageArtifactResponse
   >;
 
+// ─── CR-07 B4 — decisions, comparison sets, metric comparison ────
+//
+// These wrappers consume the B3 persistence commands (rewired to
+// the managed project store in B4) plus the new
+// `compare_version_metrics` command. Serde field names are
+// snake_case; enum variants serialize as snake_case strings.
+
+/** B1 decision state machine, serialized snake_case. */
+export type ImageDecisionState =
+  | "working"
+  | "candidate"
+  | "preferred"
+  | "final"
+  | "rejected"
+  | "reference";
+
+export interface DecisionHistoryEntry {
+  from: ImageDecisionState | null;
+  to: ImageDecisionState;
+  at: string;
+  reason: string | null;
+}
+
+/** The decision record for a single Image Version (B1 §25). */
+export interface ImageDecision {
+  version_id: string;
+  state: ImageDecisionState;
+  history: DecisionHistoryEntry[];
+  decided_at: string;
+}
+
+/** A reusable collection of candidate Image Versions (§16). */
+export interface ComparisonSet {
+  id: string;
+  project_id: string;
+  name: string;
+  version_ids: string[];
+  created_at: string;
+  slot_labels: string[];
+}
+
+export type DeltaDirection =
+  | "improved"
+  | "degraded"
+  | "unchanged"
+  | "inconclusive";
+
+/** One row of the §10 delta table (B2 `MetricDeltaRow`). */
+export interface MetricDeltaRow {
+  kind: string;
+  baseline_value: number | null;
+  compared_value: number | null;
+  direction: DeltaDirection;
+  percent_change: number;
+  materiality_threshold: number;
+  label: string;
+  unit: string;
+  context: string;
+}
+
+/** B4 response: the delta table + §11 summary for a version pair. */
+export interface VersionMetricsComparison {
+  version_id_a: string;
+  version_id_b: string;
+  rows: MetricDeltaRow[];
+  summary: string;
+}
+
+export const saveImageDecision = (decision: ImageDecision): Promise<void> =>
+  invoke("save_image_decision", { decision }) as Promise<void>;
+
+/**
+ * Load the decision for a version, or `null` when no decision row
+ * exists yet (the backend's "not found" error is mapped to `null`
+ * so panels can render the implicit `Working` default without
+ * treating a fresh version as an error).
+ */
+export const loadImageDecision = (
+  versionId: string,
+): Promise<ImageDecision | null> =>
+  (invoke("load_image_decision", { versionId }) as Promise<ImageDecision>).catch(
+    (e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("not found")) return null;
+      throw e;
+    },
+  );
+
+export const listImageDecisionsForProject = (
+  projectId: string,
+): Promise<ImageDecision[]> =>
+  invoke("list_image_decisions_for_project", { projectId }) as Promise<
+    ImageDecision[]
+  >;
+
+/**
+ * Apply a state-machine transition and persist atomically. When no
+ * decision row exists yet the backend creates a fresh `Working`
+ * decision first, so the first user action on a version is simply
+ * the first transition.
+ */
+export const applyImageDecision = (
+  versionId: string,
+  newState: ImageDecisionState,
+  reason?: string,
+): Promise<ImageDecision> =>
+  invoke("apply_image_decision", {
+    request: { version_id: versionId, new_state: newState, reason: reason ?? null },
+  }) as Promise<ImageDecision>;
+
+export const saveComparisonSet = (set: ComparisonSet): Promise<void> =>
+  invoke("save_comparison_set", { set }) as Promise<void>;
+
+export const loadComparisonSet = (setId: string): Promise<ComparisonSet> =>
+  invoke("load_comparison_set", { setId }) as Promise<ComparisonSet>;
+
+export const listComparisonSetsForProject = (
+  projectId: string,
+): Promise<ComparisonSet[]> =>
+  invoke("list_comparison_sets_for_project", { projectId }) as Promise<
+    ComparisonSet[]
+  >;
+
+export const deleteComparisonSet = (setId: string): Promise<boolean> =>
+  invoke("delete_comparison_set", { setId }) as Promise<boolean>;
+
+/**
+ * Compute the §10 metric delta table + §11 summary for a version
+ * pair over their real (applied-artifact) pixels. Errors when
+ * either version has no primary artifact on disk yet — the UI
+ * renders that as an honest "no pixels" notice.
+ */
+export const compareVersionMetrics = (
+  versionIdA: string,
+  versionIdB: string,
+): Promise<VersionMetricsComparison> =>
+  invoke("compare_version_metrics", { versionIdA, versionIdB }) as Promise<
+    VersionMetricsComparison
+  >;
+
 // CR-06 P5 — region-aware mask system. The mask
 // engine in `astroforge-core::masks` produces JSON
 // payloads via `astroforge_core::masks::encoding`;

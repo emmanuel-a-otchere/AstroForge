@@ -22,6 +22,9 @@
   import WorkspaceScreen from "./WorkspaceScreen.svelte";
   import ImageCanvas from "./ImageCanvas.svelte";
   import CompareTools from "./CompareTools.svelte";
+  import DecisionPanel from "./DecisionPanel.svelte";
+  import MetricsTable from "./MetricsTable.svelte";
+  import ComparisonSetList from "./ComparisonSetList.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
 
   let aId = $state<string | null>(null);
@@ -61,6 +64,13 @@
 
   function swap() {
     [aId, bId] = [bId, aId];
+  }
+
+  // CR-07 B4 — apply a saved comparison set's first two versions
+  // back to the A/B pickers.
+  function applySet(versionIdA: string, versionIdB: string) {
+    aId = versionIdA;
+    bId = versionIdB;
   }
 
   function formatDate(iso: string): string {
@@ -295,6 +305,36 @@
     </div>
     {/if}
 
+    {#if aId && bId}
+      <!-- CR-07 B4 — §10/§11 metrics + §17/§18 decisions + §16 sets. -->
+      <div class="compare-extras">
+        <MetricsTable
+          versionIdA={aId}
+          versionIdB={bId}
+          labelA={versionA?.label ?? "A"}
+          labelB={versionB?.label ?? "B"}
+        />
+        <div class="decision-row">
+          <DecisionPanel
+            versionId={aId}
+            versionLabel={versionA?.label ?? "Version A"}
+          />
+          <DecisionPanel
+            versionId={bId}
+            versionLabel={versionB?.label ?? "Version B"}
+          />
+        </div>
+        <ComparisonSetList
+          projectId={$versionStore.project_id ?? ""}
+          currentA={aId}
+          currentB={bId}
+          labelA={versionA?.label ?? "A"}
+          labelB={versionB?.label ?? "B"}
+          onApply={applySet}
+        />
+      </div>
+    {/if}
+
     <p class="hint font-body">
       Both cards reflect the project's durable event log. The
       canvas renders the primary artifact TIFF written by the
@@ -494,6 +534,25 @@
   .status-pill[data-status="in_review"] {
     background: rgba(33, 150, 243, 0.2);
     color: #64b5f6;
+  }
+
+  .compare-extras {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-md);
+    margin-top: var(--sp-md);
+  }
+
+  .decision-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-md);
+  }
+
+  @media (max-width: 900px) {
+    .decision-row {
+      grid-template-columns: 1fr;
+    }
   }
 
   .canvas-mount {

@@ -2,6 +2,76 @@
 
 ## Unreleased
 
+### Slice C-A1 — CR-07: Continue-from-comparison action bar (§19)
+
+**Scope.** Closes CR-07 §19 (Compare → Continue
+Workflow) which the audit marks ⚠️ Partial.
+Adds a 4-button action bar to CompareWorkspace
+that fires when both A and B are selected.
+
+#### Frontend (Svelte)
+
+- `src/components/CompareWorkspace.svelte`:
+  - Imports `studioViewport` + `applyImageDecision`.
+  - New `markPreferred()` async handler that
+    calls `applyImageDecision(bId, "preferred")`.
+  - New `continueEnhancing()` handler that
+    navigates to the Enhance workspace.
+  - New `.continue-bar` toolbar rendered at
+    the bottom of `.compare-extras` with
+    4 CTAs:
+    1. **Mark Preferred (B)**: primary
+       button; wired to the B4
+       `applyImage_decision` IPC.
+    2. **Continue enhancing**: wired to
+       `studioViewport.setView("enhance")`.
+       The Enhance flow derives its source
+       from the project's latest version
+       today; a future slice may add a
+       per-version source override.
+    3. **Create branch**: honest stub
+       with `disabled` + tooltip
+       "Coming in C-A2".
+    4. **Export comparison**: honest
+       stub with `disabled` + tooltip
+       "Coming in C-A3".
+  - Inline error rendering for
+    Mark Preferred failures.
+
+#### Honest flags
+
+- **No backend changes.** Reuses the B4
+  `apply_image_decision` IPC and the existing
+  `studioViewport.setView` mechanism.
+- **No new tests.** Repo has no frontend test
+  runner (svelte-check + manual trace).
+- **No new IPC.** C-A2 + C-A3 will land
+  the Create branch + Export wiring; this
+  slice ships the action bar shape + the
+  one CTA that doesn't need a new IPC.
+- **Continue enhancing is a navigate-only
+  CTA.** It doesn't pass B's id to the
+  Enhance workspace; the Enhance flow
+  uses the latest version as its source.
+  A future slice may add a per-version
+  source override.
+- **Honest stubs (Create branch, Export)
+  ship disabled** with tooltips. The audit's
+  §19 item says "Continue Enhancing /
+  Create Branch / Mark Preferred / Export
+  buttons from the comparison view"; C-A1
+  ships the button shape + the one wired
+  CTA; C-A2 + C-A3 ship the rest.
+
+#### Audit cross-checks
+
+The audit marks §5.5 (overlay) and §11
+(NL summary) as gaps; this slice did NOT
+work on them because both are already
+shipped (overlay in B6; NL summary in B4's
+MetricsTable). The audit is stale on those
+items.
+
 ### Slice B15 — CR-07: RecipeStageTimeline component
 
 **Scope.** Ships a full vertical stage timeline

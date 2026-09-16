@@ -30,6 +30,8 @@
   import ProvenancePanel from "./ProvenancePanel.svelte";
   import RecipeStageTimeline from "./RecipeStageTimeline.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
+  import { studioViewport } from "../state/application";
+  import { applyImageDecision } from "../lib/astroforge-api";
 
   let aId = $state<string | null>(null);
   let bId = $state<string | null>(null);
@@ -199,6 +201,48 @@
     // can move a version to "final"; the timeline card stays
     // honest with "in review" until then.
     return "in_review";
+  }
+
+  // CR-07 C-A1: continue-from-comparison action bar.
+  // Each button wires to either an existing IPC
+  // (Mark Preferred, Continue enhancing) or a
+  // honest "coming in <slice>" stub for the slices
+  // queued later in this tier (Create Branch in
+  // C-A2; Export in C-A3).
+
+  /** Mark the B version as `preferred`. Wired to
+   *  the B4 `apply_image_decision` IPC. Mirrors
+   *  the DecisionPanel pattern; calls the IPC
+   *  directly rather than going through the
+   *  comparison store so this is a one-click
+   *  shortcut from the comparison view. */
+  let markPreferredBusy = $state(false);
+  let markPreferredError = $state<string | null>(null);
+  async function markPreferred(): Promise<void> {
+    if (!bId) return;
+    markPreferredBusy = true;
+    markPreferredError = null;
+    try {
+      await applyImageDecision(bId, "preferred");
+    } catch (e) {
+      markPreferredError =
+        e instanceof Error ? e.message : String(e);
+    } finally {
+      markPreferredBusy = false;
+    }
+  }
+
+  /** Navigate to the Enhance workspace. The
+   *  Enhance flow derives its source from the
+   *  project's latest version (not from a
+   *  CompareWorkspace-chosen one); the button
+   *  is the user's intent signal to "go
+   *  enhance next", not a strict
+   *  hand-off of B's id. A future slice
+   *  may add a per-version source override
+   *  to the Enhance flow. */
+  function continueEnhancing(): void {
+    studioViewport.setView("enhance");
   }
 </script>
 
@@ -559,6 +603,71 @@
           labelB={versionB?.label ?? "B"}
           onApply={applySet}
         />
+        <!-- CR-07 C-A1: continue-from-comparison
+             action bar. Four CTAs that close the
+             comparison loop:
+             1. Mark Preferred (B): wired to
+                applyImageDecision("preferred").
+             2. Continue enhancing: navigates
+                to Enhance workspace with B
+                pre-selected as source.
+             3. Create branch: honest stub;
+                wired in C-A2 (quality profile
+                tier).
+             4. Export: honest stub; wired in
+                C-A3.
+             The bar only renders when both A
+             and B are selected (same gate as
+             the sync-nav controls). -->
+        {#if aId && bId && aId !== bId}
+          <div class="continue-bar" role="toolbar" aria-label="Continue from comparison">
+            <button
+              type="button"
+              class="continue-cta primary"
+              disabled={markPreferredBusy || !bId}
+              onclick={markPreferred}
+              aria-label="Mark version B as Preferred"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">star</span>
+              Mark Preferred (B)
+            </button>
+            <button
+              type="button"
+              class="continue-cta"
+              onclick={continueEnhancing}
+              aria-label="Continue enhancing from version B"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
+              Continue enhancing
+            </button>
+            <button
+              type="button"
+              class="continue-cta"
+              disabled
+              title="Coming in C-A2 (quality profile tier)"
+              aria-label="Create branch from version B (coming soon)"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
+              Create branch
+            </button>
+            <button
+              type="button"
+              class="continue-cta"
+              disabled
+              title="Coming in C-A3"
+              aria-label="Export comparison (coming soon)"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">download</span>
+              Export comparison
+            </button>
+          </div>
+          {#if markPreferredError}
+            <p class="continue-error font-body" role="alert">
+              <span class="material-symbols-outlined" aria-hidden="true">error</span>
+              {markPreferredError}
+            </p>
+          {/if}
+        {/if}
       </div>
     {/if}
 
@@ -761,6 +870,65 @@
   .status-pill[data-status="in_review"] {
     background: rgba(33, 150, 243, 0.2);
     color: #64b5f6;
+  }
+
+  /* CR-07 C-A1: continue-from-comparison
+     action bar. Mirrors the sync-nav-bar
+     visual style; wraps on narrow screens. */
+  .continue-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-sm);
+    padding: var(--sp-sm) var(--sp-md);
+    background: var(--surface-container-high);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+  }
+
+  .continue-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-xs);
+    padding: var(--sp-xs) var(--sp-sm);
+    background: var(--surface-container);
+    color: var(--on-surface);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+
+  .continue-cta:hover:not(:disabled) {
+    background: var(--surface-container-low);
+  }
+
+  .continue-cta:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .continue-cta.primary {
+    background: var(--primary);
+    color: var(--on-primary);
+    border-color: var(--primary);
+  }
+
+  .continue-cta.primary:hover:not(:disabled) {
+    background: var(--primary);
+    opacity: 0.9;
+  }
+
+  .continue-error {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-xs);
+    margin: 0;
+    padding: var(--sp-xs) var(--sp-sm);
+    color: #ef9a9a;
+    background: rgba(244, 67, 54, 0.1);
+    border-left: 3px solid #f44336;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
   }
 
   .compare-extras {

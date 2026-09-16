@@ -27,6 +27,7 @@
   import ComparisonSetList from "./ComparisonSetList.svelte";
   import RegionPicker, { type RegionScope } from "./RegionPicker.svelte";
   import VersionDag from "./VersionDag.svelte";
+  import ProvenancePanel from "./ProvenancePanel.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
 
   let aId = $state<string | null>(null);
@@ -515,6 +516,24 @@
             versionLabel={versionB?.label ?? "Version B"}
           />
         </div>
+        <!-- CR-07 B14: provenance panel (§13/§14).
+             Two instances (A | B) mirror the
+             DecisionPanel pattern. The panels fetch
+             their own data on versionId change via
+             the B13c provenanceStore; the store's
+             in-flight stale-load guard means two
+             panels pointing at different versions
+             don't fight each other. -->
+        <div class="provenance-row">
+          <ProvenancePanel
+            versionId={aId}
+            versionLabel={versionA?.label ?? "Version A"}
+          />
+          <ProvenancePanel
+            versionId={bId}
+            versionLabel={versionB?.label ?? "Version B"}
+          />
+        </div>
         <ComparisonSetList
           projectId={$versionStore.project_id ?? ""}
           currentA={aId}
@@ -742,6 +761,23 @@
 
   @media (max-width: 900px) {
     .decision-row {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* CR-07 B14: provenance-row mirrors the
+     decision-row layout so the two
+     DecisionPanel | ProvenancePanel pairs sit
+     side by side for A vs B. The narrow-screen
+     collapse also matches. */
+  .provenance-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-md);
+  }
+
+  @media (max-width: 900px) {
+    .provenance-row {
       grid-template-columns: 1fr;
     }
   }

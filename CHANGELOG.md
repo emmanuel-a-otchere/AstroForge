@@ -2,6 +2,70 @@
 
 ## Unreleased
 
+### Slice B14 — CR-07: ProvenancePanel component
+
+**Scope.** Surfaces the B13c live `Recipe` (or
+honest "not recorded" state) for the two
+selected Image Versions in the Compare workspace.
+Closes audit items 311 ("AI processing is
+identified") and the §13/§14 half of CR-07.
+
+#### Frontend (Svelte)
+
+- `src/components/ProvenancePanel.svelte` (NEW):
+  renders five states (loading / error / empty
+  "not recorded" / loaded-recipe / idle). When
+  the recipe is present, surfaces:
+  - **Identity**: Recipe name, description,
+    target type, version, branch, created-at.
+  - **Integrity badges**: Perceptual /
+    Deterministic / Seed recorded (active
+    badges are green-tinted).
+  - **Model list**: `ModelUsage` rows with
+    Deterministic / Perceptual type tags.
+  - **Stage preview**: first 3 stages
+    (numbered, with `disabled` annotation);
+    the full vertical timeline ships in B15.
+- `src/components/CompareWorkspace.svelte`:
+  - Imports `ProvenancePanel`.
+  - New `.provenance-row` grid that mirrors
+    the existing `.decision-row` layout: two
+    ProvenancePanels side by side, one per
+    A/B selection. Collapses to a single column
+    below 900px (same breakpoint as
+    `.decision-row`).
+  - The two panels each call
+    `provenanceStore.load(versionId)` on
+    `versionId` change; the B13c store's
+    in-flight stale-load guard means they
+    don't fight each other when the user
+    changes A and B in quick succession.
+
+#### Honest flags
+
+- **No backend changes.** The B13c IPC is
+  reused; this slice is pure Svelte.
+- **No new tests.** The repo has no
+  frontend test runner (svelte-check + manual
+  trace is the established pattern; same as
+  B5-B8).
+- **Per-project lookup limitation inherited**
+  (B9 store consolidation): the panel
+  renders "Version not found" if the user is
+  in Project A and the version is from
+  Project B. Pre-existing, not new in B14.
+- **Profile-picker in `EnhancementStudio`
+  is still not implemented** (separate UI
+  slice). Until that lands, every AI-applied
+  version renders the "Profile not recorded"
+  state. B14 ships the panel that *receives*
+  the data; B15+ ships the timeline; the
+  picker is a future slice.
+- **Stages preview is intentionally limited**
+  to 3 rows in B14. The full vertical
+  timeline (timestamps, op parameters,
+  per-stage model usage) is B15.
+
 ### Slice B13c — CR-07: recipe_get_for_image_version IPC + provenance store
 
 **Scope.** Adds the lookup chain that connects a given

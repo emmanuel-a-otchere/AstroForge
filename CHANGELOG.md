@@ -2,6 +2,78 @@
 
 ## Unreleased
 
+### Slice C-A2 — CR-07: Side-by-side comparison export (§30)
+
+**Scope.** Closes CR-07 §30 (Export From
+Comparison) which the audit marks ⚠️ Partial.
+Lands a real PNG export of the side-by-side
+composite (A | B) directly from the
+comparison view.
+
+#### Frontend (Svelte + lib)
+
+- `src/lib/comparison-export.ts` (NEW, 320 LOC):
+  - `exportComparisonComposite(opts)`:
+    parallel-loads A and B's primary artifact
+    bytes via the existing `read_image_artifact`
+    IPC, decodes the 16-bit TIFF inline to an
+    RGBA Uint8ClampedArray, paints both onto
+    an off-screen canvas at a chosen panel
+    width (default 1024 px) with a 16 px
+    gutter, draws A and B labels, and
+    returns a PNG Blob via `canvas.toBlob`.
+  - `downloadBlob(blob, filename)`: triggers
+    a browser download via `<a download>`
+    + object URL revoke.
+  - Inline 16-bit TIFF decoder (grayscale
+    and RGB, uncompressed). Mirrors the
+    approach in `ImageCanvas.svelte` but
+    outputs 8-bit RGBA since the export
+    canvas doesn't need HDR data.
+- `src/components/CompareWorkspace.svelte`:
+  - Imports `exportComparisonComposite` +
+    `downloadBlob`.
+  - New `exportComposite()` async handler
+    that calls the lib and downloads the
+    result with a timestamped filename
+    (`astroforge-comparison-<ISO>.png`).
+  - The C-A1 Export stub is now wired
+    (no longer `disabled`); button shows
+    "Exporting…" while busy.
+  - Inline error rendering for export
+    failures (`Export failed: <msg>`).
+
+#### Honest flags
+
+- **No backend changes.** Reuses the
+  existing `read_image_artifact` IPC.
+- **No new tests.** Repo has no frontend
+  test runner (svelte-check + manual
+  trace; same as B5-B8, B14, B15, C-A1).
+- **PNG only.** JPEG support is trivial
+  to add but not in this slice.
+- **Single-frame composite.** Does not
+  encode comparison mode (overlay, blink,
+  split) as animation frames.
+- **No "analytical report" export.**
+  That covers the second bullet of §30;
+  ships in a future slice.
+- **No zoom / pan / region state.** The
+  export is a clean side-by-side at the
+  source images' aspect ratio, not a
+  pixel-faithful copy of the on-screen
+  canvas.
+
+#### Audit cross-checks
+
+§22 (Quality Profiles) remains genuinely
+missing in the codebase and is not part
+of this slice; it requires a backend enum,
+DB column, Recipe tie-in, and frontend
+picker, and is a multi-PR effort. It is
+moved to a future Tier C paperwork
+tranche.
+
 ### Slice C-A1 — CR-07: Continue-from-comparison action bar (§19)
 
 **Scope.** Closes CR-07 §19 (Compare → Continue

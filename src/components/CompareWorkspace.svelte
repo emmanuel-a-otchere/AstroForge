@@ -32,6 +32,10 @@
   import { versionStore, type ImageVersion } from "../state/versions";
   import { studioViewport } from "../state/application";
   import { applyImageDecision } from "../lib/astroforge-api";
+  import {
+    exportComparisonComposite,
+    downloadBlob,
+  } from "../lib/comparison-export";
 
   let aId = $state<string | null>(null);
   let bId = $state<string | null>(null);
@@ -243,6 +247,41 @@
    *  to the Enhance flow. */
   function continueEnhancing(): void {
     studioViewport.setView("enhance");
+  }
+
+  // CR-07 C-A2: side-by-side composite export (§30).
+  // Renders an off-screen canvas with A | B and
+  // triggers a browser download. The mode note
+  // surfaces the current comparison mode so the
+  // exported PNG is self-describing.
+  let exportBusy = $state(false);
+  let exportError = $state<string | null>(null);
+  async function exportComposite(): Promise<void> {
+    if (!aId || !bId) return;
+    exportBusy = true;
+    exportError = null;
+    try {
+      const result = await exportComparisonComposite({
+        versionAId: aId,
+        versionBId: bId,
+        labelA: versionA?.label ?? "A",
+        labelB: versionB?.label ?? "B",
+        panelWidth: 1024,
+        gutter: 16,
+        background: "#000000",
+        modeNote: undefined,
+      });
+      const stamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .slice(0, 19);
+      const filename = `astroforge-comparison-${stamp}.png`;
+      downloadBlob(result.blob, filename);
+    } catch (e) {
+      exportError = e instanceof Error ? e.message : String(e);
+    } finally {
+      exportBusy = false;
+    }
   }
 </script>
 
@@ -653,18 +692,24 @@
             <button
               type="button"
               class="continue-cta"
-              disabled
-              title="Coming in C-A3"
-              aria-label="Export comparison (coming soon)"
+              disabled={exportBusy || !aId || !bId}
+              onclick={exportComposite}
+              aria-label="Export comparison as side-by-side PNG"
             >
               <span class="material-symbols-outlined" aria-hidden="true">download</span>
-              Export comparison
+              {exportBusy ? "Exporting…" : "Export comparison"}
             </button>
           </div>
           {#if markPreferredError}
             <p class="continue-error font-body" role="alert">
               <span class="material-symbols-outlined" aria-hidden="true">error</span>
               {markPreferredError}
+            </p>
+          {/if}
+          {#if exportError}
+            <p class="continue-error font-body" role="alert">
+              <span class="material-symbols-outlined" aria-hidden="true">error</span>
+              Export failed: {exportError}
             </p>
           {/if}
         {/if}

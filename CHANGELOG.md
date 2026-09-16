@@ -2,6 +2,65 @@
 
 ## Unreleased
 
+### Slice B13b — CR-07: apply round populates `recipe_id`
+
+**Scope.** Wires the `recipe_id` from the apply round's
+request through to the new `ImageVersion` row so the
+field is no longer hard-coded to NULL. B13b is the
+**second half of the data-model link**: B13a added the
+column + read path; B13b adds the producer. No UI yet;
+B14+ will surface the value in the ProvenancePanel.
+
+#### Backend (Rust)
+
+- `src-tauri/src/commands_ai_enhancement.rs`:
+  - `ApplyAiOperationRequest` gains `recipe_id: Option<String>`
+    (serde-defaulted, so legacy JSON payloads without
+    the field still deserialise and the apply round
+    writes NULL — the same behavior as B13a).
+  - The apply round's `ImageVersion` construction in
+    `enhancement_apply_operation` now sets
+    `recipe_id: request.recipe_id.clone()` instead of
+    `None`. The B13a comment pointing at B13b is
+    replaced with a comment pointing at B14 (the
+    ProvenancePanel).
+  - 2 new unit tests in the `mod tests` block:
+    `apply_request_recipe_id_defaults_to_none`
+    (legacy JSON without the field → `None`) and
+    `apply_request_recipe_id_round_trips`
+    (recipe_id in JSON → `Some(...)`).
+
+#### Frontend (TypeScript)
+
+- `src/lib/astroforge-api.ts`:
+  - `ApplyAiOperationRequest` gains `recipe_id?: string | null`
+    (optional, so no existing caller breaks).
+
+#### Honest flags
+
+- **Caller behavior unchanged.** `EnhancementStudio.svelte:onApplyOperation`
+  (the only caller) does not pass a profile id today
+  and continues to not pass one. The wiring is in place
+  for the future profile-picker slice; until that lands,
+  every apply round still writes `recipe_id = NULL`.
+- **No back-fill helper in this slice.** Legacy rows
+  (including the B13a-era test rows in any user's DB)
+  stay NULL. A back-fill needs a project↔profile binding
+  that doesn't exist yet; deferred to a separate slice
+  that introduces the project-level profile anchor.
+- **The 2 B13b tests live in `src-tauri`**, which the
+  slice skill notes is binary-only and OUTSIDE the
+  cargo workspace. CI's `cargo test --workspace` step
+  does not see them; CI's `rust` job runs
+  `cd src-tauri && cargo test` separately, which does.
+  The workspace test count stays at 953 (B13a's 1 new
+  test is the only one that shows up in the workspace
+  totals; B13b's 2 tests show up in the `rust` CI job
+  output).
+- **No `src-tauri/Cargo.lock` mutation needed** (no new
+  deps; the changes are struct fields + serde attrs +
+  tests).
+
 ### Slice B13a — CR-07: per-ImageVersion Recipe link (provenance schema)
 
 **Scope:** Adds the missing data model link between an

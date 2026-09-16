@@ -365,6 +365,14 @@ export interface ApplyAiOperationRequest {
   operation_id: string;
   parameters_json: string;
   preview_id?: string | null;
+  // CR-07 B13b: optional Recipe profile id (the
+  // `profile_id` returned from `recipe_list`). When set,
+  // the apply round persists it on the new ImageVersion
+  // row so the ProvenancePanel (B14) can surface the
+  // Recipe. Null/undefined for callers without a profile
+  // anchor (today: all of them, since EnhancementStudio
+  // doesn't surface a profile picker yet).
+  recipe_id?: string | null;
 }
 
 export interface ApplyAiOperationResponse {

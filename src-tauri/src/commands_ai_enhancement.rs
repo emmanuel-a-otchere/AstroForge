@@ -714,6 +714,16 @@ pub struct ApplyAiOperationRequest {
     /// inside the mask and the §37 segmentation-leakage
     /// gate compares included/excluded deltas.
     pub mask_id: Option<String>,
+    /// CR-07 B13b: optional Recipe profile id (the
+    /// `profile_id` from `RecipeStore::profile_id_for`).
+    /// When set, the apply round writes it to the new
+    /// ImageVersion's `recipe_id` column so the
+    /// ProvenancePanel (B14) can surface which Recipe
+    /// produced this version. None for legacy apply
+    /// calls (the field is brand new) and for apply
+    /// rounds that aren't anchored on a named profile.
+    #[serde(default)]
+    pub recipe_id: Option<String>,
 }
 
 /// CR-06 P4 — response: the new Image Version + the
@@ -822,15 +832,18 @@ pub fn enhancement_apply_operation(
         source_version_id: Some(request.source_image_version_id.clone()),
         created_at: now_iso.clone(),
         hidden: false,
-        // CR-07 B13a: the apply request today does not carry a
-        // recipe_id; the apply round produces a new Image Version
-        // from the AI op parameters, not a named Recipe profile.
-        // B13b (follow-up) will plumb the recipe_id through the
-        // request once the EnhancementApplyRequest grows the
-        // field. For now this column is NULL and the
-        // ProvenancePanel surfaces "Profile not recorded" for
-        // AI-applied versions.
-        recipe_id: None,
+        // CR-07 B13b: the apply round now threads the
+        // optional `recipe_id` from the request through
+        // to the new ImageVersion row. None for callers
+        // that don't have a profile anchor (today: all
+        // of them, since EnhancementStudio doesn't surface
+        // a profile picker yet). The ProvenancePanel (B14)
+        // will surface "Profile not recorded" when this
+        // is None; once a profile-picker ships, the
+        // Studio passes the chosen profile id here and
+        // the panel shows the Recipe name + integrity
+        // badge.
+        recipe_id: request.recipe_id.clone(),
     };
     with_store(&state, |s| s.upsert_image_version(&version).map_err(|e| e.to_string()))?;
     let ai_op_id = format!("op_{}", new_id_suffix());
@@ -1640,5 +1653,45 @@ mod tests {
             }
         }
         assert_eq!(read_tiff_dimensions(&tiff), None);
+    }
+
+    // ─── CR-07 B13b: recipe_id wiring on ApplyAiOperationRequest
+
+    /// Deserialize a request without `recipe_id` and assert
+    /// it deserialises to `None`. The B13a apply round wrote
+    /// NULL because the field didn't exist on the request
+    /// struct yet; the B13b struct is `#[serde(default)]` so
+    /// legacy callers keep working.
+    #[test]
+    fn apply_request_recipe_id_defaults_to_none() {
+        let json = r#"{
+            "project_id": "p",
+            "source_image_version_id": "v0",
+            "operation_id": "denoise",
+            "parameters_json": "{}",
+            "preview_id": null,
+            "mask_id": null
+        }"#;
+        let r: super::ApplyAiOperationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(r.recipe_id, None);
+    }
+
+    /// Deserialize a request with `recipe_id: Some(...)` and
+    /// assert the field round-trips. The apply round's
+    /// ImageVersion construction (lines ~822) threads this
+    /// value through to the `recipe_id` column.
+    #[test]
+    fn apply_request_recipe_id_round_trips() {
+        let json = r#"{
+            "project_id": "p",
+            "source_image_version_id": "v0",
+            "operation_id": "denoise",
+            "parameters_json": "{}",
+            "preview_id": null,
+            "mask_id": null,
+            "recipe_id": "prof_deep_sky_balanced"
+        }"#;
+        let r: super::ApplyAiOperationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(r.recipe_id.as_deref(), Some("prof_deep_sky_balanced"));
     }
 }

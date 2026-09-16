@@ -70,6 +70,7 @@ fn source_image_version() -> ImageVersion {
         source_version_id: None,
         created_at: "2026-09-11 12:00:00 UTC".into(),
         hidden: false,
+        recipe_id: None,
     }
 }
 
@@ -206,6 +207,7 @@ fn result_image_version() -> ImageVersion {
         source_version_id: Some("ver_source".into()),
         created_at: "2026-09-11 12:00:08 UTC".into(),
         hidden: false,
+        recipe_id: None,
     }
 }
 

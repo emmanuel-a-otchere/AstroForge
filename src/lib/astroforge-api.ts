@@ -154,6 +154,11 @@ export interface ImageVersion {
   source_version_id: string | null;
   created_at: string;
   hidden: boolean;
+  // CR-07 B13a: profile that produced this image version.
+  // null for legacy rows + AI-applied versions until B13b
+  // wires the apply round to populate it. The ProvenancePanel
+  // renders "Profile not recorded" in that case.
+  recipe_id: string | null;
 }
 
 export interface ImageVersionListResponse {
@@ -384,6 +389,9 @@ export interface ImageVersionJson {
   source_version_id: string | null;
   created_at: string;
   hidden: boolean;
+  // CR-07 B13a: profile that produced this image version.
+  // See the matching note on the `ImageVersion` interface.
+  recipe_id: string | null;
 }
 
 export const imageVersionListForProject = (

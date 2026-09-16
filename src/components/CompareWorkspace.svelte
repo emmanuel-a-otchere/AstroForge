@@ -29,6 +29,7 @@
   import VersionDag from "./VersionDag.svelte";
   import ProvenancePanel from "./ProvenancePanel.svelte";
   import RecipeStageTimeline from "./RecipeStageTimeline.svelte";
+  import QualityProfilePicker from "./QualityProfilePicker.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
   import { studioViewport } from "../state/application";
   import { applyImageDecision } from "../lib/astroforge-api";
@@ -36,6 +37,10 @@
     exportComparisonComposite,
     downloadBlob,
   } from "../lib/comparison-export";
+  import {
+    DEFAULT_QUALITY_PROFILE,
+    type QualityProfile as QualityProfileT,
+  } from "../lib/astroforge-api";
 
   let aId = $state<string | null>(null);
   let bId = $state<string | null>(null);
@@ -256,6 +261,21 @@
   // exported PNG is self-describing.
   let exportBusy = $state(false);
   let exportError = $state<string | null>(null);
+
+  // CR-07 §22: Quality Profile picker state.
+  // Holds the user's current selection. Defaults
+  // to `natural` to match the Rust default. The
+  // picker's `onChange` updates this value; the
+  // picker reads from it. Persistence to a
+  // Recipe or to an apply request lands in a
+  // future slice (the picker is "view + intent"
+  // today, not "save").
+  let selectedQualityProfile = $state<QualityProfileT>(
+    DEFAULT_QUALITY_PROFILE,
+  );
+  function handleQualityProfileChange(next: QualityProfileT): void {
+    selectedQualityProfile = next;
+  }
   async function exportComposite(): Promise<void> {
     if (!aId || !bId) return;
     exportBusy = true;
@@ -634,6 +654,24 @@
             versionLabel={versionB?.label ?? "Version B"}
           />
         </div>
+        <!-- CR-07 §22: Quality Profile picker.
+             Renders the 4-variant catalog fetched
+             via `quality_profile_list`. The user
+             can pick a profile; the selection is
+             held in local state and surfaces
+             downstream in future slices. -->
+        <div class="quality-profile-row">
+          <QualityProfilePicker
+            value={selectedQualityProfile}
+            onChange={handleQualityProfileChange}
+            label="Quality Profile (preview)"
+          />
+          <p class="hint font-body">
+            Profile selection will be honored when running AI enhancements
+            from the comparison view. Persistence to a Recipe lands in a
+            future slice.
+          </p>
+        </div>
         <ComparisonSetList
           projectId={$versionStore.project_id ?? ""}
           currentA={aId}
@@ -974,6 +1012,26 @@
     border-left: 3px solid #f44336;
     border-radius: var(--radius-sm);
     font-size: 0.85rem;
+  }
+
+  /* CR-07 §22: Quality Profile picker row.
+     Sits between the stage timeline and the
+     comparison-set list. */
+  .quality-profile-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-sm);
+    padding: var(--sp-sm);
+    background: var(--surface-container);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+  }
+
+  .quality-profile-row .hint {
+    margin: 0;
+    color: var(--on-surface-variant);
+    font-size: 0.8rem;
+    line-height: 1.4;
   }
 
   .compare-extras {

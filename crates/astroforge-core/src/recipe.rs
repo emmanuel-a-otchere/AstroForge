@@ -54,6 +54,10 @@ pub struct Recipe {
     /// Reserved for future profile metadata; currently unused.
     #[serde(default)]
     pub flags: Vec<String>,
+    /// CR-07 §22: Quality Profile axis. Defaults to `Natural`
+    /// for legacy Recipes that did not carry this field.
+    #[serde(default)]
+    pub quality_profile: QualityProfile,
 }
 
 fn default_version() -> u32 {
@@ -93,6 +97,68 @@ pub enum ModelType {
     Perceptual,
 }
 
+/// CR-07 §22: Quality Profile axis.
+///
+/// Optional profile selection on a Recipe or an
+/// applied ImageVersion. Independent of
+/// `target_type` and of the per-stage params:
+/// the profile is the user's "what kind of
+/// output do I want" answer, and the stages are
+/// the operational realization.
+///
+/// Serialized as the variant name string so
+/// legacy Recipes (without the field) decode
+/// to `Natural` via `serde(default)`.
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum QualityProfile {
+    /// Preserve the original aesthetic; minimal
+    /// intervention. Default for legacy data.
+    #[default]
+    Natural,
+    /// Preserve fine structure; resist
+    /// sharpening; favour detail over smoothness.
+    Detail,
+    /// Smooth noise aggressively; favour
+    /// smoothness over detail.
+    Clean,
+    /// Balanced for publication output:
+    /// mild smoothing, mild sharpening, strong
+    /// integrity gating.
+    Publication,
+}
+
+impl QualityProfile {
+    /// All four variants in display order. Used
+    /// by the frontend picker.
+    pub const ALL: [QualityProfile; 4] = [
+        QualityProfile::Natural,
+        QualityProfile::Detail,
+        QualityProfile::Clean,
+        QualityProfile::Publication,
+    ];
+
+    /// Short display label (e.g. "Natural").
+    pub fn label(self) -> &'static str {
+        match self {
+            QualityProfile::Natural => "Natural",
+            QualityProfile::Detail => "Detail",
+            QualityProfile::Clean => "Clean",
+            QualityProfile::Publication => "Publication",
+        }
+    }
+
+    /// One-line description for the picker UI.
+    pub fn description(self) -> &'static str {
+        match self {
+            QualityProfile::Natural => "Preserve original aesthetic; minimal intervention.",
+            QualityProfile::Detail => "Preserve fine structure; resist sharpening.",
+            QualityProfile::Clean => "Smooth noise aggressively; favour smoothness.",
+            QualityProfile::Publication => "Balanced for publication; mild smoothing + sharpening.",
+        }
+    }
+}
+
 impl Recipe {
     /// Build a new v2 Recipe. The current schema is always produced.
     pub fn new(name: &str, target_type: &str) -> Self {
@@ -114,6 +180,7 @@ impl Recipe {
             branch: "main".into(),
             created_at: String::new(),
             flags: Vec::new(),
+            quality_profile: QualityProfile::default(),
         }
     }
 
@@ -562,5 +629,71 @@ mod tests {
         let result = apply_recipe(&r, &[]).unwrap();
         let ids: Vec<&str> = result.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["stretch"], "disabled denoise must be skipped");
+    }
+
+    // CR-07 §22: QualityProfile coverage.
+
+    #[test]
+    fn test_quality_profile_default_is_natural() {
+        let r = Recipe::new("X", "y");
+        assert_eq!(r.quality_profile, QualityProfile::Natural);
+        assert_eq!(QualityProfile::default(), QualityProfile::Natural);
+    }
+
+    #[test]
+    fn test_quality_profile_all_returns_four_variants() {
+        assert_eq!(QualityProfile::ALL.len(), 4);
+        // Display order: Natural, Detail, Clean, Publication.
+        assert_eq!(QualityProfile::ALL[0], QualityProfile::Natural);
+        assert_eq!(QualityProfile::ALL[1], QualityProfile::Detail);
+        assert_eq!(QualityProfile::ALL[2], QualityProfile::Clean);
+        assert_eq!(QualityProfile::ALL[3], QualityProfile::Publication);
+    }
+
+    #[test]
+    fn test_quality_profile_label_and_description() {
+        assert_eq!(QualityProfile::Natural.label(), "Natural");
+        assert_eq!(QualityProfile::Detail.label(), "Detail");
+        assert_eq!(QualityProfile::Clean.label(), "Clean");
+        assert_eq!(QualityProfile::Publication.label(), "Publication");
+
+        // Every variant must have a non-empty
+        // description (used by the frontend picker).
+        for v in QualityProfile::ALL {
+            assert!(!v.description().is_empty(), "{:?} has empty description", v);
+        }
+    }
+
+    #[test]
+    fn test_quality_profile_legacy_recipe_defaults_to_natural() {
+        // A Recipe JSON without the quality_profile
+        // field (legacy data) must decode as Natural.
+        let legacy = r#"{
+            "schema_version": "2.0",
+            "name": "Legacy",
+            "description": "",
+            "target_type": "deep_sky",
+            "stages": [],
+            "required_models": [],
+            "integrity": {
+                "perceptual_models_used": false,
+                "deterministic_models_used": false,
+                "seed_recorded": false,
+                "models": []
+            }
+        }"#;
+        let r: Recipe = serde_json::from_str(legacy).unwrap();
+        assert_eq!(r.quality_profile, QualityProfile::Natural);
+    }
+
+    #[test]
+    fn test_quality_profile_serde_round_trip_all_variants() {
+        for v in QualityProfile::ALL {
+            let mut r = Recipe::new("X", "y");
+            r.quality_profile = v;
+            let json = serde_json::to_string(&r).unwrap();
+            let back: Recipe = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.quality_profile, v, "round-trip failed for {:?}", v);
+        }
     }
 }

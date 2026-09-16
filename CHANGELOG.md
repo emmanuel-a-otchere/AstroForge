@@ -2,6 +2,95 @@
 
 ## Unreleased
 
+### Slice C-A3 — CR-07: Quality Profile picker (§22)
+
+**Scope.** Closes CR-07 §22 (Quality Profiles) which
+the audit marks ❌ Missing. Lands the full vertical:
+backend enum + Recipe field + IPC + frontend picker
++ integration into CompareWorkspace.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/recipe.rs`:
+  - New `QualityProfile` enum with 4 variants:
+    `Natural` (default), `Detail`, `Clean`,
+    `Publication`. Derives `Default` (variant =
+    `Natural`), `Serialize`, `Deserialize`
+    (lowercase), `PartialEq`, `Eq`, `Copy`.
+  - Helper methods on `QualityProfile`:
+    `ALL` (display order), `label()`,
+    `description()`.
+  - New `quality_profile` field on `Recipe`
+    (serde-defaulted to `Natural` for backward
+    compatibility with legacy data).
+  - `Recipe::new` sets the default.
+  - 5 new tests in the test module:
+    - `test_quality_profile_default_is_natural`
+    - `test_quality_profile_all_returns_four_variants`
+    - `test_quality_profile_label_and_description`
+    - `test_quality_profile_legacy_recipe_defaults_to_natural`
+    - `test_quality_profile_serde_round_trip_all_variants`
+- `src-tauri/src/main.rs`:
+  - New `QualityProfileInfo` struct (camelCase
+    JSON shape with `id`, `label`, `description`).
+  - New `quality_profile_list` Tauri command
+    returning the 4-variant catalog.
+  - Registered in `invoke_handler`.
+
+#### Frontend (TS + Svelte)
+
+- `src/lib/astroforge-api.ts`:
+  - New `QualityProfileInfoJson` interface.
+  - New `qualityProfileList()` IPC wrapper.
+  - New `QUALITY_PROFILES` tuple + `QualityProfile`
+    type + `DEFAULT_QUALITY_PROFILE` const +
+    `isQualityProfile()` type guard.
+- `src/components/QualityProfilePicker.svelte`
+  (NEW, 130 LOC):
+  - Svelte 5 runes (`$state`, `$effect`,
+    `$derived.by`, `$props`).
+  - Loads the catalog on mount via
+    `qualityProfileList()`. Renders a `<select>`
+    with the 4 variants + a one-line description
+    underneath. Auto-syncs to `Natural` if the
+    parent's value is unknown.
+- `src/components/CompareWorkspace.svelte`:
+  - Imports `QualityProfilePicker` +
+    `DEFAULT_QUALITY_PROFILE` + `QualityProfile`
+    type.
+  - New local `selectedQualityProfile` `$state`
+    + `handleQualityProfileChange()` callback.
+  - New `.quality-profile-row` block in
+    `.compare-extras` rendering the picker with
+    an honest "preview" label + a hint about
+    persistence landing in a future slice.
+
+#### Honest flags
+
+- **No recipe persistence yet.** The picker
+  captures the user's selection in local
+  component state. Persisting to a Recipe
+  (and threading through `ApplyAiOperationRequest`)
+  is a follow-up slice (the `quality_profile`
+  field is on `Recipe`; the next slice wires
+  the save flow and the apply-round flow).
+- **No apply-round integration yet.** Same
+  reason. The Rust enum + IPC + picker
+  vertical lands first; the data-flow
+  vertical lands in the follow-up.
+- **No new tests for the picker component.**
+  Repo has no frontend test runner
+  (svelte-check + manual trace; same as
+  B5-B8, B14, B15, C-A1, C-A2).
+
+#### Audit cross-checks
+
+The audit's other ❌ items still standing:
+§23 (Expert viz), §25 (data model gaps),
+§26 (semantic API), §33 (ADRs). C-A3 closes
+§22 cleanly without pretending to close
+those.
+
 ### Slice C-A2 — CR-07: Side-by-side comparison export (§30)
 
 **Scope.** Closes CR-07 §30 (Export From

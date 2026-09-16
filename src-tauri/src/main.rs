@@ -9,7 +9,7 @@ use astroforge_core::gallery::{GalleryItemUpdate, GalleryStore};
 use astroforge_core::ingest::{self, FrameInfo};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig, PipelineResult, Verbosity};
 use astroforge_core::project::ProjectManager;
-use astroforge_core::recipe::Recipe;
+use astroforge_core::recipe::{QualityProfile, Recipe};
 use astroforge_core::recipe_store::{RecipeStore, RecipeSummary, RecipeVersion};
 use astroforge_core::session::SessionStore;
 use serde::Serialize;
@@ -327,6 +327,29 @@ fn recipe_list_versions(
 ) -> Result<Vec<RecipeVersion>, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
     store.list_versions(&profile_id).map_err(Into::into)
+}
+
+// CR-07 §22: QualityProfile catalog. Mirrors the
+// Rust enum's 4 variants with display labels and
+// descriptions for the frontend picker.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QualityProfileInfo {
+    id: String,
+    label: String,
+    description: String,
+}
+
+#[tauri::command]
+fn quality_profile_list() -> Vec<QualityProfileInfo> {
+    QualityProfile::ALL
+        .iter()
+        .map(|p| QualityProfileInfo {
+            id: format!("{:?}", p).to_lowercase(),
+            label: p.label().to_string(),
+            description: p.description().to_string(),
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -710,6 +733,7 @@ fn main() {
             pipeline_run_session,
             recipe_list,
             recipe_list_versions,
+            quality_profile_list,
             recipe_get,
             recipe_get_head,
             recipe_get_for_image_version,

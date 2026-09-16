@@ -359,6 +359,41 @@ export const operationsRegistryList = (): Promise<
     OperationRegistryEntryJson[]
   >;
 
+// CR-07 §22: Quality Profile catalog. Frontend
+// wrapper for the `quality_profile_list` IPC.
+export interface QualityProfileInfoJson {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export const qualityProfileList = (): Promise<
+  QualityProfileInfoJson[]
+> =>
+  invoke("quality_profile_list") as Promise<QualityProfileInfoJson[]>;
+
+// Quality profile values used by frontend state.
+// Mirrors `astroforge_core::recipe::QualityProfile`.
+export const QUALITY_PROFILES = [
+  "natural",
+  "detail",
+  "clean",
+  "publication",
+] as const;
+
+export type QualityProfile = (typeof QUALITY_PROFILES)[number];
+
+export const DEFAULT_QUALITY_PROFILE: QualityProfile = "natural";
+
+/** Type guard: is the given string a known
+ *  QualityProfile value? */
+export function isQualityProfile(value: unknown): value is QualityProfile {
+  return (
+    typeof value === "string" &&
+    (QUALITY_PROFILES as readonly string[]).includes(value)
+  );
+}
+
 export interface ApplyAiOperationRequest {
   project_id: string;
   source_image_version_id: string;

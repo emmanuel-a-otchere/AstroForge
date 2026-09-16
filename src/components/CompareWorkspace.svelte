@@ -28,6 +28,7 @@
   import RegionPicker, { type RegionScope } from "./RegionPicker.svelte";
   import VersionDag from "./VersionDag.svelte";
   import ProvenancePanel from "./ProvenancePanel.svelte";
+  import RecipeStageTimeline from "./RecipeStageTimeline.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
 
   let aId = $state<string | null>(null);
@@ -530,6 +531,22 @@
             versionLabel={versionA?.label ?? "Version A"}
           />
           <ProvenancePanel
+            versionId={bId}
+            versionLabel={versionB?.label ?? "Version B"}
+          />
+        </div>
+        <!-- CR-07 B15: Recipe Stage Timeline. Sister
+             component to ProvenancePanel; same
+             provenanceStore subscription pattern.
+             Renders the full stage list with
+             expandable per-stage params. Mirrors
+             the B14 two-instance A | B layout. -->
+        <div class="provenance-row">
+          <RecipeStageTimeline
+            versionId={aId}
+            versionLabel={versionA?.label ?? "Version A"}
+          />
+          <RecipeStageTimeline
             versionId={bId}
             versionLabel={versionB?.label ?? "Version B"}
           />

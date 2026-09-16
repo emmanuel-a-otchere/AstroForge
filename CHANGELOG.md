@@ -2,6 +2,69 @@
 
 ## Unreleased
 
+### Slice B15 — CR-07: RecipeStageTimeline component
+
+**Scope.** Ships a full vertical stage timeline
+that complements the B14 ProvenancePanel. The B14
+preview was intentionally truncated to 3 stages;
+B15 is the source of truth for full stage
+visibility including expandable per-stage params.
+No audit anchor: B14 already closed §13/§14;
+this slice is feature-add polish.
+
+#### Frontend (Svelte)
+
+- `src/components/RecipeStageTimeline.svelte`
+  (NEW): subscribes to the B13c provenanceStore;
+  renders five states (loading / error / empty
+  "not recorded" / loaded-recipe / idle). When
+  the recipe is present:
+  - **Summary line**: total stage count +
+    enabled vs disabled breakdown.
+  - **Ordered stage cards**: each card shows
+    stage number, stage_id, enabled/disabled
+    pill, and a `<details>` block with the full
+    `params` HashMap rendered as a key/value
+    table (sorted by key for stable output;
+    values formatted via `JSON.stringify` for
+    complex types).
+  - **Disabled stages** are visually dimmed.
+- `src/components/CompareWorkspace.svelte`:
+  - Imports `RecipeStageTimeline`.
+  - New `<div class="provenance-row">` block
+    holding two RecipeStageTimeline instances
+    (A | B), reusing the B14 grid layout.
+
+#### Honest flags
+
+- **No backend changes.** Reuses B13c IPC +
+  store. Pure Svelte.
+- **No new tests.** Repo has no frontend test
+  runner (svelte-check + manual trace).
+- **No new IPC.** Stage params already arrive
+  in the B13c `recipe_get_for_image_version`
+  response via `Recipe.stages[]`.
+- **Profile-picker in `EnhancementStudio`
+  is still not implemented** (separate UI
+  slice). Until that lands, both the B14
+  ProvenancePanel and B15 StageTimeline render
+  the "Profile not recorded" state for every
+  AI-applied version.
+- **Recipe-level data only.** RecipeStage has
+  no timestamps (those live on PipelineRun.
+  stage_runs, not on the Recipe profile). The
+  audit's "processing history with timestamps"
+  is per-RUN; addressing it would require a
+  new IPC (recipe_stage_runs_for_image_version)
+  joining ImageVersion → PipelineRun →
+  StageRun. That is a different slice.
+- **B14 ProvenancePanel stage preview stays
+  in place.** Both components render; the B14
+  preview is the at-a-glance "how many stages?"
+  view, B15 is the full breakdown. Removing
+  the B14 preview is a follow-up design
+  decision.
+
 ### Slice B14 — CR-07: ProvenancePanel component
 
 **Scope.** Surfaces the B13c live `Recipe` (or

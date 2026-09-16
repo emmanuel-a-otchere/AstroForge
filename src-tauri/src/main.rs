@@ -371,6 +371,81 @@ fn recipe_save(
     store.save(&owned).map_err(Into::into)
 }
 
+/// CR-07 B13c: look up the live `Recipe` that produced a
+/// given Image Version. Walks two stores:
+///
+/// 1. The active project's `DomainStore.image_versions`
+///    table (B13a) for the `recipe_id` foreign key.
+/// 2. The global `RecipeStore` (`recipe_get_head`) for
+///    the live `Recipe` row keyed by `profile_id`.
+///
+/// Returns `Ok(None)` when:
+/// - the version does not exist (returns `None` rather
+///   than an error: the caller treats "no such version"
+///   the same as "no recipe" at the panel level), OR
+/// - the version exists but its `recipe_id` is `None`
+///   (legacy / AI-applied versions; the ProvenancePanel
+///   surfaces "Profile not recorded" in this case).
+///
+/// Returns `Ok(Some(recipe))` when both lookups succeed.
+/// Returns `Err(...)` only on the `recipe_get_head` failure
+/// (e.g. a `recipe_id` in `image_versions` points at a
+/// profile that no longer exists in `RecipeStore`).
+#[tauri::command]
+fn recipe_get_for_image_version(
+    project_state: State<'_, commands_project::ProjectState>,
+    recipe_state: State<'_, RecipeState>,
+    version_id: String,
+) -> Result<Option<Recipe>, CommandError> {
+    use commands_ai_enhancement::image_version_get;
+    use commands_project::store_err_to_string;
+
+    // Step 1: read the version row from the active
+    // project's store. `image_version_get` returns
+    // `Value::Null` for "not found" (see
+    // commands_ai_enhancement::image_version_get).
+    let raw = image_version_get(version_id, project_state)
+        .map_err(store_err_to_string)?;
+    let version_value = match raw {
+        serde_json::Value::Null => return Ok(None),
+        v => v,
+    };
+
+    // Step 2: extract recipe_id. Serde-derived; the field
+    // is on the IPC wire because B13a added it to the
+    // `ImageVersion` Rust struct + serde, so it's already
+    // present in the `image_version_get` JSON.
+    let profile_id: Option<String> = serde_json::from_value(
+        serde_json::json!({ "recipe_id": version_value.get("recipe_id") }),
+    )
+    .map_err(|e| {
+        CommandError {
+            message: format!("malformed ImageVersion payload: {e}"),
+        }
+    })?;
+    let profile_id = match profile_id {
+        Some(s) if !s.is_empty() => s,
+        // No recipe recorded for this version. Honest
+        // "not recorded" path; the UI renders an empty
+        // state, not an error.
+        _ => return Ok(None),
+    };
+
+    // Step 3: pull the live Recipe from the global
+    // RecipeStore keyed by the profile_id. The
+    // `recipe_get_head` helper returns the head version
+    // of the named profile.
+    let store = recipe_state.0.lock().expect("recipe store mutex poisoned");
+    match store.get_head(&profile_id) {
+        Ok(recipe) => Ok(Some(recipe)),
+        Err(e) => Err(CommandError {
+            message: format!(
+                "recipe_id {profile_id:?} recorded on version but RecipeStore.get_head failed: {e}"
+            ),
+        }),
+    }
+}
+
 fn gallery_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     // Resolves to e.g. <app_data_dir>/gallery.sqlite. Falls back to
     // cwd if the app data dir isn't available (shouldn't happen in
@@ -637,6 +712,7 @@ fn main() {
             recipe_list_versions,
             recipe_get,
             recipe_get_head,
+            recipe_get_for_image_version,
             recipe_save,
             // CR-05 R1 — read-only AI model catalog (Recipes/AI
             // Models/Settings/Help application-level surfaces).

@@ -416,6 +416,55 @@ export const imageVersionGet = (
     ImageVersionJson | null
   >;
 
+// CR-07 B13c: look up the live `Recipe` that produced a
+// given Image Version. Returns the `Recipe` from the
+// `recipe_get` IPC type (snake_case from the Rust
+// `astroforge_core::recipe::Recipe` struct), or null when:
+// - the version does not exist, OR
+// - the version's `recipe_id` is null (legacy / AI-applied
+//   versions: the ProvenancePanel surfaces "Profile not
+//   recorded" in that case).
+export const recipeGetForImageVersion = (
+  versionId: string,
+): Promise<RecipeFromRust | null> =>
+  invoke("recipe_get_for_image_version", { versionId }) as Promise<
+    RecipeFromRust | null
+  >;
+
+// CR-07 B13c: local mirror of the Rust `Recipe` shape on
+// the IPC wire. The Svelte `Recipe` type in profile-store.ts
+// mirrors the same fields with camelCase. The IPC command
+// returns the wire shape (snake_case) so the store does the
+// translation. We declare this here (rather than importing
+// from profile-store) to keep the IPC layer self-contained
+// and avoid a profile-store.ts <-> astroforge-api.ts cycle.
+export interface RecipeFromRust {
+  schema_version: string;
+  name: string;
+  description: string;
+  target_type: string;
+  stages: Array<{
+    stage_id: string;
+    enabled: boolean;
+    params: Record<string, unknown>;
+  }>;
+  required_models: string[];
+  integrity: {
+    perceptual_models_used: boolean;
+    deterministic_models_used: boolean;
+    seed_recorded: boolean;
+    models: Array<{
+      model_name: string;
+      model_type: "deterministic" | "perceptual";
+    }>;
+  };
+  version: number;
+  parent_version: number | null;
+  branch: string;
+  created_at: string;
+  flags: string[];
+}
+
 /**
  * CR-07 — read an applied Image Version's primary artifact as
  * base64-encoded 16-bit TIFF bytes plus dimensions. The Zone B

@@ -2,6 +2,82 @@
 
 ## Unreleased
 
+### Slice B13c — CR-07: recipe_get_for_image_version IPC + provenance store
+
+**Scope.** Adds the lookup chain that connects a given
+Image Version to the live `Recipe` profile that produced
+it. B13a added the column; B13b added the producer; B13c
+adds the consumer-side IPC + a Svelte store. No UI yet;
+B14 will render the data in the ProvenancePanel.
+
+#### Backend (Rust)
+
+- `src-tauri/src/main.rs`:
+  - New Tauri command `recipe_get_for_image_version`
+    that takes a `version_id` and returns
+    `Result<Option<Recipe>, CommandError>`. Walks two
+    stores: the active project's `DomainStore` for the
+    `image_versions` row (B13a) and the global
+    `RecipeStore` for the live `Recipe` keyed by
+    `profile_id`.
+  - Returns `Ok(None)` for both "version not found"
+    and "version has no recorded recipe"; returns
+    `Err(CommandError)` only when the version
+    references a `recipe_id` that no longer exists in
+    the RecipeStore.
+  - Registered in the `invoke_handler` alongside the
+    other recipe commands.
+- `src-tauri/src/commands_ai_enhancement.rs`: no
+  changes; the new command reuses the existing
+  `image_version_get` for step 1.
+
+#### Frontend (TypeScript)
+
+- `src/lib/astroforge-api.ts`:
+  - New `recipeGetForImageVersion(versionId)` wrapper.
+  - New `RecipeFromRust` interface mirroring the Rust
+    `Recipe` wire shape (snake_case). Declared here
+    rather than imported from `profile-store.ts` to
+    avoid a cross-file cycle and keep the IPC layer
+    self-contained.
+- `src/state/provenance-store.ts` (NEW): a small
+  Svelte store that wraps the IPC call. Exposes
+  `provenanceStore.load(versionId)` and `reset()`. The
+  state shape is `{ versionId, recipe, status, error }`
+  where `status ∈ "idle" | "loading" | "loaded" |
+  "error"` and `recipe` is the camelCase Svelte-side
+  `ProvenanceRecipe` (translated from the snake_case
+  IPC shape). Stale-load guard: if the user clicks
+  another version while a fetch is in flight, the
+  older result is dropped silently.
+
+#### Honest flags
+
+- **No UI in this slice.** The store is wired but no
+  component subscribes to it yet. B14 will add the
+  `ProvenancePanel.svelte` and bind it to
+  `provenanceStore.load(versionA | versionB)` from
+  `CompareWorkspace.svelte`.
+- **No tests in this slice.** The new Rust command is
+  an end-to-end join of two existing helpers
+  (`image_version_get` + `recipe_get_head`), both of
+  which already have test coverage. A unit test for
+  the join would need a Tauri `State` mock, which the
+  repo doesn't have a pattern for yet. The command's
+  behavior is covered by the integration path the CI
+  smoke tests exercise.
+- **Per-project lookup limitation inherited.** The
+  command reads the active project's `DomainStore`
+  via `with_store`; if the user is in Project A and
+  queries a version from Project B, the lookup fails
+  (returns "not found"). This is a pre-existing
+  limitation of the B9 store consolidation, not
+  something B13c creates. B14 inherits it; a future
+  project-aware version resolver would address it.
+- **No `src-tauri/Cargo.lock` mutation needed** (no
+  new deps; the changes are a new command + serde
+  juggling).
+
 ### Slice B13b — CR-07: apply round populates `recipe_id`
 
 **Scope.** Wires the `recipe_id` from the apply round's

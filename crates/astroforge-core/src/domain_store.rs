@@ -485,6 +485,22 @@ CREATE INDEX idx_comparison_sets_project
     ON comparison_sets(project_id, created_at DESC);
 "#,
     ),
+    // CR-07 B13a: per-ImageVersion Recipe link. The
+    // ProvenancePanel (B13b/B14) surfaces the recipe profile
+    // that produced each Image Version. NULL for legacy rows
+    // written before this column shipped; the UI shows
+    // "Profile not recorded" in that case. The apply round
+    // (commands_ai_enhancement) will populate this from the
+    // PipelineRun's recipe_id in a follow-up slice.
+    (
+        11,
+        r#"
+ALTER TABLE image_versions ADD COLUMN recipe_id TEXT;
+
+CREATE INDEX idx_image_versions_recipe
+    ON image_versions(recipe_id) WHERE recipe_id IS NOT NULL;
+"#,
+    ),
 ];
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -859,13 +875,19 @@ impl DomainStore {
     /// CR-06 §4 / §22 (non-destructive). The store is a thin
     /// pass-through: the apply round owns the sequence number
     /// + the artifact id.
+    ///
+    /// CR-07 B13a: also persists the optional recipe_id (the
+    /// profile that produced this version) so the
+    /// ProvenancePanel can surface it.
     pub fn upsert_image_version(&self, row: &ImageVersion) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO image_versions
                 (version_id, project_id, label, sequence,
-                 primary_artifact_id, source_version_id, created_at, hidden)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(NULLIF(?7, ''), datetime('now')), ?8)",
+                 primary_artifact_id, source_version_id, created_at, hidden,
+                 recipe_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(NULLIF(?7, ''), datetime('now')), ?8,
+                     ?9)",
             params![
                 row.version_id,
                 row.project_id,
@@ -875,6 +897,7 @@ impl DomainStore {
                 row.source_version_id,
                 row.created_at,
                 row.hidden as i64,
+                row.recipe_id,
             ],
         )?;
         Ok(())
@@ -886,7 +909,7 @@ impl DomainStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT version_id, project_id, label, sequence, primary_artifact_id,
-                    source_version_id, created_at, hidden
+                    source_version_id, created_at, hidden, recipe_id
              FROM image_versions
              WHERE project_id = ?1 AND hidden = 0
              ORDER BY sequence ASC, created_at ASC, version_id ASC",
@@ -901,6 +924,7 @@ impl DomainStore {
                 source_version_id: row.get(5)?,
                 created_at: row.get(6)?,
                 hidden: row.get::<_, i64>(7)? != 0,
+                recipe_id: row.get(8)?,
             })
         })?;
         let mut out = Vec::new();
@@ -921,7 +945,7 @@ impl DomainStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT version_id, project_id, label, sequence, primary_artifact_id,
-                    source_version_id, created_at, hidden
+                    source_version_id, created_at, hidden, recipe_id
              FROM image_versions
              ORDER BY created_at ASC, version_id ASC",
         )?;
@@ -935,6 +959,7 @@ impl DomainStore {
                 source_version_id: row.get(5)?,
                 created_at: row.get(6)?,
                 hidden: row.get::<_, i64>(7)? != 0,
+                recipe_id: row.get(8)?,
             })
         })?;
         let mut out = Vec::new();
@@ -951,7 +976,7 @@ impl DomainStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT version_id, project_id, label, sequence, primary_artifact_id,
-                    source_version_id, created_at, hidden
+                    source_version_id, created_at, hidden, recipe_id
              FROM image_versions WHERE version_id = ?1",
         )?;
         let mut rows = stmt.query(params![version_id])?;
@@ -965,6 +990,7 @@ impl DomainStore {
                 source_version_id: row.get(5)?,
                 created_at: row.get(6)?,
                 hidden: row.get::<_, i64>(7)? != 0,
+                recipe_id: row.get(8)?,
             }))
         } else {
             Ok(None)
@@ -2622,10 +2648,12 @@ mod tests {
         // ai_quality_reports migration.
         // CR-07 B3 — schema_version() bumped to 10 by the
         // image_decisions + comparison_sets migration.
-        assert_eq!(s.schema_version(), 10);
+        // CR-07 B13a: schema_version() bumped to 11 by the
+        // image_versions recipe_id ALTER TABLE migration.
+        assert_eq!(s.schema_version(), 11);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 10);
+        assert_eq!(s2.schema_version(), 11);
     }
 
     #[test]
@@ -3197,6 +3225,7 @@ mod tests {
             source_version_id: None,
             created_at: "2026-09-01T00:00:00Z".into(),
             hidden: false,
+            recipe_id: None,
         };
         let v2 = ImageVersion {
             version_id: "ver_b".into(),
@@ -3207,6 +3236,7 @@ mod tests {
             source_version_id: None,
             created_at: "2026-09-02T00:00:00Z".into(),
             hidden: false,
+            recipe_id: None,
         };
         s.upsert_image_version(&v1).unwrap();
         s.upsert_image_version(&v2).unwrap();
@@ -3214,6 +3244,67 @@ mod tests {
         let ids: Vec<String> = all.iter().map(|v| v.version_id.clone()).collect();
         assert!(ids.contains(&"ver_a".to_string()));
         assert!(ids.contains(&"ver_b".to_string()));
+    }
+
+    /// CR-07 B13a: the new `recipe_id` column on `image_versions`
+    /// round-trips through `upsert_image_version` and
+    /// `get_image_version` / `list_image_versions_for_project` /
+    /// `list_image_versions_all`. Legacy rows (written before
+    /// migration 11 was applied on the live DB) get NULL and
+    /// stay that way; the apply round (commands_ai_enhancement)
+    /// currently writes NULL with a comment pointing at the
+    /// B13b follow-up.
+    #[test]
+    fn recipe_id_round_trip_on_image_version() {
+        let s = store();
+        let v_with = ImageVersion {
+            version_id: "ver_with_recipe".into(),
+            project_id: "proj_b13a".into(),
+            label: "AI Enhanced".into(),
+            sequence: 1,
+            primary_artifact_id: "art_b13a".into(),
+            source_version_id: None,
+            created_at: "2026-09-16T00:00:00Z".into(),
+            hidden: false,
+            recipe_id: Some("prof_deep_sky_balanced".into()),
+        };
+        let v_without = ImageVersion {
+            version_id: "ver_no_recipe".into(),
+            project_id: "proj_b13a".into(),
+            label: "Pre-migration".into(),
+            sequence: 2,
+            primary_artifact_id: "art_legacy".into(),
+            source_version_id: None,
+            created_at: "2026-09-16T00:01:00Z".into(),
+            hidden: false,
+            recipe_id: None,
+        };
+        s.upsert_image_version(&v_with).unwrap();
+        s.upsert_image_version(&v_without).unwrap();
+
+        // get_image_version round-trips both.
+        let got_with = s.get_image_version("ver_with_recipe").unwrap().unwrap();
+        assert_eq!(
+            got_with.recipe_id.as_deref(),
+            Some("prof_deep_sky_balanced")
+        );
+        let got_without = s.get_image_version("ver_no_recipe").unwrap().unwrap();
+        assert_eq!(got_without.recipe_id, None);
+
+        // list_image_versions_for_project carries the column
+        // through; sort by sequence asc so the order is stable.
+        let list = s.list_image_versions_for_project("proj_b13a").unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].recipe_id.as_deref(), Some("prof_deep_sky_balanced"));
+        assert_eq!(list[1].recipe_id, None);
+
+        // list_image_versions_all also carries the column.
+        let all = s.list_image_versions_all().unwrap();
+        let with = all
+            .iter()
+            .find(|v| v.version_id == "ver_with_recipe")
+            .expect("ver_with_recipe present");
+        assert_eq!(with.recipe_id.as_deref(), Some("prof_deep_sky_balanced"));
     }
 
     /// CR-07 B9: list_ai_operations_all returns every row

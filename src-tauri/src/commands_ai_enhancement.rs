@@ -822,6 +822,15 @@ pub fn enhancement_apply_operation(
         source_version_id: Some(request.source_image_version_id.clone()),
         created_at: now_iso.clone(),
         hidden: false,
+        // CR-07 B13a: the apply request today does not carry a
+        // recipe_id; the apply round produces a new Image Version
+        // from the AI op parameters, not a named Recipe profile.
+        // B13b (follow-up) will plumb the recipe_id through the
+        // request once the EnhancementApplyRequest grows the
+        // field. For now this column is NULL and the
+        // ProvenancePanel surfaces "Profile not recorded" for
+        // AI-applied versions.
+        recipe_id: None,
     };
     with_store(&state, |s| s.upsert_image_version(&version).map_err(|e| e.to_string()))?;
     let ai_op_id = format!("op_{}", new_id_suffix());

@@ -319,6 +319,7 @@ mod tests {
                 source_version_id: None,
                 created_at: "2026-09-15T00:00:00Z".into(),
                 hidden: false,
+                recipe_id: None,
             })
             .unwrap();
         artifact.artifact_id

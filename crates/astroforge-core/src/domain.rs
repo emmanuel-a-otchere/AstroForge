@@ -402,6 +402,12 @@ pub struct ImageVersion {
     /// Hidden versions stay retained for provenance but leave the timeline
     /// (CR-02 §26 delete semantics).
     pub hidden: bool,
+    /// CR-07 B13a: the Recipe profile ID that produced this image
+    /// version. NULL for legacy rows written before this column
+    /// shipped; the ProvenancePanel surfaces "Profile not recorded"
+    /// in that case. B13b will populate this from the apply round.
+    #[serde(default)]
+    pub recipe_id: Option<String>,
 }
 
 /// CR-02 §11 — one execution of a processing recipe. Distinct from Recipe:

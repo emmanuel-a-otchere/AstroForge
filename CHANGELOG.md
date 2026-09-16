@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+### Slice B13a — CR-07: per-ImageVersion Recipe link (provenance schema)
+
+**Scope:** Adds the missing data model link between an
+`ImageVersion` and the `Recipe` profile that produced it.
+B13a ships the schema + read path only; B13b will wire
+the apply round to populate `recipe_id`, and B13c/B14+
+will surface it in the ProvenancePanel UI. This is the
+foundation for CR-07 §13 / §14 / audit items 311-314
+("AI processing is identified", "Processing history",
+"AI model information", "Recipe information").
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/domain.rs`:
+  - `ImageVersion` struct gains `recipe_id: Option<String>`
+    (serde-defaulted, so legacy JSON still deserialises).
+- `crates/astroforge-core/src/domain_store.rs`:
+  - Migration 11: `ALTER TABLE image_versions ADD
+    COLUMN recipe_id TEXT;` plus a partial index on
+    non-null values. Migration runner is idempotent
+    (already applied on test `store()` fixture and on
+    any live project DB that has been opened at least
+    once since this PR landed).
+  - `upsert_image_version` writes the new column.
+  - `get_image_version`, `list_image_versions_for_project`,
+    `list_image_versions_all` all SELECT the new column.
+  - `migrations_apply_once_and_are_idempotent` + the
+    `open_round_trips_and_validates_identity` test in
+    `project.rs` bumped to expect `schema_version() == 11`.
+  - New test: `recipe_id_round_trip_on_image_version`
+    writes two rows (one with `recipe_id`, one legacy
+    NULL), then asserts both round-trip through
+    `get_image_version`, `list_image_versions_for_project`,
+    and `list_image_versions_all`.
+- `crates/astroforge-core/src/comparison_metrics.rs`:
+  - Test helper `ImageVersion` literal updated to
+    include `recipe_id: None`.
+- `crates/astroforge-core/tests/ai_enhancement.rs`:
+  - 5 `ImageVersion` literal sites updated to include
+    `recipe_id: None` (4 false-hidden, 1 true-hidden).
+- `crates/astroforge-core/tests/dod_enhancement.rs`:
+  - 2 `ImageVersion` literal sites updated to include
+    `recipe_id: None`.
+- `src-tauri/src/commands_ai_enhancement.rs`:
+  - Apply round's `ImageVersion` construction
+    (`apply_operation_apply_round`) now writes
+    `recipe_id: None` with a comment pointing at
+    the B13b follow-up that will plumb the field
+    through `EnhancementApplyRequest`.
+
+#### Frontend (TypeScript)
+
+- `src/lib/astroforge-api.ts`:
+  - `ImageVersion` + `ImageVersionJson` interfaces
+    both gain `recipe_id: string | null`.
+
+#### Honest flags
+
+- **No new IPC, no new Tauri command, no new UI.** This
+  is a pure data-model slice.
+- **AI-applied versions still have `recipe_id = NULL`**
+  because `EnhancementApplyRequest` does not carry a
+  recipe id today. B13b will grow the request struct +
+  the apply round's `ImageVersion` construction to take
+  an optional `recipe_id`. Until then, the
+  ProvenancePanel (when it lands) will show
+  "Profile not recorded" for AI-applied versions.
+- **Legacy rows get NULL** (SQLite `ALTER TABLE ADD
+  COLUMN` with no DEFAULT puts NULL in existing rows).
+  The UI will surface this honestly.
+- **No `src-tauri/Cargo.lock` mutation needed** (the
+  diff is data-model + tests; no new deps).
+
 ### Slice B12 — CR-07 UX: §5.4 fixed-stretch + n-sigma normalizer
 
 **Scope:** Surfaces the explicit-cutoff and n-sigma

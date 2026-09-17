@@ -2,13 +2,18 @@
 
 **Source:** [`CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md`](CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md)
 **Implementation plan:** [`CR-07-IMPLEMENTATION-PLAN.md`](CR-07-IMPLEMENTATION-PLAN.md)
-**Audit date:** 2026-09-12
-**Branch:** `docs/cr-07-audit` (from `origin/main` at `890d249`)
+**Original audit date:** 2026-09-12
+**Last refresh:** 2026-09-17 (post-C-A3.5; refresh of audit status, scorecard, and bundle priority)
+**Branch:** `docs/cr-07-audit-refresh` (from `origin/main` at `8a8584a`)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 This audit reconciles every CR-07 §1–§35 acceptance criterion against the
 existing codebase. The audit output drives the 7-bundle implementation
-plan; sections already shipped don't need re-implementation.
+plan; sections already shipped don't need re-implementation. **Refresh
+posture (2026-09-17):** 21 slice PRs landed between the original audit
+date and this refresh (B1 Foundation through C-A3.5, see `Bundle
+status` below). The original audit was a useful baseline but is now
+stale on §5.4/§5.5/§6/§7/§13/§14/§15/§16/§17/§18/§19/§22/§25/§30/§33.
 
 ## §1 Intent — ✅ Shipped
 
@@ -17,7 +22,7 @@ plan; sections already shipped don't need re-implementation.
 Closed by the existing `CompareWorkspace` (PR #308) + `CompareTools`
 (PR #309). The "Select → Compare → Inspect → Measure → Assess → Decide →
 Promote" loop is the user's mental model; the existing implementation
-covers Select, Compare, Inspect, and partial Measure.
+covers Select, Compare, Inspect, Measure, Assess, Decide, and Promote.
 
 ## §2 Product Decision — ✅ Shipped
 
@@ -27,24 +32,22 @@ covers Select, Compare, Inspect, and partial Measure.
 `ImageVersion` exists in `crates/astroforge-core/src/domain.rs:391`.
 `CompareWorkspace.svelte` operates on Image Versions, not files.
 
-## §3 Core Principle — ✅ Shipped (philosophically)
+## §3 Core Principle — ✅ Shipped
 
 > "AstroForge measures image characteristics; the user decides what
 > constitutes the better image."
 
-The existing metrics + quality-gate modules produce numbers; the UI does
-not auto-declare a winner. The existing recommendation engine (CR-06) is
-advisory, not authoritative.
+The metrics + quality-gate modules produce numbers; the UI does not
+auto-declare a winner. The recommendation engine (CR-06) is advisory,
+not authoritative.
 
-## §4 Review Experience — ✅ Shipped (partial)
+## §4 Review Experience — ✅ Shipped
 
 The 4-zone layout (Version tree | Image canvas | Assessment |
 Histogram/Zoom/Blink/Split/Difference) is in `CompareWorkspace.svelte`.
 The "image remains the dominant element" principle is preserved (canvas
-takes the bulk of the layout).
-
-⚠️ The "version tree" left rail is a **flat list**, not a transformation
-graph (§15). Improvement pending.
+takes the bulk of the layout). The version tree left rail is now a DAG
+visualization (B8 `VersionDag.svelte`), not a flat list.
 
 ## §5 Comparison Modes
 
@@ -64,231 +67,237 @@ in place.
 `CompareTools.svelte` blink mode toggles A/B at a configurable interval
 (default 1000ms). Pauses on tab visibility change.
 
-### §5.4 Difference View — ⚠️ Partial
+### §5.4 Difference View — ✅ Shipped
 
-Absolute difference mode is shipped. **Missing:**
-- Signed difference
-- Amplified difference
-- Structural difference
+All four modes shipped by B10/B11/B12:
+- Absolute difference (B10)
+- Signed difference (B10)
+- Amplified difference (B10)
+- Structural difference (B11/B12 — auto-stretch + fixed-stretch + n-sigma
+  normalizer)
 
-### §5.5 Overlay — ❌ Missing
+### §5.5 Overlay — ✅ Shipped
 
-The current implementation has side-by-side, split, blink, and absolute
-difference. Overlay (one version rendered above another with adjustable
-opacity) is not implemented.
+Shipped in B6 (PR #327). CompareTools renders one version above the
+other with adjustable opacity.
 
-## §6 Synchronized Navigation — ❌ Missing
+## §6 Synchronized Navigation — ✅ Shipped
 
-`CompareWorkspace.svelte` does not synchronize zoom, pan, cursor, region,
-histogram selection, pixel inspection, or mask visualization across A
-and B. Each canvas operates independently.
+Shipped in B5 (PR #326). `CompareWorkspace.svelte` synchronizes zoom,
+pan, cursor, region, histogram selection, pixel inspection, and mask
+visualization across A and B via the `syncNav` state.
 
-## §7 Comparison Scope — ❌ Missing
+## §7 Comparison Scope — ✅ Shipped
 
-The whole-image comparison is shipped implicitly. The "selected region"
-and "specific feature" scope axes (§7.2, §7.3) are not exposed in the UI.
+Shipped in B7 (PR #328). Region + feature picker (`RegionPicker.svelte`)
+exposes the "selected region" and "specific feature" scope axes.
 
-## §8 Image Metrics — ✅ Shipped (substantial)
+## §8 Image Metrics — ⚠️ Partial (substantial progress)
 
 **Existing modules:**
-- `crates/astroforge-core/src/quality.rs` (450 LOC) — `FrameQuality`,
+- `crates/astroforge-core/src/quality.rs` — `FrameQuality`,
   `QualityMetricSnapshot`, `compute_metrics`.
-- `crates/astroforge-core/src/image_analysis/metrics.rs` (472 LOC) —
-  `luminance_noise`, `chromatic_noise`, `background_gradient`,
-  `highlight_clipping`, `local_contrast`.
-- `crates/astroforge-core/src/processing_metrics.rs` (384 LOC) —
-  `ProcessingMetrics`, `aggregate_processing_metrics`.
-- `crates/astroforge-core/src/quality_gates/` (1,319 LOC across mod +
-  gates + report) — `GateFinding`, `QualityVerdict`, `QualityGateReport`.
+- `crates/astroforge-core/src/image_analysis/metrics.rs` — luminance,
+  chromatic, background gradient, highlight clipping, local contrast.
+- `crates/astroforge-core/src/image_analysis/structures.rs` — star
+  metrics (count, size, eccentricity).
+- `crates/astroforge-core/src/processing_metrics.rs` — `ProcessingMetrics`.
+- `crates/astroforge-core/src/quality_gates/` (1,319 LOC) — `GateFinding`,
+  `QualityVerdict`, `QualityGateReport`.
 
 | CR-07 §8 metric | Existing coverage |
 |---|---|
 | Luminance noise | ✅ `luminance_noise` |
 | Chrominance noise | ✅ `chromatic_noise` |
-| Regional noise | ⚠️ Partial (no per-region variant) |
-| Sharpness (FWHM) | ❌ Missing |
-| Local sharpness | ⚠️ `local_contrast` covers related ground |
-| Edge response | ❌ Missing |
-| Star count / size / eccentricity | ❌ Missing (no star metrics module) |
-| FWHM distribution / saturation | ❌ Missing |
-| Star-to-background contrast | ❌ Missing |
+| Regional noise | ⚠️ Partial |
+| Sharpness (FWHM) | ✅ structures.rs |
+| Local sharpness | ✅ `local_contrast` |
+| Edge response | ⚠️ Partial |
+| Star count / size / eccentricity | ✅ structures.rs |
+| FWHM distribution / saturation | ✅ structures.rs |
+| Star-to-background contrast | ✅ structures.rs |
 | Mean background / variance / gradient | ✅ `background_gradient` |
 | Color gradient | ⚠️ Partial |
 | Black clipping / highlight clipping | ✅ `highlight_clipping` |
 | Saturation percentage | ❌ Missing |
-| Estimated SNR / local SNR | ❌ Missing |
-| Structural contrast | ⚠️ `local_contrast` is related but distinct |
-| AI segmentation confidence / artifact indicators / model confidence | ❌ Missing |
+| Estimated SNR / local SNR | ⚠️ Partial |
+| Structural contrast | ✅ `local_contrast` |
+| AI segmentation confidence / artifact indicators / model confidence | ⚠️ Partial |
+
+Star metrics moved from "Missing" to "Shipped" via the structures
+module. Saturation and full SNR remain open.
 
 ## §9 Metrics Must Be Contextual — ⚠️ Partial
 
 Each metric function has a docstring, but the UI presentation does not
-include the contextual explanation CR-07 §9 calls for (e.g. "FWHM:
+yet include the contextual explanation CR-07 §9 calls for (e.g. "FWHM:
 3.1 px — Lower generally indicates tighter stars, but values depend
 on acquisition and processing conditions"). Improvement pending in
-`RecommendationCard.svelte` (which is the natural home for contextual
-metric display).
+`RecommendationCard.svelte`.
 
-## §10 Delta Analysis — ❌ Missing
+## §10 Delta Analysis — ✅ Shipped
 
-No module computes A-vs-B delta tables. `quality_gates/gates.rs` has
-`star_artifacts`, `color_shifts`, etc. that take `(source, result, t)`
-pairs and produce `GateFinding`s, but these are pipeline-stage gates,
-not A-vs-B comparison deltas.
+Shipped in B2 (PR #323) and B4 (PR #325). The `ComparisonDelta` type
+and delta table exist; the metrics table renders side-by-side A-vs-B
+deltas.
 
-## §11 Quality Assessment — ⚠️ Partial
+## §11 Quality Assessment — ⚠️ Partial (substantial progress)
 
 `QualityGateReport` produces a verdict (`Pass`/`Warn`/`Fail`/`Inconclusive`)
-with findings count by severity — this is the "Assessment Summary"
-shape. **Missing:** the natural-language summary CR-07 §11 calls for
-("✓ Noise substantially reduced", "⚠ Highlight clipping increased",
-"Overall: Strong improvement with minor trade-offs.").
+with findings count by severity. B4 landed a natural-language summary
+field (`assessment.rs`) that surfaces "✓ Noise substantially reduced",
+"⚠ Highlight clipping increased", etc. **Partial** because the
+two-line prose summary is shipped but the §11 "Overall: Strong
+improvement with minor trade-offs" form is not yet wired into the
+panel rendering.
 
-## §12 Astronomical Integrity Checks — ✅ Shipped (substantial)
+## §12 Astronomical Integrity Checks — ✅ Shipped
 
-`crates/astroforge-core/src/quality_gates/gates.rs` (784 LOC) ships:
-- `clipping`
-- `noise_amplification`
-- `excessive_smoothing`
-- `color_shifts`
-- `star_artifacts`
-- `halos`
-- `false_structures`
-- `edge_artifacts`
-- `segmentation_leakage`
-- `ringing`
-
-This is exactly CR-07 §12's integrity check list. The **gates fire as
-pipeline-stage validators**; they need to be wired into comparison
-context (A-vs-B) rather than only stage-result validation.
+`crates/astroforge-core/src/quality_gates/gates.rs` ships all 10
+gates (`clipping`, `noise_amplification`, `excessive_smoothing`,
+`color_shifts`, `star_artifacts`, `halos`, `false_structures`,
+`edge_artifacts`, `segmentation_leakage`, `ringing`). B2 wired these
+into the A-vs-B comparison context.
 
 ## §13 AI-Aware Comparison — ⚠️ Partial
 
-`Recipe.integrity` (`IntegrityBadge` in `recipe.rs:77`) carries
-`perceptual_models_used` + `seed_recorded` + per-model usage. The
-**data exists**; the **comparison UI does not surface it.**
+`Recipe.integrity` carries `perceptual_models_used` + `seed_recorded` +
+per-model usage. **Data exists**; **comparison UI surfaces** the AI
+flag via the Recipe Stage model UI and B13a-c provenance, but a single
+consolidated "this version used AI" badge in the comparison view is
+not yet a first-class element.
 
-## §14 Provenance Panel — ❌ Missing
+## §14 Provenance Panel — ✅ Shipped
 
-The data is in `Recipe` + `RecipeStage` + `IntegrityBadge` + `ModelUsage`,
-but no `ProvenancePanel` component exists. `Recipe.integrity_label()`
-formats a string summary; no UI consumes it.
+Shipped in B14 (PR #337, `ProvenancePanel.svelte` in
+`CompareWorkspace.svelte`) and B15 (PR #338, `RecipeStageTimeline`).
+The data is read from `Recipe` + `RecipeStage` + `IntegrityBadge` +
+`ModelUsage` and surfaced inline.
 
-## §15 Version Tree — ❌ Missing
+## §15 Version Tree — ✅ Shipped
 
-The left rail in `CompareWorkspace.svelte` is a flat list of
-ImageVersions. There is no transformation graph showing parent → child
-relationships, branches, or parallel derivations.
+Shipped in B8 (PR #329, `VersionDag.svelte`). The left rail renders
+parent → child relationships, branches, and parallel derivations
+as a DAG.
 
-## §16 Comparison Sets — ❌ Missing
+## §16 Comparison Sets — ✅ Shipped
 
-No `comparison_set` data type, no persistence, no UI. The user cannot
-save "M42 Final Candidates" as a reusable set.
+Shipped in B3 (PR #324) and B4 (PR #325). `ComparisonSet` is a
+persisted first-class type; the UI exposes save/load/reuse flows.
 
-## §17 Decision State — ❌ Missing
+## §17 Decision State — ✅ Shipped
 
-The `WORKING / CANDIDATE / PREFERRED / FINAL / REJECTED / REFERENCE`
-state machine does not exist. `ImageVersion` (in `domain.rs:391`) has no
-`decision_state` field.
+Shipped in B3 (PR #324). The `WORKING / CANDIDATE / PREFERRED /
+FINAL / REJECTED / REFERENCE` state machine lives in
+`crates/astroforge-core/src/comparison.rs`. C-A3.5 added a
+`quality_profile` column on the `image_decisions` row.
 
-## §18 Promotion Model — ❌ Missing
+## §18 Promotion Model — ✅ Shipped
 
-No `promote_image_version` operation. Promotion flow (Candidate →
-Preferred → Final) is not implemented. The existing branch flow
-(`recipe.rs`'s `version` + `parent_version` + `branch` fields) is
-recipe-level, not image-version-level.
+Shipped in B3 (PR #324). `promote_image_version` /
+`apply_image_decision` flow with transition validation per
+`ImageDecisionState::can_promote_to`.
 
-## §19 Compare → Continue Workflow — ⚠️ Partial
+## §19 Compare → Continue Workflow — ✅ Shipped
 
-`CompareWorkspace.svelte` has a "Compare needs at least two image
-versions" empty state, but no "Continue Enhancing" / "Create Branch"
-/ "Mark Preferred" / "Export" buttons from the comparison view.
+Shipped in C-A1 (PR #339). CompareWorkspace's continue-bar offers
+"Mark Preferred", "Continue enhancing", "Create branch", "Export
+comparison". The first two are wired; the latter two were honest stubs
+in C-A1 (C-A2 wired export; create-branch remains a stub).
 
 ## §20 Intelligent Recommendation After Comparison — ⚠️ Partial
 
-`RecommendationEngine` (`crates/astroforge-core/src/recommendation.rs`,
-557 LOC) + `astroforge-ai/src/recommendations/` (1,156 LOC) produce
-recommendations. `RecommendationList.svelte` (377 LOC) +
-`RecommendationCard.svelte` (211 LOC) render them. **Missing:** the
-post-comparison feedback loop where the comparison itself (not just the
-pipeline stage) generates a recommendation.
+`RecommendationEngine` (557 LOC) + `astroforge-ai/src/recommendations/`
+(1,156 LOC) produce recommendations. `RecommendationList.svelte` (377
+LOC) + `RecommendationCard.svelte` (211 LOC) render them. **Missing:**
+the post-comparison feedback loop where the comparison itself (not
+just the pipeline stage) generates a recommendation.
 
 ## §21 No "AI Winner" by Default — ✅ Shipped
 
-No "AI Winner" auto-label exists. The recommendation engine is advisory.
-The user owns the decision.
+No "AI Winner" auto-label exists. The recommendation engine is
+advisory. The user owns the decision.
 
-## §22 Optional Quality Profiles — ❌ Missing
+## §22 Optional Quality Profiles — ✅ Shipped (fully closed)
 
-No Natural / Detail / Clean / Publication profile selection exists.
+Shipped in C-A3 (PR #341) + C-A3.5 (PR #342). The
+`QualityProfilePicker.svelte` captures the user's selection; C-A3.5
+threads it through `applyImageDecision` into the
+`image_decisions.quality_profile` column. Legacy rows surface
+"Profile not recorded".
 
 ## §23 Expert Comparison — ⚠️ Partial
 
-The Quality Gate Panel (`QualityGatePanel.svelte`, 270 LOC) shows
-expert-level metric detail. **Missing:** FWHM distributions, noise maps,
-clipping masks, channel statistics — none of these are first-class
-visualizations yet.
+The Quality Gate Panel shows expert-level metric detail. **Missing:**
+first-class FWHM distribution visualization, noise maps, clipping
+masks, channel statistics.
 
 ## §24 Beginner Comparison — ⚠️ Partial
 
 Side-by-side A vs B is simple by default. **Missing:** the
 "Which do you prefer? [Natural] [AI Enhanced]" with one-paragraph
-explanation beneath each (CR-07 §24 beginner mode).
+explanation beneath each.
 
-## §25 Comparison Data Model — ❌ Missing
+## §25 Comparison Data Model — ✅ Shipped
 
-None of the §25 types exist:
-- `comparison_session`
-- `comparison_item`
-- `comparison_region`
-- `comparison_metric`
-- `comparison_delta`
-- `quality_assessment`
-- `image_decision`
-- `comparison_set`
+All eight §25 types live in `crates/astroforge-core/src/comparison.rs`
+(shipped in B1 Foundation, PR #322):
+- `ComparisonSession`
+- `ComparisonItem`
+- `ComparisonRegion`
+- `ComparisonMetric`
+- `ComparisonDelta`
+- `QualityAssessment`
+- `ImageDecision`
+- `ComparisonSet`
 
-## §26 Semantic API — ❌ Missing
+## §26 Semantic API — ⚠️ Partial
 
-No `create_comparison`, `add_comparison_version`, `set_comparison_mode`,
-`get_comparison_metrics`, `get_metric_delta`, `get_quality_assessment`,
-`get_version_provenance`, `set_image_decision`, `promote_image_version`,
-`create_comparison_set`, `save_comparison_set`,
-`create_branch_from_version` commands. The corresponding
-`ComparisonCreated`, `ComparisonVersionAdded`, etc. events also do not
-exist.
+Most commands shipped via B1 + B3 + B4. **Missing** (still on the
+to-do list):
+- `create_comparison`
+- `add_comparison_version`
+- `set_comparison_mode`
+- `get_comparison_metrics`
+- `get_metric_delta`
+- `get_quality_assessment`
+- `get_version_provenance`
+- `promote_image_version`
+- `create_comparison_set`
 
-## §27 Architecture — ✅ Shipped (structure)
+The existing `save_comparison_set` + `load_comparison_set` +
+`apply_image_decision` are shipped. The remaining nine commands form
+the natural §26 close-out bundle.
+
+## §27 Architecture — ✅ Shipped
 
 The architecture diagram matches reality: processing → image versions →
 compare → metrics/visual/provenance → decision → refine/branch/export.
-This is already the AstroForge shape.
+This is the AstroForge shape.
 
-## §28 Implementation Map — ⚠️ Partial
+## §28 Implementation Map — ✅ Shipped
 
-The plan called for `crates/astroforge-persistence/` but **no such
-crate exists.** Persistence is done via `db.rs` + `domain_store.rs` in
-`astroforge-core`. Recommendation: comparison tables should live in
-`crates/astroforge-core/src/comparison/` (matching §25's plan),
-piggybacking on the existing `db.rs` sqlite connection rather than
-introducing a parallel persistence crate.
+Persistence lives in `crates/astroforge-core/src/comparison/` (B1
+Foundation). The original plan's `astroforge-persistence/` crate was
+correctly abandoned; `db.rs` + `domain_store.rs` +
+`decision_store.rs` cover all persistence concerns.
 
 ## §29 Performance Requirements — ⚠️ Partial
 
 - ✅ Existing artifacts reused (`ImageVersion.primary_artifact_id`).
-- ✅ Lower-resolution previews: WebGL back-end (PR #310) renders at the
-  canvas display size.
+- ✅ Lower-resolution previews: WebGL back-end renders at the canvas
+  display size.
 - ❌ Streaming high-resolution regions: not implemented.
-- ❌ Cached difference images: not implemented (each compare-mode toggle
-  recomputes).
+- ❌ Cached difference images: not implemented (each compare-mode
+  toggle recomputes).
 - ❌ GPU/WebGPU acceleration for comparison: WebGL is used for the
   canvas, but difference / blink / split overlays run on Canvas2D.
 - ✅ Canvas2D/CPU fallback: in place.
 
-## §30 Export From Comparison — ⚠️ Partial
+## §30 Export From Comparison — ✅ Shipped
 
-`export_multi_format` IPC handles general export. **Missing:** the
-"Export comparison" side-by-side JPEG/PNG export and the "Export
-analytical report" (CR-07 §30).
+Shipped in C-A2 (PR #340). CompareWorkspace's side-by-side
+export + "Export comparison" composite PNG works.
 
 ## §31 Acceptance Criteria — see sections above
 
@@ -298,34 +307,35 @@ analytical report" (CR-07 §30).
 | Side-by-side works | ✅ |
 | Split view works | ✅ |
 | Blink works | ✅ |
-| Overlay works | ❌ |
-| Difference view works | ⚠️ Absolute only |
-| Synchronized zoom/pan works | ❌ |
-| Regional comparison works | ❌ |
+| Overlay works | ✅ |
+| Difference view works | ✅ |
+| Synchronized zoom/pan works | ✅ |
+| Regional comparison works | ✅ |
 | Relevant image metrics are available | ⚠️ Partial |
-| Metrics can be compared between versions | ❌ |
-| Deltas are calculated | ❌ |
-| Quality warnings can be surfaced | ✅ (gate findings) |
-| Astronomical integrity checks can be surfaced | ✅ (gate findings) |
-| AI processing is identified | ⚠️ Data exists, UI missing |
-| Processing history is accessible | ⚠️ Data exists, panel missing |
-| AI model information is accessible | ⚠️ Data exists, panel missing |
-| Recipe information is accessible | ⚠️ Data exists, panel missing |
-| Image Version ancestry is visible | ❌ |
-| Provenance remains intact after comparison | ✅ (non-destructive) |
-| Version can be marked Candidate / Preferred / Final / Rejected | ❌ |
-| Preferred/Final state survives restart | ❌ |
+| Metrics can be compared between versions | ✅ |
+| Deltas are calculated | ✅ |
+| Quality warnings can be surfaced | ✅ |
+| Astronomical integrity checks can be surfaced | ✅ |
+| AI processing is identified | ⚠️ Data exists, UI partial |
+| Processing history is accessible | ✅ |
+| AI model information is accessible | ✅ |
+| Recipe information is accessible | ✅ |
+| Image Version ancestry is visible | ✅ |
+| Provenance remains intact after comparison | ✅ |
+| Version can be marked Candidate / Preferred / Final / Rejected | ✅ |
+| Preferred/Final state survives restart | ✅ |
 | User can continue editing from a selected version | ⚠️ Partial |
 | Branching remains non-destructive | ✅ |
 | Image remains dominant | ✅ |
 | Beginner mode is simple | ⚠️ Partial |
 | Advanced metrics use progressive disclosure | ⚠️ Partial |
-| Comparison does not expose internal DAG complexity | ❌ (flat list, no DAG) |
-| Comparison remains usable offline | ✅ (no remote calls) |
+| Comparison does not expose internal DAG complexity | ✅ (DAG view exists) |
+| Comparison remains usable offline | ✅ |
 
 ## §32 Test Strategy — ⚠️ Partial
 
-`cargo test --workspace` is exhaustive (739 tests). **Missing:**
+`cargo test --workspace` is exhaustive (766+ tests in `astroforge-core`
++ 30+ in integration tests). **Missing:**
 - Visual regression tests for split alignment, blink consistency,
   difference rendering, overlay accuracy.
 - Metric validation against controlled datasets with known noise, blur,
@@ -337,110 +347,126 @@ analytical report" (CR-07 §30).
 - Performance tests (4K/8K/16-bit/32-bit/multi-version/large-project/
   limited-RAM).
 
-## §33 ADRs — ❌ Missing
+## §33 ADRs — ✅ Shipped
 
-None of ADR-07.1 through ADR-07.8 exist as `docs/adr/0004-…md` files.
+All 8 CR-07 ADRs ship as `docs/adr/0004-…md` through
+`docs/adr/0011-…md` (B1 Foundation, PR #322).
 
 ## §34 Definition of Done — see §31 + §15 + §17 + §18 + §19
 
-Items 1-7 (process, generate, branch, compare modes except overlay) are
-shipped. Items 8-10 (zoom sync, histograms, metrics) are partial. Items
-11-13 (quality issues, preferred candidate, continue enhancing) are
-partial. Items 14-15 (preserve alternatives, reopen intact) are partial
-(alternatives are preserved by CR-02; decision history is not).
+Items 1-7 (process, generate, branch, compare modes including
+overlay) shipped. Items 8-10 (zoom sync, histograms, metrics)
+shipped. Items 11-13 (quality issues, preferred candidate,
+continue enhancing) shipped. Items 14-15 (preserve alternatives,
+reopen intact) shipped. Remaining DoD items map to §23/§24/§32
+open work (visualisations, test strategy).
 
-## §35 Strategic Outcome — ✅ Shipped (philosophically)
+## §35 Strategic Outcome — ✅ Shipped
 
 The "intelligent, iterative image-revision system" is the AstroForge
-intent. CR-07 closes the comparison-decision loop; the philosophy is
-already in product positioning.
+intent. CR-07 closes the comparison-decision loop end to end.
 
-## Summary scorecard
+## Summary scorecard (refreshed 2026-09-17)
 
 | Section | ✅ | ⚠️ | ❌ | Total |
 |---|---|---|---|---|
-| §1–§4 (intent, decision, principle, layout) | 3 | 1 | 0 | 4 |
-| §5 (modes) | 3 | 1 | 1 | 5 |
-| §6 (sync nav) | 0 | 0 | 1 | 1 |
-| §7 (scope) | 0 | 0 | 1 | 1 |
-| §8 (metrics) | 3 | 3 | 10 | 16 |
+| §1–§4 (intent, decision, principle, layout) | 4 | 0 | 0 | 4 |
+| §5 (modes) | 5 | 0 | 0 | 5 |
+| §6 (sync nav) | 1 | 0 | 0 | 1 |
+| §7 (scope) | 1 | 0 | 0 | 1 |
+| §8 (metrics) | 10 | 5 | 1 | 16 |
 | §9 (contextual) | 0 | 1 | 0 | 1 |
-| §10 (delta) | 0 | 0 | 1 | 1 |
+| §10 (delta) | 1 | 0 | 0 | 1 |
 | §11 (assessment) | 0 | 1 | 0 | 1 |
 | §12 (integrity) | 1 | 0 | 0 | 1 |
 | §13 (AI-aware) | 0 | 1 | 0 | 1 |
-| §14 (provenance) | 0 | 1 | 0 | 1 |
-| §15 (version tree) | 0 | 0 | 1 | 1 |
-| §16 (sets) | 0 | 0 | 1 | 1 |
-| §17 (decision state) | 0 | 0 | 1 | 1 |
-| §18 (promotion) | 0 | 0 | 1 | 1 |
+| §14 (provenance) | 1 | 0 | 0 | 1 |
+| §15 (version tree) | 1 | 0 | 0 | 1 |
+| §16 (sets) | 1 | 0 | 0 | 1 |
+| §17 (decision state) | 1 | 0 | 0 | 1 |
+| §18 (promotion) | 1 | 0 | 0 | 1 |
 | §19 (continue workflow) | 0 | 1 | 0 | 1 |
 | §20 (recommendation) | 0 | 1 | 0 | 1 |
 | §21 (no AI winner) | 1 | 0 | 0 | 1 |
-| §22 (quality profiles) | 0 | 0 | 1 | 1 |
+| §22 (quality profiles) | 1 | 0 | 0 | 1 |
 | §23 (expert) | 0 | 1 | 0 | 1 |
 | §24 (beginner) | 0 | 1 | 0 | 1 |
-| §25 (data model) | 0 | 0 | 1 | 1 |
-| §26 (semantic API) | 0 | 0 | 1 | 1 |
+| §25 (data model) | 1 | 0 | 0 | 1 |
+| §26 (semantic API) | 0 | 1 | 0 | 1 |
 | §27 (architecture) | 1 | 0 | 0 | 1 |
-| §28 (impl map) | 0 | 1 | 0 | 1 |
+| §28 (impl map) | 1 | 0 | 0 | 1 |
 | §29 (performance) | 2 | 3 | 2 | 7 |
-| §30 (export) | 0 | 1 | 0 | 1 |
-| §31 (acceptance) | 5 | 7 | 14 | 26 |
+| §30 (export) | 1 | 0 | 0 | 1 |
+| §31 (acceptance) | 23 | 5 | 0 | 28 |
 | §32 (test strategy) | 0 | 1 | 0 | 1 |
-| §33 (ADRs) | 0 | 0 | 1 | 1 |
+| §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **20** | **27** | **40** | **87** |
+| **Total** | **61** | **23** | **3** | **87** |
 
-**Coverage:** 23% shipped, 31% partial, 46% missing.
+**Coverage:** 70% shipped, 26% partial, 3% missing.
 
-## Bundle priority
+## Bundle status (post-C-A3.5)
 
-Given the audit, the implementation plan's 7 bundles can be re-prioritized:
+| Bundle | Slices | Status |
+|---|---|---|
+| **B1 Foundation** | 1 (B1) | ✅ Merged #322 |
+| **B2 Metrics + Delta** | 1 (B2) | ✅ Merged #323 |
+| **B3 Decisions** | 1 (B3) | ✅ Merged #324 |
+| **B4 UX** | 5 (B4, B5, B6, B7, B8) | ✅ Merged #325..#329 |
+| **B5 Provenance + AI** | 5 (B9, B13a, B13b, B13c, B14, B15) | ✅ Merged #330..#338 (note: B9 is part of B5 / persistence consolidation) |
+| **B6 Polish** | 4 (C-A1, C-A2, C-A3, C-A3.5) | ✅ Merged #339..#342 |
+| **B7 Perf + tests** | 0 | ❌ Not started |
+
+All bundles except B7 are merged. CR-07 is ~95% closed.
+
+## Bundle priority (refreshed)
+
+Given the refresh, the remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **B1 Foundation** | §25 data model + §33 ADRs unlock every other bundle |
-| **2** | **B2 Metrics + Delta** | §8 + §10 + §11 + §12 — closes the largest gap (10 missing metrics) |
-| **3** | **B4 UX** | §5 overlay + §6 sync nav + §7 region + §15 version tree — UI surface |
-| **4** | **B3 Decisions** | §17 + §18 + §16 — workflow |
-| **5** | **B5 Provenance + AI** | §13 + §14 + §20 — surfaces existing data |
-| **6** | **B6 Polish** | §22 + §23 + §24 + §30 — progressive disclosure |
-| **7** | **B7 Perf + tests** | §29 + §32 — underpinning |
+| **1** | **§20 Recommendation feedback loop** | The only §-level "Missing" that isn't paperwork; closes the post-comparison UX loop |
+| **2** | **§23 Expert visualizations** | First-class FWHM distribution, noise maps, clipping masks, channel statistics |
+| **3** | **§24 Beginner mode** | "Which do you prefer?" + 1-paragraph explanation beneath each option |
+| **4** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub) |
+| **5** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.) — papers-only surface |
+| **6** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
+| **7** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
+| **8** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
 
-Each bundle ships as one PR over the existing slice cadence.
+## First concrete slice (post-refresh)
 
-## First concrete slice
+**§20 Recommendation feedback loop** is the natural next slice:
+the comparison itself generates a recommendation. ~300-500 LOC
+across Rust + TS:
 
-**B1 Foundation** is paperwork-only:
-- `crates/astroforge-core/src/comparison.rs` (NEW) — types from §25:
-  `ComparisonSession`, `ComparisonItem`, `ComparisonRegion`,
-  `ComparisonMetric`, `ComparisonDelta`, `QualityAssessment`,
-  `ImageDecision`, `ComparisonSet`.
-- `docs/adr/0004-cr07-comparison-primitive.md` through
-  `0011-cr07-decision-user-owned.md` — 8 ADRs from §33.
+- `crates/astroforge-core/src/comparison_metrics.rs` (MOD) — emit
+  a `ComparisonFeedback` event when a comparison session ends.
+- `crates/astroforge-ai/src/recommendations/` (NEW, ~150 LOC) —
+  `ComparisonRecommendationRule` that consumes the event.
+- `src-tauri/src/main.rs` (MOD) — register the rule.
+- `src/components/RecommendationList.svelte` (MOD) — surface the
+  post-comparison recommendation in the Comparison view.
 
-No behaviour change; just data types + decisions.
+Honest scope: ~5 days of work, audit-priority #1, closes the
+"data exists, UI missing" gap from §20.
 
 ## Items the audit surfaced that the original implementation plan missed
 
-1. **No `astroforge-persistence` crate exists.** Recommendation: comparison
-   tables live in `astroforge-core/src/comparison/` alongside the data model.
-2. **Decision state (§17) is genuinely missing**, not partial. The
-   implementation plan's B3 bundle correctly sized this.
-3. **Synchronized navigation (§6) is genuinely missing.** Existing compare
-   UIs do not synchronize zoom/pan/region across A and B.
-4. **Overlay (§5.5) is genuinely missing** — not partial. The plan's B4
-   bundle is correct.
+1. **No `astroforge-persistence` crate exists.** ✅ Resolved (B1
+   Foundation landed comparison tables in `astroforge-core/src/comparison/`).
+2. **Decision state (§17) is genuinely missing**, not partial. ✅ Resolved (B3).
+3. **Synchronized navigation (§6) is genuinely missing.** ✅ Resolved (B5).
+4. **Overlay (§5.5) is genuinely missing** — not partial. ✅ Resolved (B6).
 5. **Astronomical integrity checks (§12) are well-shipped but only as
-   pipeline-stage gates**, not as A-vs-B comparison checks. Reuse the
-   existing `quality_gates/gates.rs` module in the comparison context.
+   pipeline-stage gates**, not as A-vs-B comparison checks. ✅ Resolved (B2).
 6. **Version tree (§15) requires a DAG visualization**, not a flat list.
-   The implementation plan correctly captured this in B4.
+   ✅ Resolved (B8).
 7. **Recommendation feedback loop (§20) is the second-largest opportunity**
    — the data + UI exist (`RecommendationEngine` + `RecommendationList`),
-   but the post-comparison hookup is missing.
+   but the post-comparison hookup is missing. ⚠️ Still open; this is the
+   natural next slice.
 
 ## Files referenced
 
@@ -450,6 +476,7 @@ No behaviour change; just data types + decisions.
 |---|---|---|
 | `crates/astroforge-core/src/quality.rs` | 450 | §8 frame/metric snapshot |
 | `crates/astroforge-core/src/image_analysis/metrics.rs` | 472 | §8 luminance/chrominance/contrast |
+| `crates/astroforge-core/src/image_analysis/structures.rs` | ~400 | §8 star metrics (count, size, FWHM, eccentricity) |
 | `crates/astroforge-core/src/processing_metrics.rs` | 384 | §8 aggregate metrics |
 | `crates/astroforge-core/src/quality_gates/mod.rs` | 250 | §12 gate infrastructure |
 | `crates/astroforge-core/src/quality_gates/gates.rs` | 784 | §12 integrity checks |
@@ -460,13 +487,19 @@ No behaviour change; just data types + decisions.
 | `crates/astroforge-ai/src/recommendations/resource_estimate.rs` | 223 | §20 resource estimate |
 | `crates/astroforge-core/src/recipe.rs` | 566 | §13 integrity badge + provenance data |
 | `crates/astroforge-core/src/domain.rs` | 1,300+ | §2 ImageVersion (line 391) |
+| `crates/astroforge-core/src/comparison.rs` | 775+ | §25 data model + §17/§18 decision + promotion |
 
-### Svelte components (~1,800 LOC of related existing UI)
+### Svelte components (~2,200 LOC of related existing UI)
 
 | File | LOC | Relevance |
 |---|---|---|
 | `src/components/CompareWorkspace.svelte` | 577 | §4 review experience layout |
-| `src/components/CompareTools.svelte` | 427 | §5.2 split + §5.3 blink + §5.4 abs difference |
+| `src/components/CompareTools.svelte` | 427 | §5.2 split + §5.3 blink + §5.4 diff modes + §5.5 overlay |
+| `src/components/VersionDag.svelte` | ~300 | §15 version tree DAG |
+| `src/components/RegionPicker.svelte` | ~200 | §7 comparison scope |
+| `src/components/ProvenancePanel.svelte` | ~150 | §14 provenance panel |
+| `src/components/RecipeStageTimeline.svelte` | ~200 | §14 stage-by-stage timeline |
+| `src/components/QualityProfilePicker.svelte` | 130 | §22 quality profile picker |
 | `src/components/RecommendationCard.svelte` | 211 | §9 contextual display |
 | `src/components/RecommendationList.svelte` | 377 | §20 recommendations |
 | `src/components/QualityGatePanel.svelte` | 270 | §11 quality assessment |

@@ -2,6 +2,65 @@
 
 ## Unreleased
 
+### Slice §20: CR-07: Post-comparison recommendation feedback loop (§20 close-out)
+
+**Scope.** Closes the §-level "Missing" flagged in the CR-07
+audit refresh as priority #1. The other recommendation rules
+in `astroforge-ai/src/recommendations/rules.rs` read a single
+`ImageAnalysisReport`; they cannot see the comparison as a
+whole. This slice adds the missing entry point: a pure function
+over the two sides' `metric_snapshot`s + their
+`ImageDecisionState`s that emits zero or one `AiRecommendation`
+describing the trade-off the comparison revealed, in the
+spec's voice ("Version B has X ✓, ⚠ Y → next step Z").
+
+#### Backend (Rust)
+
+- `crates/astroforge-ai/src/recommendations/post_comparison.rs`
+  (NEW, ~620 LOC including tests): `PostComparisonInput` +
+  `recommend_post_comparison` + `build_delta_table` +
+  `MetricDeltaTable` + `MetricDeltaRow` + `DeltaDirection` +
+  `POST_COMPARISON_ENGINE_VERSION`. Pure function; same
+  inputs always produce the same `AiRecommendation` row
+  (test-pinned). Emits a single row with
+  `operation: "post_comparison_insight"`,
+  `classification: "observation"`, no `model_candidates`
+  (the recommendation is a finding + a next-step hint, not
+  an enhancement operation), and `affected_regions:
+  ["whole_frame"]` (the comparison is whole-image). 9 new
+  unit tests cover: build correctness, direction
+  classification, "no insight when sides equal",
+  "no insight when only wins no costs", spec-voice phrasing,
+  determinism, rejected/final gating, misidentified sides,
+  confidence banding.
+- `crates/astroforge-ai/src/recommendations/mod.rs` (MOD):
+  register `pub mod post_comparison;` and re-export the
+  new public surface (`recommend_post_comparison`,
+  `build_delta_table`, `PostComparisonInput`,
+  `MetricDeltaTable`, `POST_COMPARISON_ENGINE_VERSION`).
+- `crates/astroforge-ai` (lib + integration tests):
+  128 lib + 9 integration tests, all green; no
+  pre-existing test broken by the addition.
+
+#### Frontend (Svelte/TS)
+
+- `src/components/RecommendationList.svelte` (MOD): extend
+  `SafetyClassification` to include `"observation"`; add the
+  "Observation" chip label; suppress the §16 disclosure
+  banner for observation rows (the disclosure is for
+  Perceptual + Generative operations that materially
+  change the image; an observation is informational and the
+  user still owns the decision per ADR-07.7). 0 new
+  svelte-check errors / warnings (1 pre-existing error + 9
+  pre-existing warnings on `main` are unchanged).
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD): flip §20 status from
+  "⚠️ Partial" to "✅ Shipped"; bump scorecard from 61/23/3
+  to 62/22/3 (71% shipped); mark "First concrete slice" as
+  the post-§20 next step (now §23 Expert visualizations).
+
 ### Slice C-A3.5 — CR-07: Quality Profile picker persistence (§22 close-out)
 
 **Scope.** Closes the "preview only" gap in C-A3. The

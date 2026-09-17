@@ -365,7 +365,9 @@ mod tests {
         // image_decisions + comparison_sets migration.
         // CR-07 B13a: schema_version() bumped to 11 by the
         // image_versions recipe_id ALTER TABLE migration.
-        assert_eq!(reopened.store.schema_version(), 11);
+        // CR-07 C-A3.5: schema_version() bumped to 12 by the
+        // image_decisions quality_profile ALTER TABLE migration.
+        assert_eq!(reopened.store.schema_version(), 12);
 
         // Tampered manifest is rejected.
         let mut bad = reopened.manifest.clone();

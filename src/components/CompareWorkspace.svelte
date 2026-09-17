@@ -232,7 +232,18 @@
     markPreferredBusy = true;
     markPreferredError = null;
     try {
-      await applyImageDecision(bId, "preferred");
+      // CR-07 C-A3.5: thread the picker's selection
+      // through so the decision row carries the user's
+      // currently-picked Quality Profile. Without this,
+      // the picker's intent stays local-only — the row
+      // gets marked "preferred" but the panel can't tell
+      // what profile the user had in mind.
+      await applyImageDecision(
+        bId,
+        "preferred",
+        undefined,
+        selectedQualityProfile,
+      );
     } catch (e) {
       markPreferredError =
         e instanceof Error ? e.message : String(e);

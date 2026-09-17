@@ -501,6 +501,27 @@ CREATE INDEX idx_image_versions_recipe
     ON image_versions(recipe_id) WHERE recipe_id IS NOT NULL;
 "#,
     ),
+    // CR-07 C-A3.5 — persist the user's selected Quality
+    // Profile on the ImageDecision row. The picker
+    // (QualityProfilePicker.svelte) lets the user choose
+    // a profile in the Compare workspace; the picker's
+    // intent flows through ApplyDecisionRequest, gets
+    // recorded on the image_decisions row, and surfaces
+    // in the JSON decision list so future slices can
+    // join "what was decided" with "what profile the
+    // user picked at decision time". NULL for legacy
+    // rows written before C-A3.5; the panel surfaces
+    // "Profile not recorded" in that case (mirrors
+    // the ImageVersion.recipe_id precedent from B13a).
+    (
+        12,
+        r#"
+ALTER TABLE image_decisions ADD COLUMN quality_profile TEXT;
+
+CREATE INDEX idx_image_decisions_quality_profile
+    ON image_decisions(quality_profile) WHERE quality_profile IS NOT NULL;
+"#,
+    ),
 ];
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -2650,10 +2671,12 @@ mod tests {
         // image_decisions + comparison_sets migration.
         // CR-07 B13a: schema_version() bumped to 11 by the
         // image_versions recipe_id ALTER TABLE migration.
-        assert_eq!(s.schema_version(), 11);
+        // CR-07 C-A3.5: schema_version() bumped to 12 by the
+        // image_decisions quality_profile ALTER TABLE migration.
+        assert_eq!(s.schema_version(), 12);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 11);
+        assert_eq!(s2.schema_version(), 12);
     }
 
     #[test]

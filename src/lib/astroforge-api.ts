@@ -623,14 +623,27 @@ export const listImageDecisionsForProject = (
  * decision row exists yet the backend creates a fresh `Working`
  * decision first, so the first user action on a version is simply
  * the first transition.
+ *
+ * `qualityProfile` (CR-07 C-A3.5) is the profile the user had
+ * selected on the picker at the moment of this transition. The
+ * backend persists it on the `image_decisions.quality_profile`
+ * column so future slices can join "what was decided" with "what
+ * profile the user picked". Optional for legacy callers; the picker
+ * in `CompareWorkspace` always supplies it.
  */
 export const applyImageDecision = (
   versionId: string,
   newState: ImageDecisionState,
   reason?: string,
+  qualityProfile?: QualityProfile,
 ): Promise<ImageDecision> =>
   invoke("apply_image_decision", {
-    request: { version_id: versionId, new_state: newState, reason: reason ?? null },
+    request: {
+      version_id: versionId,
+      new_state: newState,
+      reason: reason ?? null,
+      quality_profile: qualityProfile ?? null,
+    },
   }) as Promise<ImageDecision>;
 
 export const saveComparisonSet = (set: ComparisonSet): Promise<void> =>

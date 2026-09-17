@@ -39,7 +39,17 @@
   import { aiEnhancementStore } from "../state/ai-enhancement";
 
   type Confidence = "Low" | "Medium" | "High";
-  type SafetyClassification = "deterministic" | "perceptual" | "generative";
+  // CR-06 §3 + CR-07 §20: `observation` is a finding surfaced
+  // by the post-comparison insight rule (per §20 of the
+  // comparison spec). It is not an enhancement operation, so
+  // it does NOT trigger the §16 disclosure banner (the
+  // disclosure is for Perceptual and Generative operations
+  // that materially change the image).
+  type SafetyClassification =
+    | "deterministic"
+    | "perceptual"
+    | "generative"
+    | "observation";
 
   interface ModelCandidateJson {
     name: string;
@@ -104,14 +114,19 @@
         return "Perceptual";
       case "generative":
         return "Generative";
+      case "observation":
+        return "Observation";
     }
   }
 
   function safetyRequiresDisclosure(c: SafetyClassification): boolean {
     // Per CR-06 §16, Perceptual and Generative operations
     // surface a banner so the user understands the trust
-    // implications.
-    return c !== "deterministic";
+    // implications. `observation` (CR-07 §20 post-comparison
+    // insight) is informational: the user still owns the
+    // decision per ADR-07.7 and the row does not change the
+    // image, so the §16 banner is not required.
+    return c === "perceptual" || c === "generative";
   }
 
   $: report = $aiEnhancementStore.recommendationsReport as RecommendationReportJson | null;

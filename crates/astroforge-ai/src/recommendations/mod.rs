@@ -33,6 +33,7 @@
 //! worst case; the user sees them before any work begins.
 
 pub mod ordering;
+pub mod post_comparison;
 pub mod resource_estimate;
 pub mod rules;
 
@@ -41,6 +42,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub use crate::recommendations::ordering::{order_recommendations, SequencingNote};
+pub use crate::recommendations::post_comparison::{
+    build_delta_table, recommend_post_comparison, MetricDeltaTable, PostComparisonInput,
+    POST_COMPARISON_ENGINE_VERSION,
+};
 pub use crate::recommendations::resource_estimate::{estimate_for, ResourceEstimate};
 pub use crate::recommendations::rules::{recommend, RecommendationSet};
 

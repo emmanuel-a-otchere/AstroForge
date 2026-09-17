@@ -205,13 +205,23 @@ Shipped in C-A1 (PR #339). CompareWorkspace's continue-bar offers
 comparison". The first two are wired; the latter two were honest stubs
 in C-A1 (C-A2 wired export; create-branch remains a stub).
 
-## §20 Intelligent Recommendation After Comparison — ⚠️ Partial
+## §20 Intelligent Recommendation After Comparison: ✅ Shipped
 
 `RecommendationEngine` (557 LOC) + `astroforge-ai/src/recommendations/`
-(1,156 LOC) produce recommendations. `RecommendationList.svelte` (377
-LOC) + `RecommendationCard.svelte` (211 LOC) render them. **Missing:**
-the post-comparison feedback loop where the comparison itself (not
-just the pipeline stage) generates a recommendation.
+(~1,340 LOC after the §20 rule) produce recommendations.
+`RecommendationList.svelte` (392 LOC after the §20 chip extension) +
+`RecommendationCard.svelte` (211 LOC) render them. **Added (this slice):**
+the post-comparison feedback loop in
+`astroforge-ai/src/recommendations/post_comparison.rs` (~620 LOC
+including tests). The rule is a pure function over the two sides'
+`metric_snapshot`s + their `ImageDecisionState`s that emits a single
+`AiRecommendation` (`operation: "post_comparison_insight"`,
+`classification: "observation"`) describing the trade-off in the
+spec's voice ("Version B has X ✓, ⚠ Y → next step Z"). Determinism,
+§21 "no winner" framing, and the whole-frame / observation
+classification are all unit-tested (9 new tests, 0 new svelte-check
+issues). Closes the §-level "Missing" flagged in the audit refresh
+as priority #1.
 
 ## §21 No "AI Winner" by Default — ✅ Shipped
 
@@ -402,11 +412,11 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **61** | **23** | **3** | **87** |
+| **Total** | **62** | **22** | **3** | **87** |
 
-**Coverage:** 70% shipped, 26% partial, 3% missing.
+**Coverage:** 71% shipped, 25% partial, 3% missing (post-§20 slice).
 
-## Bundle status (post-C-A3.5)
+## Bundle status (post-§20)
 
 | Bundle | Slices | Status |
 |---|---|---|
@@ -415,42 +425,32 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | **B3 Decisions** | 1 (B3) | ✅ Merged #324 |
 | **B4 UX** | 5 (B4, B5, B6, B7, B8) | ✅ Merged #325..#329 |
 | **B5 Provenance + AI** | 5 (B9, B13a, B13b, B13c, B14, B15) | ✅ Merged #330..#338 (note: B9 is part of B5 / persistence consolidation) |
-| **B6 Polish** | 4 (C-A1, C-A2, C-A3, C-A3.5) | ✅ Merged #339..#342 |
-| **B7 Perf + tests** | 0 | ❌ Not started |
+| **B6 Polish + §20** | 5 (C-A1, C-A2, C-A3, C-A3.5, §20) | ✅ Merged #339..#342 + §20 PR |
 
-All bundles except B7 are merged. CR-07 is ~95% closed.
+All bundles except B7 are merged. CR-07 is ~96% closed (was ~95%).
 
-## Bundle priority (refreshed)
+## Bundle priority (refreshed post-§20)
 
 Given the refresh, the remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§20 Recommendation feedback loop** | The only §-level "Missing" that isn't paperwork; closes the post-comparison UX loop |
-| **2** | **§23 Expert visualizations** | First-class FWHM distribution, noise maps, clipping masks, channel statistics |
-| **3** | **§24 Beginner mode** | "Which do you prefer?" + 1-paragraph explanation beneath each option |
-| **4** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub) |
-| **5** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.) — papers-only surface |
-| **6** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
-| **7** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
-| **8** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
+| **1** | **§23 Expert visualizations** | First-class FWHM distribution, noise maps, clipping masks, channel statistics |
+| **2** | **§24 Beginner mode** | "Which do you prefer?" + 1-paragraph explanation beneath each option |
+| **3** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub) |
+| **4** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface |
+| **5** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
+| **6** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
+| **7** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
 
-## First concrete slice (post-refresh)
+## First concrete slice (post-§20)
 
-**§20 Recommendation feedback loop** is the natural next slice:
-the comparison itself generates a recommendation. ~300-500 LOC
-across Rust + TS:
-
-- `crates/astroforge-core/src/comparison_metrics.rs` (MOD) — emit
-  a `ComparisonFeedback` event when a comparison session ends.
-- `crates/astroforge-ai/src/recommendations/` (NEW, ~150 LOC) —
-  `ComparisonRecommendationRule` that consumes the event.
-- `src-tauri/src/main.rs` (MOD) — register the rule.
-- `src/components/RecommendationList.svelte` (MOD) — surface the
-  post-comparison recommendation in the Comparison view.
-
-Honest scope: ~5 days of work, audit-priority #1, closes the
-"data exists, UI missing" gap from §20.
+**§23 Expert visualizations** is the next slice: FWHM
+distribution, noise maps, clipping masks, channel statistics
+sourced from the existing `metric_snapshot` + quality metrics.
+~400-600 LOC across Rust + TS (server-side computation +
+Svelte visualisation), audit-priority #1 now that §20 is
+shipped.
 
 ## Items the audit surfaced that the original implementation plan missed
 

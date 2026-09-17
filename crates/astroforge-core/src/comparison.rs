@@ -460,6 +460,19 @@ pub struct ImageDecision {
     pub state: ImageDecisionState,
     pub history: Vec<DecisionHistoryEntry>,
     pub decided_at: String,
+    /// CR-07 C-A3.5 — the Quality Profile the user had
+    /// selected on the picker at the moment of the most
+    /// recent decision transition. NULL for legacy rows
+    /// written before C-A3.5; the panel surfaces
+    /// "Profile not recorded" in that case. The picker
+    /// (QualityProfilePicker.svelte) carries the
+    /// selection forward across transitions until the
+    /// user explicitly changes it, so the value reflects
+    /// "what profile is the user in right now" rather
+    /// than "what profile produced the underlying
+    /// pixels" (that's `ImageVersion.recipe_id` /
+    /// future per-pixels recipes).
+    pub quality_profile: Option<String>,
 }
 
 impl ImageDecision {
@@ -477,6 +490,10 @@ impl ImageDecision {
                 reason: None,
             }],
             decided_at: now,
+            // C-A3.5: brand-new decision has no profile
+            // attached; the first transition (or the
+            // picker's onChange) populates it.
+            quality_profile: None,
         }
     }
 

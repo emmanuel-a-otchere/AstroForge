@@ -80,6 +80,15 @@ pub struct ApplyDecisionRequest {
     pub version_id: String,
     pub new_state: ImageDecisionState,
     pub reason: Option<String>,
+    /// CR-07 C-A3.5 — the Quality Profile the user had
+    /// selected on the picker at the moment of this
+    /// transition. None for callers that don't surface
+    /// the picker (today: legacy callers). When set, the
+    /// value is persisted on the image_decisions row so
+    /// future slices can join "what was decided" with
+    /// "what profile the user picked".
+    #[serde(default)]
+    pub quality_profile: Option<String>,
 }
 
 /// Apply a state transition and persist atomically. Returns the
@@ -92,14 +101,14 @@ pub fn apply_image_decision(
     request: ApplyDecisionRequest,
 ) -> Result<ImageDecision, String> {
     with_store(&state, |s| {
-        decision_store::apply_and_save_decision(
+        decision_store::apply_and_save_decision_with_profile(
             s,
             &request.version_id,
             request.new_state,
             request.reason,
+            request.quality_profile,
         )
-        .map_err(|e| e.to_string())
-    })?
+    })
 }
 
 // ─── Comparison set commands ───────────────────────────────────────────────

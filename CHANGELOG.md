@@ -2,6 +2,87 @@
 
 ## Unreleased
 
+### Slice C-A3.5 — CR-07: Quality Profile picker persistence (§22 close-out)
+
+**Scope.** Closes the "preview only" gap in C-A3. The
+picker (QualityProfilePicker.svelte) captures the
+user's selection, but until C-A3.5 the selection was
+local-only and never reached the persisted decision
+row. This slice threads the picker's value through
+`applyImageDecision` into the `image_decisions`
+table, so the panel can later surface "what profile
+the user had picked" alongside the decision state.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/domain_store.rs`:
+  - Migration v12: `ALTER TABLE image_decisions
+    ADD COLUMN quality_profile TEXT;` plus a
+    partial index on the column. Mirrors the
+    `image_versions.recipe_id` precedent from B13a.
+- `crates/astroforge-core/src/comparison.rs`:
+  - `ImageDecision` gains a `quality_profile:
+    Option<String>` field (NULL for legacy rows
+    written before C-A3.5).
+  - `ImageDecision::new` initialises the field to
+    `None`.
+- `crates/astroforge-core/src/decision_store.rs`:
+  - `load_decision` selects the new column and
+    populates `ImageDecision.quality_profile`.
+  - `save_decision` writes the field into the
+    INSERT/REPLACE.
+  - New `apply_and_save_decision_with_profile`
+    function: same as `apply_and_save_decision` but
+    also takes `profile: Option<String>`. When the
+    argument is `Some`, it overwrites the existing
+    value; when `None`, the existing value is
+    preserved so transitions without a profile don't
+    accidentally clear the user's prior pick.
+  - 3 new tests:
+    - `quality_profile_round_trips_through_apply_and_save`
+    - `quality_profile_none_preserves_existing_value`
+    - `quality_profile_defaults_to_none_for_legacy_decision`
+- `src-tauri/src/commands_comparison.rs`:
+  - `ApplyDecisionRequest` gains
+    `quality_profile: Option<String>` (serde-defaulted).
+  - `apply_image_decision` threads it through to
+    `apply_and_save_decision_with_profile`.
+- `crates/astroforge-core/src/domain_store.rs`:
+  - `migrations_apply_once_and_are_idempotent`
+    updated to assert `schema_version == 12`.
+- `crates/astroforge-core/src/project.rs`:
+  - `open_round_trips_and_validates_identity`
+    updated to assert `schema_version == 12`.
+
+#### Frontend (TS + Svelte)
+
+- `src/lib/astroforge-api.ts`:
+  - `applyImageDecision` accepts an optional
+    `qualityProfile: QualityProfile` argument and
+    sends it on the request as `quality_profile`.
+- `src/components/CompareWorkspace.svelte`:
+  - `markPreferred()` passes
+    `selectedQualityProfile` through to
+    `applyImageDecision` so the decision row
+    carries the user's currently-picked profile.
+  - Other entry points (`continueEnhancing`,
+    `exportComposite`) are unchanged — they don't
+    transition a decision.
+
+#### Out-of-scope (deferred)
+
+- No Recipe-save wiring: the picker's value
+  threads through decision transitions today. A
+  future slice can set `Recipe.quality_profile` on
+  the next `recipe_save` invocation from the same
+  picker state (Recipe already has the field from
+  C-A3). The picker carries the selection forward,
+  so this is purely a wiring step on the existing
+  Recipe field.
+- No panel that displays the persisted profile
+  (the JSON field round-trips; UI surfacing is a
+  separate slice).
+
 ### Slice C-A3 — CR-07: Quality Profile picker (§22)
 
 **Scope.** Closes CR-07 §22 (Quality Profiles) which

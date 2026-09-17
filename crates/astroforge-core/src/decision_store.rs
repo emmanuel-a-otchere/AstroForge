@@ -107,13 +107,14 @@ pub fn save_decision(store: &DomainStore, decision: &ImageDecision) -> Result<()
 
     tx.execute(
         "INSERT OR REPLACE INTO image_decisions
-            (version_id, state, decided_at, reason)
-         VALUES (?1, ?2, ?3, ?4)",
+            (version_id, state, decided_at, reason, quality_profile)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             decision.version_id,
             state_to_str(decision.state),
             decision.decided_at,
             decision.history.last().and_then(|h| h.reason.clone()),
+            decision.quality_profile.as_deref(),
         ],
     )?;
 
@@ -150,12 +151,17 @@ pub fn save_decision(store: &DomainStore, decision: &ImageDecision) -> Result<()
 pub fn load_decision(store: &DomainStore, version_id: &str) -> Result<ImageDecision> {
     let conn = store.lock_conn();
 
-    let (state, decided_at, reason): (String, String, Option<String>) = conn
+    let (state, decided_at, reason, quality_profile): (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+    ) = conn
         .query_row(
-            "SELECT state, decided_at, reason FROM image_decisions
+            "SELECT state, decided_at, reason, quality_profile FROM image_decisions
              WHERE version_id = ?1",
             params![version_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
@@ -196,6 +202,7 @@ pub fn load_decision(store: &DomainStore, version_id: &str) -> Result<ImageDecis
         state,
         history,
         decided_at,
+        quality_profile,
     })
 }
 
@@ -351,6 +358,23 @@ pub fn apply_and_save_decision(
     new_state: ImageDecisionState,
     reason: Option<String>,
 ) -> Result<ImageDecision> {
+    apply_and_save_decision_with_profile(store, version_id, new_state, reason, None)
+}
+
+/// CR-07 C-A3.5 — same as [`apply_and_save_decision`] but
+/// also accepts the Quality Profile the user had selected
+/// at the moment of the transition. When `profile` is
+/// `Some`, it overwrites the existing `quality_profile`
+/// on the decision; when `None`, the existing value is
+/// preserved (so transitions without a profile argument
+/// don't accidentally clear the user's prior pick).
+pub fn apply_and_save_decision_with_profile(
+    store: &DomainStore,
+    version_id: &str,
+    new_state: ImageDecisionState,
+    reason: Option<String>,
+    profile: Option<String>,
+) -> Result<ImageDecision> {
     // Load existing decision or create a fresh `Working` one. This
     // mirrors B1's contract that `ImageDecision::new` starts in
     // `Working`.
@@ -366,6 +390,9 @@ pub fn apply_and_save_decision(
             to: format!("{:?}", new_state),
         }
     })?;
+    if profile.is_some() {
+        decision.quality_profile = profile;
+    }
     save_decision(store, &decision)?;
     Ok(decision)
 }
@@ -494,6 +521,64 @@ mod tests {
             err,
             Err(DomainStoreError::InvalidTransition { .. })
         ));
+    }
+
+    // ─── CR-07 C-A3.5: Quality Profile persistence ──────────────────
+
+    #[test]
+    fn quality_profile_round_trips_through_apply_and_save() {
+        let store = fresh_store();
+        // Drive a Working -> Candidate transition with a profile
+        // attached; reload from the store and confirm the profile
+        // was persisted on the image_decisions row.
+        let decision = apply_and_save_decision_with_profile(
+            &store,
+            "v1",
+            ImageDecisionState::Candidate,
+            Some("first pass".into()),
+            Some("detail".into()),
+        )
+        .unwrap();
+        assert_eq!(decision.quality_profile.as_deref(), Some("detail"));
+
+        let reloaded = load_decision(&store, "v1").unwrap();
+        assert_eq!(reloaded.quality_profile.as_deref(), Some("detail"));
+    }
+
+    #[test]
+    fn quality_profile_none_preserves_existing_value() {
+        let store = fresh_store();
+        // Set a profile, then run a follow-up transition WITHOUT
+        // a profile argument. The existing value must be preserved
+        // (transitions without a profile don't accidentally clear
+        // the user's prior pick).
+        apply_and_save_decision_with_profile(
+            &store,
+            "v1",
+            ImageDecisionState::Candidate,
+            None,
+            Some("publication".into()),
+        )
+        .unwrap();
+        let after = apply_and_save_decision_with_profile(
+            &store,
+            "v1",
+            ImageDecisionState::Preferred,
+            Some("r".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(after.quality_profile.as_deref(), Some("publication"));
+    }
+
+    #[test]
+    fn quality_profile_defaults_to_none_for_legacy_decision() {
+        // A fresh ImageDecision with no profile wired through has
+        // `quality_profile: None` (matches the C-A3 picker "before
+        // user picks anything" state). Mirrors the
+        // ImageVersion.recipe_id legacy-null precedent from B13a.
+        let d = ImageDecision::new("v-legacy");
+        assert!(d.quality_profile.is_none());
     }
 
     #[test]

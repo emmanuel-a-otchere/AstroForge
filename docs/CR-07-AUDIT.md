@@ -236,13 +236,24 @@ threads it through `applyImageDecision` into the
 `image_decisions.quality_profile` column. Legacy rows surface
 "Profile not recorded".
 
-## §23 Expert Comparison — ⚠️ Partial
+## §23 Expert Comparison: ⚠ Partial (1/N shipped)
 
 The Quality Gate Panel shows expert-level metric detail. **Missing:**
 first-class FWHM distribution visualization, noise maps, clipping
-masks, channel statistics.
+masks. **Shipped (this slice, §23.1):** per-channel statistics
+(per-channel mean, stddev, min, max, clip count) for R/G/B (and
+c{n} for the 4th-and-beyond channels). The data path is
+`channel_stats(image) -> BTreeMap<String, f64>` in
+`astroforge-core::comparison_metrics`, exposed via the new
+`get_version_metric_snapshot` Tauri command, consumed by the
+`ExpertChannelStats.svelte` panel. The panel sits behind a
+"Show expert details" toggle on `CompareWorkspace.svelte` per
+the §23 "progressive disclosure, consistent with CR-01"
+requirement. Remaining §23 sub-items (FWHM distribution, noise
+maps, clipping masks) are out of scope for this slice and
+remain "Missing".
 
-## §24 Beginner Comparison — ⚠️ Partial
+## §24 Beginner Comparison: ⚠ Partial
 
 Side-by-side A vs B is simple by default. **Missing:** the
 "Which do you prefer? [Natural] [AI Enhanced]" with one-paragraph
@@ -435,7 +446,7 @@ Given the refresh, the remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§23 Expert visualizations** | First-class FWHM distribution, noise maps, clipping masks, channel statistics |
+| **1** | **§23 Expert visualizations (cont.)** | 1/N shipped (§23.1 channel stats). Next sub-slices: FWHM distribution, noise maps, clipping masks |
 | **2** | **§24 Beginner mode** | "Which do you prefer?" + 1-paragraph explanation beneath each option |
 | **3** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub) |
 | **4** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface |
@@ -445,12 +456,13 @@ Given the refresh, the remaining work is:
 
 ## First concrete slice (post-§20)
 
-**§23 Expert visualizations** is the next slice: FWHM
-distribution, noise maps, clipping masks, channel statistics
-sourced from the existing `metric_snapshot` + quality metrics.
-~400-600 LOC across Rust + TS (server-side computation +
-Svelte visualisation), audit-priority #1 now that §20 is
-shipped.
+**§23.1 channel statistics** is the first sub-slice of §23:
+per-channel (R, G, B, c{n}) mean, stddev, min, max, and clip
+count. ~450 LOC across Rust + TS (Rust computation in
+`comparison_metrics::channel_stats` + Tauri command +
+Svelte panel + CompareWorkspace toggle). FWHM distribution,
+noise maps, and clipping-mask visualizations remain as
+follow-on §23 sub-slices.
 
 ## Items the audit surfaced that the original implementation plan missed
 

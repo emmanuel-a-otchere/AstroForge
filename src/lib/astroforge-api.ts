@@ -676,6 +676,43 @@ export const compareVersionMetrics = (
     VersionMetricsComparison
   >;
 
+// ─── CR-07 §23.1: per-version full metric snapshot ────────────
+//
+// The expert channel-stats panel needs the full per-version
+// snapshot (5 detector-backed metrics + 5 per-channel stats =
+// 20 keys for an RGB image, 25 for RGBA, etc.) rather than the
+// delta table. The Rust side computes it once per version and
+// returns a sorted flat array; the consumer renders the
+// per-channel rows and ignores the detector keys.
+
+/** One snapshot entry: a key like `channel.r.mean` and its value. */
+export interface VersionMetricEntry {
+  key: string;
+  value: number;
+}
+
+/** §23.1 response: the full metric snapshot for one version. */
+export interface VersionMetricSnapshot {
+  version_id: string;
+  metrics: VersionMetricEntry[];
+  width: number;
+  height: number;
+  channels: number;
+}
+
+/**
+ * §23.1: load a version's applied pixels and return the
+ * sorted per-version metric snapshot (detector-backed +
+ * per-channel). Used by `ExpertChannelStats.svelte` to render
+ * the channel-stats table.
+ */
+export const getVersionMetricSnapshot = (
+  versionId: string,
+): Promise<VersionMetricSnapshot> =>
+  invoke("get_version_metric_snapshot", { versionId }) as Promise<
+    VersionMetricSnapshot
+  >;
+
 // CR-06 P5 — region-aware mask system. The mask
 // engine in `astroforge-core::masks` produces JSON
 // payloads via `astroforge_core::masks::encoding`;

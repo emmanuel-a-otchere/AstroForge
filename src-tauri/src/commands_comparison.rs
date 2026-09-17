@@ -22,6 +22,7 @@ use astroforge_core::domain_store::DomainStore;
 use astroforge_core::image::F32Image;
 use astroforge_core::metric_registry::MetricDeltaRow;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use tauri::State;
 
 /// Run `f` against the managed project store. Mirrors the locking
@@ -221,5 +222,67 @@ pub fn compare_version_metrics(
         version_id_b,
         rows,
         summary,
+    })
+}
+
+// ─── CR-07 §23.1: version per-metric snapshot (expert panel) ─────
+
+/// Response envelope for `get_version_metric_snapshot`: the
+/// full per-version snapshot (5 detector-backed keys from
+/// `metric_snapshot` + 5 per-channel stats from `channel_stats`).
+///
+/// Returned as a `Vec<(String, f64)>` rather than a `BTreeMap`
+/// because Tauri's IPC serialises a typed struct more cleanly
+/// than a map-of-strings and the consumer (`ExpertChannelStats.svelte`)
+/// wants a flat array it can iterate. The Rust side keeps the
+/// `BTreeMap` so the keys are deterministically ordered; the
+/// `(String, f64)` array is the IPC-friendly projection.
+#[derive(Debug, Clone, Serialize)]
+pub struct VersionMetricSnapshotDto {
+    pub version_id: String,
+    pub metrics: Vec<MetricEntryDto>,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MetricEntryDto {
+    pub key: String,
+    pub value: f64,
+}
+
+/// CR-07 §23.1: load a version's applied pixels, compute the
+/// full metric snapshot (detectors + per-channel statistics),
+/// and return the sorted entries plus the image dimensions.
+///
+/// Used by the `ExpertChannelStats.svelte` component to render
+/// the per-channel stats table. The endpoint is a thin wrapper
+/// over `comparison_metrics::metric_snapshot_full` and the
+/// existing path-confined `load_pixels` loader; the only new
+/// logic is the BTreeMap → Vec projection.
+#[tauri::command]
+pub fn get_version_metric_snapshot(
+    state: State<'_, ProjectState>,
+    version_id: String,
+) -> Result<VersionMetricSnapshotDto, String> {
+    let (snapshot, width, height, channels) = with_store(&state, |s| {
+        let img = load_pixels(s, &version_id)?;
+        let w = img.width() as u32;
+        let h = img.height() as u32;
+        let c = img.channels() as u32;
+        let snap = astroforge_core::comparison_metrics::metric_snapshot_full(&img);
+        Ok::<(BTreeMap<String, f64>, u32, u32, u32), String>((snap, w, h, c))
+    })??;
+    let metrics = snapshot
+        .into_iter()
+        .map(|(key, value)| MetricEntryDto { key, value })
+        .collect();
+    Ok(VersionMetricSnapshotDto {
+        version_id,
+        metrics,
+        width,
+        height,
+        channels,
     })
 }

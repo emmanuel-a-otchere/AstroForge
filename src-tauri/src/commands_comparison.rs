@@ -16,6 +16,7 @@
 
 use crate::commands_project::{lock_err, ProjectState};
 use astroforge_core::comparison::{ComparisonSet, ImageDecision, ImageDecisionState};
+use astroforge_core::comparison_metrics::FwhmHistogram;
 use astroforge_core::comparison_metrics::VersionComparisonReport;
 use astroforge_core::decision_store;
 use astroforge_core::domain_store::DomainStore;
@@ -284,5 +285,46 @@ pub fn get_version_metric_snapshot(
         width,
         height,
         channels,
+    })
+}
+
+// CR-07 §23.2: per-version FWHM distribution (expert panel).
+
+/// Response envelope for `get_version_fwhm_distribution`:
+/// the per-star FWHM values, the seven-number summary, and
+/// the pre-binned histogram (Sturges' rule, capped to
+/// [1, 50] bins). The histogram is ready-to-render in the
+/// Svelte component; no client-side bucketing required.
+#[derive(Serialize)]
+pub struct FwhmDistributionDto {
+    pub version_id: String,
+    pub histogram: FwhmHistogram,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub async fn get_version_fwhm_distribution(
+    version_id: String,
+    state: tauri::State<'_, ProjectState>,
+) -> Result<FwhmDistributionDto, String> {
+    let project_root = lock_err(&state)?;
+    let project_root_for_block = project_root.clone();
+    let version_id_for_block = version_id.clone();
+    let (histogram, width, height) = tokio::task::spawn_blocking(move || {
+        let store = DomainStore::open(&project_root_for_block)?;
+        let img = load_pixels(&store, &version_id_for_block)?;
+        let w = img.width() as u32;
+        let h = img.height() as u32;
+        let hist = astroforge_core::comparison_metrics::fwhm_histogram(&img);
+        Ok::<(FwhmHistogram, u32, u32), String>((hist, w, h))
+    })
+    .await
+    .map_err(|e| format!("fwhm histogram task failed: {e}"))??;
+    Ok(FwhmDistributionDto {
+        version_id,
+        histogram,
+        width,
+        height,
     })
 }

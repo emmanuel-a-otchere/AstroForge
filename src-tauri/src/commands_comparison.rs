@@ -17,6 +17,7 @@
 use crate::commands_project::{lock_err, ProjectState};
 use astroforge_core::comparison::{ComparisonSet, ImageDecision, ImageDecisionState};
 use astroforge_core::comparison_metrics::FwhmHistogram;
+use astroforge_core::comparison_metrics::NoiseMap;
 use astroforge_core::comparison_metrics::VersionComparisonReport;
 use astroforge_core::decision_store;
 use astroforge_core::domain_store::DomainStore;
@@ -324,6 +325,46 @@ pub async fn get_version_fwhm_distribution(
     Ok(FwhmDistributionDto {
         version_id,
         histogram,
+        width,
+        height,
+    })
+}
+
+// CR-07 §23.3: per-version noise map (2D sigma field).
+
+/// Response envelope for `get_version_noise_map`: the
+/// per-pixel local sigma field plus the three summary
+/// stats (min, mean, max). The sigma field is a flat
+/// row-major array of `width * height` f64 values.
+#[derive(Serialize)]
+pub struct NoiseMapDto {
+    pub version_id: String,
+    pub map: NoiseMap,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub async fn get_version_noise_map(
+    version_id: String,
+    state: tauri::State<'_, ProjectState>,
+) -> Result<NoiseMapDto, String> {
+    let project_root = lock_err(&state)?;
+    let project_root_for_block = project_root.clone();
+    let version_id_for_block = version_id.clone();
+    let (map, width, height) = tokio::task::spawn_blocking(move || {
+        let store = DomainStore::open(&project_root_for_block)?;
+        let img = load_pixels(&store, &version_id_for_block)?;
+        let w = img.width() as u32;
+        let h = img.height() as u32;
+        let m = astroforge_core::comparison_metrics::noise_map(&img);
+        Ok::<(NoiseMap, u32, u32), String>((m, w, h))
+    })
+    .await
+    .map_err(|e| format!("noise map task failed: {e}"))??;
+    Ok(NoiseMapDto {
+        version_id,
+        map,
         width,
         height,
     })

@@ -2,6 +2,143 @@
 
 ## Unreleased
 
+### Slice §23.3: CR-07 Expert noise map panel (§23 sub-slice 3)
+
+**Scope.** The third of four §23 "Expert Comparison"
+sub-slices called out by the CR-07 audit refresh as
+priority #1. Ships per-pixel 2D noise map visualization:
+the per-pixel local sigma field as a row-major flat f64
+array plus a three-number summary (min, mean, max). The
+image is downsampled to the preview budget (≤256 px on
+the long axis), then for each pixel the local sigma is
+estimated over a 7×7 window using the same MAD-on-
+residuals algorithm as the scalar `luminance_noise`
+metric but applied per-pixel. The panel sits behind the
+same "Show expert details" toggle on
+`CompareWorkspace.svelte` as §23.1 + §23.2, per the §23
+"progressive disclosure, consistent with CR-01"
+requirement.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/comparison_metrics.rs`
+  (MOD):
+  - NEW `NoiseMap` struct: `width`, `height`,
+    row-major flat `sigma: Vec<f64>`, and three-number
+    summary (`min`, `mean`, `max`). `Serialize`-derived
+    for the Tauri bridge.
+  - NEW `noise_map(image) -> NoiseMap`: downsample to
+    preview budget via `F32Image::downsample_box(0.25)`,
+    then for each inner pixel (those inside the
+    HALF=3 border) compute the local median over a
+    7×7 window and the local sigma as
+    `1.4826 * MAD` over the inner 5×5 residuals. Three
+    scalar summary stats (min, mean, max) are computed
+    alongside. The outer ring of the sigma field is
+    zeroed (no stable estimator for those pixels).
+  - 6 new unit tests (zeroed-for-empty-image,
+    nonzero-for-noisy-image, summary-stats-match-array,
+    determinism, spatial-correctness-for-half-noisy,
+    field-size-matches-dimensions).
+- `src-tauri/src/commands_comparison.rs` (MOD): NEW
+  `get_version_noise_map(version_id)` command: thin
+  wrapper that loads the version's applied pixels (via
+  the existing path-confined `load_pixels` helper),
+  runs `noise_map`, and returns a typed DTO
+  `{ version_id, map: NoiseMap, width, height }`.
+  Wrapped in `tokio::task::spawn_blocking` (the
+  per-pixel estimator is O(W' * H' * 49) and would
+  otherwise block the async runtime on large images).
+- `src-tauri/src/main.rs` (MOD): register the new
+  command in the Tauri `invoke_handler` list.
+
+#### Frontend (Svelte/TS)
+
+- `src/lib/astroforge-api.ts` (MOD): add `NoiseMapData`,
+  `NoiseMapSnapshot` interfaces and the
+  `getVersionNoiseMap(versionId)` wrapper.
+- `src/components/ExpertNoiseMap.svelte` (NEW, ~250
+  LOC): Svelte 5 component using `$props()`,
+  `$state()`, and `$effect()`. Loads the snapshot on
+  mount and on `versionId` change. Renders an SVG
+  heatmap: 320×320 viewBox, one `<rect>` per pixel of
+  the sigma field, fill colour interpolated between
+  deep blue (low sigma, quiet), mid green, and deep red
+  (high sigma, noisy), normalized to the [min, max] of
+  the field. Below the heatmap: a 4-cell summary grid
+  (min, mean, max, resolution). Loading + error +
+  empty states are rendered explicitly. Pure SVG: no
+  new dep.
+- `src/components/CompareWorkspace.svelte` (MOD): add
+  a third `expert-panels` row in the §23.1 toggle
+  block, holding two `ExpertNoiseMap` panels (A and B)
+  side by side.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD): §23 status updated to
+  "Partial (3/N shipped)"; bundle priority #1 updated
+  to "§23 Expert visualizations (cont.)" with the
+  sub-slice roadmap (clipping masks); "First concrete
+  slice (post-§23.2)" pointer to §23.3.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- 989 Rust tests pass (workspace). 6 new in
+  `comparison_metrics::noise_map`.
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --all-targets -- -D
+  warnings` clean.
+- `npm run check`: 0 new errors / warnings (1
+  pre-existing error + 9 pre-existing warnings on
+  `main` are unchanged).
+- `npm run build`: clean.
+- Em-dash sweep: 0 em-dashes in all 6 changed files
+  (memory's GitHub language rule).
+
+#### Honest flags
+
+- Slice size: ~900 LOC. The overage vs the audit's §23.1
+  estimate of 450 LOC per sub-slice is in the SVG
+  heatmap (~250 LOC for the panel itself, including
+  per-pixel `<rect>` rendering with proper colour
+  ramp) and in the per-pixel Rust implementation
+  (~150 LOC for the sliding-window estimator).
+- Per-pixel noise estimation is O(W' * H' * WINDOW^2)
+  on the preview budget (≤256 px on the long axis):
+  ~3.2M ops on the worst-case preview. On a typical
+  laptop this runs in ~50 ms. The Tauri command wraps
+  it in `spawn_blocking` so the async runtime is not
+  blocked. Per-version (A and B) sequential calls add
+  ~100 ms total on a 4K image; the panel's loading
+  state covers the wait. No caching: each toggle
+  re-estimates. This is a known follow-on item
+  (caching the per-version noise map is part of §29
+  Performance).
+- The outer ring of the sigma field (3 px on each
+  side, equal to HALF for the 7×7 window) is zeroed.
+  The Svelte component skips these zeroed pixels in the
+  outer corners when drawing rects (the inner pixels
+  are the meaningful region). This matches the
+  contract documented in the `NoiseMap` struct's rustdoc.
+- The "spatial correctness" test verifies that the
+  right half of a half-noisy fixture has >2x the mean
+  sigma of the left half. The 2x threshold (rather
+  than 10x) is to allow for the smoothing introduced
+  by the 7×7 window: near the boundary, the
+  estimator averages pixels from both sides, reducing
+  the apparent contrast.
+- No Tauri command-level tests were added; the noise
+  map logic is exercised via the unit tests on
+  `astroforge-core` (so `cargo test --workspace` and
+  CI's `rust` job both run them).
+
+Closes §23.3 of the §23 "Expert Comparison" spec.
+Next slice per the post-§23.3 priority list: §23.4
+(clipping masks) to flip §23 to "Shipped", or pivot
+to §24 Beginner mode per the refreshed audit priority.
+
 ### Slice §23.2: CR-07 Expert FWHM distribution panel (§23 sub-slice 2)
 
 **Scope.** The second of four §23 "Expert Comparison"

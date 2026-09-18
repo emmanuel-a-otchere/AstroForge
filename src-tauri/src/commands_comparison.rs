@@ -16,6 +16,7 @@
 
 use crate::commands_project::{lock_err, ProjectState};
 use astroforge_core::comparison::{ComparisonSet, ImageDecision, ImageDecisionState};
+use astroforge_core::comparison_metrics::ClippingMasks;
 use astroforge_core::comparison_metrics::FwhmHistogram;
 use astroforge_core::comparison_metrics::NoiseMap;
 use astroforge_core::comparison_metrics::VersionComparisonReport;
@@ -365,6 +366,48 @@ pub async fn get_version_noise_map(
     Ok(NoiseMapDto {
         version_id,
         map,
+        width,
+        height,
+    })
+}
+
+// CR-07 §23.4: per-version clipping masks (highlight + shadow).
+
+/// Response envelope for `get_version_clipping_masks`:
+/// the per-pixel highlight + shadow clipping masks plus
+/// their summary stats. The masks are flat row-major
+/// u8 arrays of `width * height` pixels, indexed as
+/// `mask[y * width + x]`. Each byte is `1` if the pixel
+/// is clipped, `0` otherwise.
+#[derive(Serialize)]
+pub struct ClippingMasksDto {
+    pub version_id: String,
+    pub masks: ClippingMasks,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub async fn get_version_clipping_masks(
+    version_id: String,
+    state: tauri::State<'_, ProjectState>,
+) -> Result<ClippingMasksDto, String> {
+    let project_root = lock_err(&state)?;
+    let project_root_for_block = project_root.clone();
+    let version_id_for_block = version_id.clone();
+    let (masks, width, height) = tokio::task::spawn_blocking(move || {
+        let store = DomainStore::open(&project_root_for_block)?;
+        let img = load_pixels(&store, &version_id_for_block)?;
+        let w = img.width() as u32;
+        let h = img.height() as u32;
+        let m = astroforge_core::comparison_metrics::clipping_masks(&img);
+        Ok::<(ClippingMasks, u32, u32), String>((m, w, h))
+    })
+    .await
+    .map_err(|e| format!("clipping masks task failed: {e}"))??;
+    Ok(ClippingMasksDto {
+        version_id,
+        masks,
         width,
         height,
     })

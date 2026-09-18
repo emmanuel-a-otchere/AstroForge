@@ -788,6 +788,52 @@ export const getVersionNoiseMap = (
 ): Promise<NoiseMapSnapshot> =>
   invoke("get_version_noise_map", { versionId }) as Promise<NoiseMapSnapshot>;
 
+// CR-07 §23.4: Clipping masks (highlight + shadow, expert panel).
+
+/**
+ * Per-version per-pixel highlight + shadow clipping
+ * masks. The image is downsampled to the preview budget
+ * (≤256 px on the long axis); for each preview pixel we
+ * record whether it is highlight-clipped (v >= 0.99)
+ * and/or shadow-clipped (v <= 0.01). The thresholds match
+ * the established codebase conventions
+ * (`image_analysis::metrics::highlight_clipping` uses
+ * `>= 0.99`; `quality_gates::clipping` uses both
+ * `<= 0.01` and `>= 0.99`).
+ *
+ * `highlightMask` and `shadowMask` are flat row-major
+ * u8 arrays of `width * height` pixels, indexed as
+ * `mask[y * width + x]`. Each byte is `1` if the pixel is
+ * clipped, `0` otherwise. The two masks never overlap
+ * (a pixel cannot be both highlight- and shadow-clipped).
+ */
+export interface ClippingMasksData {
+  width: number;
+  height: number;
+  /** 1 = highlight-clipped (`v >= 0.99`), 0 = not. */
+  highlightMask: number[];
+  /** 1 = shadow-clipped (`v <= 0.01`), 0 = not. */
+  shadowMask: number[];
+  highlightCount: number;
+  shadowCount: number;
+  highlightFraction: number;
+  shadowFraction: number;
+}
+
+export interface ClippingMasksSnapshot {
+  versionId: string;
+  masks: ClippingMasksData;
+  width: number;
+  height: number;
+}
+
+export const getVersionClippingMasks = (
+  versionId: string,
+): Promise<ClippingMasksSnapshot> =>
+  invoke("get_version_clipping_masks", {
+    versionId,
+  }) as Promise<ClippingMasksSnapshot>;
+
 // CR-06 P5 — region-aware mask system. The mask
 // engine in `astroforge-core::masks` produces JSON
 // payloads via `astroforge_core::masks::encoding`;

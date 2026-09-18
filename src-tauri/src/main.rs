@@ -906,6 +906,10 @@ fn main() {
             // (per-pixel local sigma field + three-number
             // summary) for the expert noise map panel.
             commands_comparison::get_version_noise_map,
+            // CR-07 §23.4: per-version highlight + shadow
+            // clipping masks for the expert clipping-masks
+            // panel.
+            commands_comparison::get_version_clipping_masks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

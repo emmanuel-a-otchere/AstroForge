@@ -897,6 +897,11 @@ fn main() {
             // CR-07 §23.1: per-version full metric snapshot for
             // the expert channel-stats panel.
             commands_comparison::get_version_metric_snapshot,
+            // CR-07 §23.2: per-version FWHM distribution
+            // (per-star FWHM values + pre-binned histogram
+            // + seven-number summary) for the expert FWHM
+            // distribution panel.
+            commands_comparison::get_version_fwhm_distribution,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

@@ -713,6 +713,47 @@ export const getVersionMetricSnapshot = (
     VersionMetricSnapshot
   >;
 
+// CR-07 §23.2: FWHM distribution (expert panel).
+
+/**
+ * Per-version FWHM distribution: sorted per-star FWHM
+ * values, a seven-number summary (count, mean, median,
+ * p25, p75, min, max) in pixels, and a pre-binned
+ * histogram (Sturges' rule, capped to [1, 50] bins).
+ *
+ * `count == 0` means no stars were detected at the
+ * default 3σ threshold; `binEdges` and `counts` are
+ * empty, and the seven-number summary is `NaN`. The
+ * Svelte component renders a "No stars detected"
+ * message instead of a chart in that case.
+ */
+export interface FwhmHistogram {
+  count: number;
+  values: number[];
+  mean: number;
+  median: number;
+  p25: number;
+  p75: number;
+  min: number;
+  max: number;
+  binEdges: number[];
+  counts: number[];
+}
+
+export interface FwhmDistribution {
+  versionId: string;
+  histogram: FwhmHistogram;
+  width: number;
+  height: number;
+}
+
+export const getVersionFwhmDistribution = (
+  versionId: string,
+): Promise<FwhmDistribution> =>
+  invoke("get_version_fwhm_distribution", { versionId }) as Promise<
+    FwhmDistribution
+  >;
+
 // CR-06 P5 — region-aware mask system. The mask
 // engine in `astroforge-core::masks` produces JSON
 // payloads via `astroforge_core::masks::encoding`;

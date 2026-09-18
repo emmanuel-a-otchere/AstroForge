@@ -27,6 +27,7 @@ use crate::domain_store::{DomainStore, DomainStoreError};
 use crate::image::F32Image;
 use crate::image_analysis::metrics;
 use crate::metric_registry::{compute_deltas, MetricDeltaRow, MetricKind};
+use crate::registration::extract_stars;
 
 /// Compute the CR-07 §8 metric snapshot for one decoded image.
 ///
@@ -175,6 +176,156 @@ pub fn metric_snapshot_full(image: &F32Image) -> BTreeMap<String, f64> {
     let mut out = metric_snapshot(image);
     out.extend(channel_stats(image));
     out
+}
+
+// CR-07 §23.2: per-star FWHM distribution + histogram.
+
+/// CR-07 §23.2: full per-star FWHM distribution plus
+/// seven-number summary. The histogram is pre-binned
+/// (Sturges' rule, floored at 1 and capped at 50) so the
+/// frontend does not need to redo the bucketing work.
+///
+/// `count == 0` means "no stars detected at the
+/// default sigma threshold"; the bin edges and counts
+/// will be empty, the seven-number summary will be
+/// `f64::NAN`, and the histogram will be skipped by
+/// the Svelte component (it renders a "No stars
+/// detected" message instead).
+#[derive(Debug, Clone, Serialize)]
+pub struct FwhmHistogram {
+    /// Star count (= `Vec<f64>::len()` of `fwhm_distribution`).
+    pub count: usize,
+    /// Sorted raw FWHM values in pixels.
+    pub values: Vec<f64>,
+    /// Mean of `values`; `f64::NAN` if `count == 0`.
+    pub mean: f64,
+    /// Median of `values`; `f64::NAN` if `count == 0`.
+    pub median: f64,
+    /// 25th percentile (linear interpolation); `f64::NAN` if `count == 0`.
+    pub p25: f64,
+    /// 75th percentile (linear interpolation); `f64::NAN` if `count == 0`.
+    pub p75: f64,
+    /// Min; `f64::NAN` if `count == 0`.
+    pub min: f64,
+    /// Max; `f64::NAN` if `count == 0`.
+    pub max: f64,
+    /// Bin edges (`bins + 1` edges, in pixels). Empty if `count == 0`.
+    pub bin_edges: Vec<f64>,
+    /// Counts per bin (`bins` counts). Empty if `count == 0`.
+    pub counts: Vec<u32>,
+}
+
+/// CR-07 §23.2: extract per-star FWHM values from a
+/// decoded image. Wraps `registration::extract_stars`
+/// (sigma = 3.0 above the image mean) and returns the
+/// `fwhm` field of every detected star. Sort order
+/// matches `extract_stars` (brightest first), but the
+/// histogram function sorts again by value, so the
+/// frontend can rely on `FwhmHistogram.values` being
+/// non-decreasing.
+pub fn fwhm_distribution(image: &F32Image) -> Vec<f64> {
+    extract_stars(image, 3.0)
+        .into_iter()
+        .map(|s| s.fwhm)
+        .collect()
+}
+
+/// CR-07 §23.2: `fwhm_distribution` + pre-binned
+/// histogram + seven-number summary.
+///
+/// Edge cases:
+/// - `count == 0` returns a zeroed struct with
+///   `f64::NAN` summary stats and empty `bin_edges` /
+///   `counts` (the frontend renders "No stars
+///   detected").
+/// - `count == 1` returns one bin with that single
+///   value's FWHM as both the left and right edge (the
+///   histogram bar renders as a 1-pixel-wide column at
+///   that x-coordinate).
+/// - Bin count is `min(50, max(1, ceil(log2(n)) + 1))`
+///   (Sturges' rule, capped). For typical star counts
+///   (32 stars -> 6 bins, 256 -> 9 bins, 4096 -> 13
+///   bins) the histogram is readable.
+pub fn fwhm_histogram(image: &F32Image) -> FwhmHistogram {
+    let mut values = fwhm_distribution(image);
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let count = values.len();
+    if count == 0 {
+        return FwhmHistogram {
+            count: 0,
+            values,
+            mean: f64::NAN,
+            median: f64::NAN,
+            p25: f64::NAN,
+            p75: f64::NAN,
+            min: f64::NAN,
+            max: f64::NAN,
+            bin_edges: Vec::new(),
+            counts: Vec::new(),
+        };
+    }
+    let min = values[0];
+    let max = values[count - 1];
+    let sum: f64 = values.iter().sum();
+    let mean = sum / count as f64;
+    let median = percentile(&values, 0.5);
+    let p25 = percentile(&values, 0.25);
+    let p75 = percentile(&values, 0.75);
+
+    // Sturges' rule, capped to [1, 50].
+    let raw_bins = ((count as f64).log2().ceil() as usize).saturating_add(1);
+    let bins = raw_bins.clamp(1, 50);
+
+    let (bin_edges, counts) = if count == 1 {
+        // Single-value case: one bin centered on the value.
+        // Edges are [value, value] so the bar renders as a
+        // 1-pixel-wide column at that x-coordinate.
+        (vec![min, min], vec![1u32])
+    } else if min == max {
+        // All values identical (degenerate FWHM): one bin
+        // with both edges equal to that value, count = N.
+        (vec![min, min], vec![count as u32])
+    } else {
+        // Standard Sturges histogram. `bin_edges` has
+        // `bins + 1` entries; `counts` has `bins` entries.
+        let width = (max - min) / bins as f64;
+        let edges: Vec<f64> = (0..=bins).map(|i| min + i as f64 * width).collect();
+        let mut counts = vec![0u32; bins];
+        for v in &values {
+            let idx = ((v - min) / width).floor() as usize;
+            // Guard against `v == max` (which would index past the end).
+            let idx = idx.min(bins - 1);
+            counts[idx] += 1;
+        }
+        (edges, counts)
+    };
+
+    FwhmHistogram {
+        count,
+        values,
+        mean,
+        median,
+        p25,
+        p75,
+        min,
+        max,
+        bin_edges,
+        counts,
+    }
+}
+
+/// Linear-interpolation percentile (matches numpy's
+/// default `method="linear"`). `q` is in `[0, 1]`.
+fn percentile(sorted: &[f64], q: f64) -> f64 {
+    debug_assert!(!sorted.is_empty(), "percentile called on empty slice");
+    if sorted.len() == 1 {
+        return sorted[0];
+    }
+    let rank = q * (sorted.len() - 1) as f64;
+    let lo = rank.floor() as usize;
+    let hi = (lo + 1).min(sorted.len() - 1);
+    let frac = rank - lo as f64;
+    sorted[lo] * (1.0 - frac) + sorted[hi] * frac
 }
 
 /// The B4 payload consumed by `MetricsTable.svelte`: the full §10
@@ -628,5 +779,206 @@ mod tests {
         assert!(full.contains_key("channel.b.clip_count"));
         // 5 detector keys + 15 channel keys = 20 total.
         assert_eq!(full.len(), 20);
+    }
+
+    // ─── §23.2: FWHM distribution + histogram ────────────────
+
+    /// A 64×64 image with low-amplitude noise
+    /// (mean = 0.5, std ≈ 0.01): every pixel stays
+    /// below mean + 3σ, so `extract_stars` returns `[]`.
+    /// Used to exercise the "no stars detected"
+    /// histogram path. An exactly-flat image doesn't
+    /// work because every pixel sits exactly at
+    /// threshold and `extract_stars` picks them all up.
+    fn low_amplitude_noise_image(size: usize) -> F32Image {
+        let mut img = F32Image::new(size, size, 1);
+        for (i, v) in img.iter_mut().enumerate() {
+            // Deterministic low-amplitude pattern: values
+            // oscillate in roughly [0.485, 0.515] so the
+            // std is much smaller than the threshold.
+            let phase = (i % 7) as f32 * 0.005;
+            *v = 0.5 + phase - 0.015;
+        }
+        img
+    }
+
+    /// A 64×64 black image with a single bright star at the
+    /// centre (8x8 PSF). Used to exercise the single-star
+    /// histogram path.
+    fn single_star_image() -> F32Image {
+        let mut img = F32Image::new(64, 64, 1);
+        // Background: low but non-zero to give the image a
+        // defined mean + std (otherwise extract_stars would
+        // still find the peak but the threshold would be
+        // undefined).
+        for v in img.iter_mut() {
+            *v = 0.05;
+        }
+        // Star: an 8×8 peak in the centre, intensity 1.0.
+        for dy in -4i32..=4 {
+            for dx in -4i32..=4 {
+                let x = 32 + dx;
+                let y = 32 + dy;
+                if (0..64).contains(&x) && (0..64).contains(&y) {
+                    let r = ((dx * dx + dy * dy) as f32).sqrt();
+                    let falloff = (1.0 - r / 5.0).max(0.0);
+                    img[(0, y as usize, x as usize)] = 0.05 + falloff;
+                }
+            }
+        }
+        img
+    }
+
+    /// A 64×64 image with 5 stars of varying brightness and
+    /// FWHM, evenly distributed. Used to exercise multi-star
+    /// histogram + percentile paths.
+    fn five_star_image() -> F32Image {
+        let mut img = F32Image::new(64, 64, 1);
+        for v in img.iter_mut() {
+            *v = 0.05;
+        }
+        // Five peaks at different intensities + PSF sizes
+        // (FWHM in pixels: ~3, ~5, ~4, ~2, ~6).
+        // The integer type is pinned to `i32` so the
+        // `py + dy` expression below stays `i32` and
+        // the explicit `as usize` casts on `x`/`y` are
+        // the only narrowing operations clippy sees.
+        let peaks: [(i32, i32, f32, f32); 5] = [
+            (10, 10, 1.0, 3.0),
+            (32, 14, 0.9, 5.0),
+            (54, 18, 0.8, 4.0),
+            (16, 50, 0.7, 2.0),
+            (48, 50, 0.6, 6.0),
+        ];
+        for &(px, py, peak_intensity, fwhm) in &peaks {
+            let sigma = fwhm / 2.355;
+            for dy in -8i32..=8 {
+                for dx in -8i32..=8 {
+                    let x = (px + dx) as usize;
+                    let y = (py + dy) as usize;
+                    if x < 64 && y < 64 {
+                        let r2 = (dx * dx + dy * dy) as f32;
+                        let v = peak_intensity * (-r2 / (2.0 * sigma * sigma)).exp();
+                        img[(0, y, x)] = (img[(0, y, x)] + v).max(0.05);
+                    }
+                }
+            }
+        }
+        img
+    }
+
+    #[test]
+    fn fwhm_histogram_returns_zeroed_for_image_with_no_stars_above_threshold() {
+        // The flat_image helper is exactly 0.5 everywhere;
+        // every pixel sits at threshold (mean + 3σ), and
+        // extract_stars treats all of them as above-threshold
+        // local maxima (it picks them all up). To exercise
+        // the "no stars detected" path we need a noisy image
+        // where no pixel exceeds mean + 3σ. A 64×64 image
+        // with mean = 0.5, std ≈ 0.01, threshold = 0.53:
+        // none of the pixels reach it.
+        let img = low_amplitude_noise_image(64);
+        let h = fwhm_histogram(&img);
+        assert_eq!(h.count, 0);
+        assert!(h.values.is_empty());
+        assert!(h.bin_edges.is_empty());
+        assert!(h.counts.is_empty());
+        assert!(h.mean.is_nan());
+        assert!(h.median.is_nan());
+        assert!(h.min.is_nan());
+        assert!(h.max.is_nan());
+    }
+
+    #[test]
+    fn fwhm_histogram_handles_single_star() {
+        let img = single_star_image();
+        let h = fwhm_histogram(&img);
+        assert_eq!(h.count, 1, "expected exactly one star");
+        assert!(!h.values.is_empty());
+        // Single star -> single bin, count = 1.
+        assert_eq!(h.bin_edges.len(), 2);
+        assert_eq!(h.counts.len(), 1);
+        assert_eq!(h.counts[0], 1);
+        // All summary stats equal the single value.
+        assert!((h.mean - h.values[0]).abs() < 1e-9);
+        assert!((h.median - h.values[0]).abs() < 1e-9);
+        assert!((h.min - h.values[0]).abs() < 1e-9);
+        assert!((h.max - h.values[0]).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fwhm_histogram_handles_multi_star_distribution() {
+        let img = five_star_image();
+        let h = fwhm_histogram(&img);
+        // The 5-peak test image should yield ≥ 5 detected
+        // stars (extract_stars de-dups overlapping local maxima
+        // within a 5-pixel radius, so tightly-spaced peaks may
+        // collapse). We assert the histogram is non-empty.
+        assert!(h.count >= 5, "expected ≥ 5 stars, got {}", h.count);
+        // Bins: Sturges' rule. For 5 stars: bins = 4; for 8+:
+        // bins = 5; capped to [1, 50].
+        let expected_bins = ((h.count as f64).log2().ceil() as usize + 1).clamp(1, 50);
+        assert_eq!(h.bin_edges.len(), expected_bins + 1);
+        assert_eq!(h.counts.len(), expected_bins);
+        // Total count in the histogram bins equals the star count.
+        assert_eq!(h.counts.iter().sum::<u32>() as usize, h.count);
+        // All summary stats are within [min, max].
+        assert!(h.min <= h.p25);
+        assert!(h.p25 <= h.median);
+        assert!(h.median <= h.p75);
+        assert!(h.p75 <= h.max);
+    }
+
+    #[test]
+    fn fwhm_histogram_is_deterministic_for_same_input() {
+        let img = five_star_image();
+        let h1 = fwhm_histogram(&img);
+        let h2 = fwhm_histogram(&img);
+        assert_eq!(h1.count, h2.count);
+        assert_eq!(h1.values, h2.values);
+        assert_eq!(h1.bin_edges, h2.bin_edges);
+        assert_eq!(h1.counts, h2.counts);
+        assert!((h1.mean - h2.mean).abs() < 1e-12);
+        assert!((h1.median - h2.median).abs() < 1e-12);
+    }
+
+    #[test]
+    fn fwhm_distribution_returns_one_value_per_star() {
+        let img = five_star_image();
+        let dist = fwhm_distribution(&img);
+        let hist = fwhm_histogram(&img);
+        // The distribution is the un-sorted, un-binned raw
+        // per-star FWHM list; the histogram is sorted + binned.
+        // Both have the same count.
+        assert_eq!(dist.len(), hist.count);
+        // All values are positive (FWHM is a length in pixels).
+        for &v in &dist {
+            assert!(v > 0.0, "FWHM must be positive: got {}", v);
+        }
+    }
+
+    #[test]
+    fn fwhm_histogram_percentiles_match_linear_interp() {
+        // For the multi-star image, the 50th percentile must
+        // match the numpy-style linear interpolation between
+        // the two middle values (or the middle value if odd).
+        let img = five_star_image();
+        let hist = fwhm_histogram(&img);
+        if hist.count >= 2 {
+            let mut sorted = hist.values.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let n = sorted.len();
+            let expected_median = if n % 2 == 1 {
+                sorted[n / 2]
+            } else {
+                (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+            };
+            assert!(
+                (hist.median - expected_median).abs() < 1e-9,
+                "median {} != expected {}",
+                hist.median,
+                expected_median
+            );
+        }
     }
 }

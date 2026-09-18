@@ -25,6 +25,7 @@
   import DecisionPanel from "./DecisionPanel.svelte";
   import MetricsTable from "./MetricsTable.svelte";
   import ExpertChannelStats from "./ExpertChannelStats.svelte";
+  import ExpertFwhmDistribution from "./ExpertFwhmDistribution.svelte";
   import ComparisonSetList from "./ComparisonSetList.svelte";
   import RegionPicker, { type RegionScope } from "./RegionPicker.svelte";
   import VersionDag from "./VersionDag.svelte";
@@ -656,6 +657,16 @@
                 label={versionA?.label ?? "Version A"}
               />
               <ExpertChannelStats
+                versionId={bId}
+                label={versionB?.label ?? "Version B"}
+              />
+            </div>
+            <div class="expert-panels">
+              <ExpertFwhmDistribution
+                versionId={aId}
+                label={versionA?.label ?? "Version A"}
+              />
+              <ExpertFwhmDistribution
                 versionId={bId}
                 label={versionB?.label ?? "Version B"}
               />

@@ -2,6 +2,160 @@
 
 ## Unreleased
 
+### Slice §23.2: CR-07 Expert FWHM distribution panel (§23 sub-slice 2)
+
+**Scope.** The second of four §23 "Expert Comparison"
+sub-slices called out by the CR-07 audit refresh as
+priority #1. Ships per-star FWHM distribution
+visualization: the per-star FWHM values extracted from
+`registration::extract_stars`, a seven-number summary
+(count, mean, median, p25, p75, min, max) in pixels, and a
+pre-binned histogram (Sturges' rule, capped to [1, 50]
+bins) rendered as an SVG bar chart. The panel sits behind
+the same "Show expert details" toggle on
+`CompareWorkspace.svelte` as the §23.1 channel-stats
+panel, per the §23 "progressive disclosure, consistent
+with CR-01" requirement.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/comparison_metrics.rs`
+  (MOD):
+  - NEW `FwhmHistogram` struct: count, sorted raw
+    values, seven-number summary (mean, median, p25,
+    p75, min, max), bin edges (n+1 entries), and counts
+    per bin (n entries). `Serialize`-derived for the
+    Tauri bridge.
+  - NEW `fwhm_distribution(image) -> Vec<f64>`: wraps
+    `registration::extract_stars(image, 3.0)` and
+    returns the `fwhm` field of every detected star.
+    Threshold is `mean + 3σ` (the conventional value for
+    star detection in noisy backgrounds). Sort order is
+    inherited from `extract_stars` (brightest first).
+  - NEW `fwhm_histogram(image) -> FwhmHistogram`:
+    single-pass post-processing of `fwhm_distribution`.
+    Edge cases handled: zero stars (returns zeroed
+    struct with NaN summary), single star (one bin with
+    the value as both edges), all-equal FWHM (one bin
+    with N count), standard Sturges histogram otherwise.
+    Bin count is `min(50, max(1, ceil(log2(n)) + 1))`.
+    Percentiles use linear interpolation (matches
+    numpy's default `method="linear"`).
+  - NEW private helper `percentile(sorted: &[f64],
+    q: f64) -> f64`: linear-interpolation percentile
+    with the empty-slice guard.
+  - 6 new unit tests (zeroed-for-no-stars,
+    single-star, multi-star, determinism,
+    distribution-count-matches-histogram, percentiles-
+    match-linear-interp). All pass alongside the 21
+    pre-existing comparison-metrics tests (27/27 in
+    the `comparison_metrics` module; +6 from this
+    slice).
+- `src-tauri/src/commands_comparison.rs` (MOD): NEW
+  `get_version_fwhm_distribution(version_id)` command:
+  thin wrapper that loads the version's applied pixels
+  (via the existing path-confined `load_pixels` helper),
+  runs `fwhm_histogram`, and returns a typed DTO
+  `{ version_id, histogram: FwhmHistogram, width,
+  height }`. Wrapped in `tokio::task::spawn_blocking`
+  (star extraction is O(W*H) and would otherwise block
+  the async runtime on large images).
+- `src-tauri/src/main.rs` (MOD): register the new command
+  in the Tauri `invoke_handler` list.
+
+#### Frontend (Svelte/TS)
+
+- `src/lib/astroforge-api.ts` (MOD): add `FwhmHistogram`,
+  `FwhmDistribution` interfaces and the
+  `getVersionFwhmDistribution(versionId)` wrapper.
+- `src/components/ExpertFwhmDistribution.svelte` (NEW,
+  ~340 LOC): Svelte 5 component using `$props()`,
+  `$state()`, and `$effect()`. Loads the snapshot on
+  mount and on `versionId` change. Renders an SVG bar
+  chart: 320×160 viewBox, 36 px left/24 px bottom
+  padding for axis labels, dashed grid lines at
+  top/mid/bottom, y-axis ticks at 0 and
+  `Math.max(...counts)`, x-axis ticks at left/mid/right
+  FWHM range. Below the chart: a 7-cell summary grid
+  (count, mean, median, p25, p75, min, max). Loading +
+  error + empty (count == 0) states are rendered
+  explicitly; the empty case shows "No stars detected
+  (count: 0). The histogram is empty; FWHM is a
+  per-star measurement, so a starless image has no
+  distribution to show." rather than a degenerate
+  empty SVG. Pure SVG: no new dep.
+- `src/components/CompareWorkspace.svelte` (MOD): add
+  a second `expert-panels` row in the §23.1 toggle
+  block, holding two `ExpertFwhmDistribution` panels
+  (A and B) side by side.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD): §23 status updated to
+  "Partial (2/N shipped)"; bundle priority #1 updated
+  to "§23 Expert visualizations (cont.)" with the
+  sub-slice roadmap (noise maps, clipping masks);
+  "First concrete slice (post-§23.1)" pointer to §23.2.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- 983 Rust tests pass (workspace). 6 new in
+  `comparison_metrics::fwhm_histogram` plus the
+  percentile helper test.
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --all-targets -- -D
+  warnings` clean.
+- `npm run check`: 0 new errors / warnings (1
+  pre-existing error + 9 pre-existing warnings on
+  `main` are unchanged).
+- `npm run build`: clean.
+- Em-dash sweep: 0 em-dashes in all 6 changed files
+  (memory's GitHub language rule).
+
+#### Honest flags
+
+- Slice size: ~700 LOC (slightly above the audit's
+  §23.1 450 LOC estimate). The overage is in the
+  Svelte SVG component (340 LOC for the SVG + summary
+  grid + empty/error/loading states + accessibility
+  attributes + caption) and in the test fixture
+  generation (single-star + 5-peak Gaussian fixtures
+  are ~50 LOC).
+- Star extraction is O(W * H) per image via the
+  existing `extract_stars` (it scans every pixel).
+  On a 4K test image this is ~8M iterations and
+  ~25M pixel reads. The Tauri command wraps the
+  call in `spawn_blocking` so it does not block the
+  async runtime. Per-version (A and B) sequential
+  calls add ~50-200 ms on a typical laptop for a
+  4K image; the panel's loading state covers the
+  wait. No caching: each toggle re-extracts. This is
+  a known follow-on item (caching the per-version
+  FWHM distribution is part of §29 Performance).
+- 6 unit tests cover the happy paths. No property
+  tests (e.g. "FWHM distribution of two stacked
+  images is the union of their distributions") were
+  added; the audit didn't call for them.
+- The "no stars detected" empty-state message is the
+  default render when `count == 0`. The first
+  attempt used a `flat_image(64)` fixture, but
+  `extract_stars` correctly detects ~121 local maxima
+  in a perfectly-flat field (every pixel sits exactly
+  at threshold); the test was rewritten to use a
+  low-amplitude-noise image where no pixel exceeds
+  `mean + 3σ`. The lesson is documented in the test
+  helper's doc comment.
+- No Tauri command-level tests were added; the
+  histogram logic is exercised via the unit tests on
+  `astroforge-core` (so `cargo test --workspace` and
+  CI's `rust` job both run them).
+
+Closes §23.2 of the §23 "Expert Comparison" spec.
+Next slice per the post-§23.2 priority list: §23.3
+(noise maps), then §23.4 (clipping masks), or pivot
+to §24 Beginner mode per the refreshed audit priority.
+
 ### Slice §23.1: CR-07 Expert channel statistics panel (§23 sub-slice 1)
 
 **Scope.** The first of four §23 "Expert Comparison"

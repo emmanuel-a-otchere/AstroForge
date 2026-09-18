@@ -236,21 +236,38 @@ threads it through `applyImageDecision` into the
 `image_decisions.quality_profile` column. Legacy rows surface
 "Profile not recorded".
 
-## §23 Expert Comparison: ⚠ Partial (1/N shipped)
+## §23 Expert Comparison: ⚠ Partial (2/N shipped)
 
-The Quality Gate Panel shows expert-level metric detail. **Missing:**
-first-class FWHM distribution visualization, noise maps, clipping
-masks. **Shipped (this slice, §23.1):** per-channel statistics
-(per-channel mean, stddev, min, max, clip count) for R/G/B (and
-c{n} for the 4th-and-beyond channels). The data path is
-`channel_stats(image) -> BTreeMap<String, f64>` in
-`astroforge-core::comparison_metrics`, exposed via the new
-`get_version_metric_snapshot` Tauri command, consumed by the
-`ExpertChannelStats.svelte` panel. The panel sits behind a
-"Show expert details" toggle on `CompareWorkspace.svelte` per
-the §23 "progressive disclosure, consistent with CR-01"
-requirement. Remaining §23 sub-items (FWHM distribution, noise
-maps, clipping masks) are out of scope for this slice and
+The Quality Gate Panel shows expert-level metric detail.
+**Missing:** first-class FWHM distribution visualization
+in chart form, noise maps, clipping masks.
+
+**Shipped:**
+- §23.1 (this audit refresh's first slice): per-channel
+  statistics (per-channel mean, stddev, min, max, clip count)
+  for R/G/B (and c{n} for the 4th-and-beyond channels). The
+  data path is `channel_stats(image) -> BTreeMap<String, f64>`
+  in `astroforge-core::comparison_metrics`, exposed via the
+  `get_version_metric_snapshot` Tauri command, consumed by
+  the `ExpertChannelStats.svelte` panel.
+- §23.2 (second slice): per-star FWHM distribution
+  visualization. The data path is
+  `fwhm_histogram(image) -> FwhmHistogram` (calls
+  `registration::extract_stars` for per-star FWHM values,
+  pre-bins them with Sturges' rule capped to [1, 50] bins,
+  and computes a seven-number summary: count, mean, median,
+  p25, p75, min, max), exposed via the new
+  `get_version_fwhm_distribution` Tauri command, consumed by
+  the `ExpertFwhmDistribution.svelte` panel. The panel
+  renders an SVG bar chart plus the seven-number summary
+  underneath. Empty-image case renders a "No stars detected"
+  message rather than a degenerate empty chart.
+
+The two expert panels sit behind a single "Show expert
+details" toggle on `CompareWorkspace.svelte` per the §23
+"progressive disclosure, consistent with CR-01"
+requirement. Remaining §23 sub-slices (noise maps, clipping
+masks) are out of scope for the first two slices and
 remain "Missing".
 
 ## §24 Beginner Comparison: ⚠ Partial
@@ -446,7 +463,7 @@ Given the refresh, the remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§23 Expert visualizations (cont.)** | 1/N shipped (§23.1 channel stats). Next sub-slices: FWHM distribution, noise maps, clipping masks |
+| **1** | **§23 Expert visualizations (cont.)** | 2/N shipped (§23.1 channel stats + §23.2 FWHM distribution). Next sub-slices: noise maps, clipping masks |
 | **2** | **§24 Beginner mode** | "Which do you prefer?" + 1-paragraph explanation beneath each option |
 | **3** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub) |
 | **4** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface |
@@ -454,15 +471,17 @@ Given the refresh, the remaining work is:
 | **6** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
 | **7** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
 
-## First concrete slice (post-§20)
+## First concrete slice (post-§23.1)
 
-**§23.1 channel statistics** is the first sub-slice of §23:
-per-channel (R, G, B, c{n}) mean, stddev, min, max, and clip
-count. ~450 LOC across Rust + TS (Rust computation in
-`comparison_metrics::channel_stats` + Tauri command +
-Svelte panel + CompareWorkspace toggle). FWHM distribution,
-noise maps, and clipping-mask visualizations remain as
-follow-on §23 sub-slices.
+**§23.2 FWHM distribution** is the second sub-slice of
+§23: per-star FWHM values (count, mean, median, p25, p75,
+min, max) plus a pre-binned histogram (Sturges' rule,
+capped to [1, 50] bins) rendered as an SVG bar chart.
+~700 LOC across Rust + TS (Rust computation in
+`comparison_metrics::fwhm_histogram` + Tauri command +
+Svelte SVG panel + CompareWorkspace panel row). Noise
+maps and clipping-mask visualizations remain as follow-on
+§23 sub-slices.
 
 ## Items the audit surfaced that the original implementation plan missed
 

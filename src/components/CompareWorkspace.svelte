@@ -24,6 +24,7 @@
   import CompareTools from "./CompareTools.svelte";
   import DecisionPanel from "./DecisionPanel.svelte";
   import MetricsTable from "./MetricsTable.svelte";
+  import ExpertChannelStats from "./ExpertChannelStats.svelte";
   import ComparisonSetList from "./ComparisonSetList.svelte";
   import RegionPicker, { type RegionScope } from "./RegionPicker.svelte";
   import VersionDag from "./VersionDag.svelte";
@@ -81,6 +82,12 @@
     y1: number;
   } | null>(null);
   let selectedFeature = $state<string | null>(null);
+  // CR-07 §23.1: toggle for the expert channel-stats panel.
+  // Default off: the panel is a progressive-disclosure surface
+  // per CR-01 + §23 ("should remain progressive disclosure,
+  // consistent with CR-01"). Hiding by default keeps the
+  // beginner / intermediate experience clean.
+  let showExpertDetails = $state(false);
 
   // Overlay regions handed to ImageCanvas. Always empty for
   // "whole" scope (whole-image has no visual overlay); populated
@@ -621,6 +628,40 @@
           feature={selectedFeature}
           hasRegion={selectedRegion !== null}
         />
+        {#if aId && bId}
+          <div class="expert-toggle-row">
+            <button
+              type="button"
+              class="expert-toggle"
+              class:active={showExpertDetails}
+              aria-expanded={showExpertDetails}
+              aria-controls="expert-channel-stats-panels"
+              onclick={() => (showExpertDetails = !showExpertDetails)}
+            >
+              {showExpertDetails ? "Hide" : "Show"} expert details
+            </button>
+            <p class="expert-hint">
+              Per-channel statistics (mean, stddev, min, max, clipped
+              pixels) for both versions. Per §23, this is the
+              progressive-disclosure surface: toggled on demand.
+            </p>
+          </div>
+          {#if showExpertDetails}
+            <div
+              id="expert-channel-stats-panels"
+              class="expert-panels"
+            >
+              <ExpertChannelStats
+                versionId={aId}
+                label={versionA?.label ?? "Version A"}
+              />
+              <ExpertChannelStats
+                versionId={bId}
+                label={versionB?.label ?? "Version B"}
+              />
+            </div>
+          {/if}
+        {/if}
         <div class="decision-row">
           <DecisionPanel
             versionId={aId}
@@ -1058,8 +1099,53 @@
     gap: var(--sp-md);
   }
 
+  /* CR-07 §23.1: expert toggle + panel layout. The
+     toggle row is a single line with a button and a
+     one-line hint; the panels below mirror the
+     decision-row / provenance-row two-column layout. */
+  .expert-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-md);
+    margin-top: var(--sp-md);
+    flex-wrap: wrap;
+  }
+
+  .expert-toggle {
+    background: var(--surface-1, #1a1a1a);
+    color: var(--text-dim, #aaa);
+    border: 1px solid var(--border-subtle, #2a2a2a);
+    border-radius: 4px;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .expert-toggle.active {
+    background: var(--accent, #4a8eff);
+    color: white;
+    border-color: var(--accent, #4a8eff);
+  }
+
+  .expert-hint {
+    margin: 0;
+    color: var(--text-dim, #888);
+    font-size: 0.8rem;
+    line-height: 1.4;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .expert-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-md);
+    margin-top: var(--sp-sm);
+  }
+
   @media (max-width: 900px) {
-    .decision-row {
+    .decision-row,
+    .expert-panels {
       grid-template-columns: 1fr;
     }
   }

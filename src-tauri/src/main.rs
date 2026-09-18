@@ -894,6 +894,9 @@ fn main() {
             commands_comparison::delete_comparison_set,
             // CR-07 B4 — version-pair metric comparison (§10 + §11).
             commands_comparison::compare_version_metrics,
+            // CR-07 §23.1: per-version full metric snapshot for
+            // the expert channel-stats panel.
+            commands_comparison::get_version_metric_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

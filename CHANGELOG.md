@@ -2,7 +2,132 @@
 
 ## Unreleased
 
-### Slice §20: CR-07: Post-comparison recommendation feedback loop (§20 close-out)
+### Slice §23.1: CR-07 Expert channel statistics panel (§23 sub-slice 1)
+
+**Scope.** The first of four §23 "Expert Comparison"
+sub-slices called out by the CR-07 audit refresh as
+priority #1. Ships per-channel (R, G, B, c{n}) statistics
+for both sides of a comparison: mean, stddev, min, max, and
+clip count. The panel sits behind a "Show expert details"
+toggle on `CompareWorkspace.svelte` per the §23
+"progressive disclosure, consistent with CR-01" requirement.
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/comparison_metrics.rs`:
+  - NEW `channel_stats(image) -> BTreeMap<String, f64>`:
+    single-pass O(N) computation over the `Array3<f32>`
+    pixels, maintaining per-channel f64 sums / sum-of-squares
+    / min / max / clip count. R/G/B for the first three
+    channels, c{n} numeric suffix for the 4th-and-beyond
+    (narrowband support). The clip threshold is `>= 1.0` on
+    the normalized scale (matches the highlight-clipping
+    detector in `image_analysis::metrics`).
+  - NEW `metric_snapshot_full(image) -> BTreeMap<String, f64>`:
+    merges the existing 5 detector-backed keys from
+    `metric_snapshot` with the 5 per-channel stat keys from
+    `channel_stats`. The delta table (`compute_deltas`) and
+    the post-comparison recommendation rule
+    (`build_delta_table`) read only the detector-backed
+    keys, so this is additive: no existing data path breaks.
+  - 7 new unit tests (closed-form values, stddev against a
+    known distribution, clip threshold boundary, 4-channel
+    numeric suffix, determinism, single-pixel edge case,
+    merged-snapshot key count). All pass alongside the
+    pre-existing 8 comparison-metrics tests (15/15 in the
+    `comparison_metrics` module).
+
+- `src-tauri/src/commands_comparison.rs`:
+  - NEW `get_version_metric_snapshot(version_id)` command:
+    thin wrapper that loads the version's applied pixels
+    (via the existing path-confined `load_pixels` helper),
+    runs `metric_snapshot_full`, and returns a typed DTO
+    `{ version_id, metrics: [{key, value}], width, height,
+    channels }`. The BTreeMap → Vec projection is the
+    only new logic.
+
+- `src-tauri/src/main.rs` (MOD): register the new command
+  in the Tauri `invoke_handler` list.
+
+#### Frontend (Svelte/TS)
+
+- `src/lib/astroforge-api.ts` (MOD): add
+  `VersionMetricEntry`, `VersionMetricSnapshot` interfaces
+  and the `getVersionMetricSnapshot(versionId)` wrapper.
+- `src/components/ExpertChannelStats.svelte` (NEW, ~200
+  LOC): Svelte 5 component using `$props()`, `$state()`, and
+  `$effect()`. Loads the snapshot on mount + on `versionId`
+  change, groups the flat `metrics[]` array by channel
+  label, sorts R, G, B, c3, c4, ... in canonical order,
+  renders a 6-column table (Channel / Mean / Stddev / Min /
+  Max / Clipped pixels). Loading + error states are
+  rendered explicitly; the clip column formats as both
+  count and percent of total pixels.
+- `src/components/CompareWorkspace.svelte` (MOD): add
+  `showExpertDetails` state (default `false` per the
+  progressive-disclosure requirement), a "Show/Hide expert
+  details" toggle button (with `aria-expanded` and
+  `aria-controls`), and the two `ExpertChannelStats` panels
+  inside a 2-column grid that mirrors the
+  DecisionPanel / ProvenancePanel layout. The toggle only
+  renders when both `aId` and `bId` are set (i.e. the user
+  has a comparison to inspect).
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD): §23 status updated to "⚠
+  Partial (1/N shipped)"; bundle priority #1 updated to
+  "§23 Expert visualizations (cont.)" with the sub-slice
+  roadmap; "First concrete slice" pointer updated to §23.1.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- 957 Rust tests pass (workspace); 7 new in
+  `comparison_metrics::channel_stats` plus the merged
+  snapshot test.
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`
+  clean.
+- `npm run check`: 0 new errors / warnings (1 pre-existing
+  error + 9 pre-existing warnings on `main` are unchanged).
+- `npm run build`: clean.
+- Em-dash sweep: 0 em-dashes in all 6 changed files (the
+  §23.1 audit entry is in the new content; old content
+  untouched per memory's surgical-clean policy).
+
+#### Honest flags
+
+- Slice size: 454 insertions + 1 new file (~200 LOC),
+  1 deletion (a redundant duplicate-media-query in
+  `CompareWorkspace.svelte` that the new section
+  subsumed).
+- The §23 audit row status changed from "⚠ Partial" to
+  "⚠ Partial (1/N shipped)" rather than the standard
+  "Shipped" / "Partial" / "Missing" because the §23
+  sub-slices are independent (FWHM distribution, noise
+  maps, clipping masks are still "Missing"). Future
+  §23.2..N can flip the row to "Shipped" once the last
+  sub-slice lands.
+- The scorecard did not change in this slice: the §23 row
+  was already "Partial" before, and "Partial" after.
+  Channel statistics is one of four sub-items listed in
+  the §23 "Missing" text, so closing it shifts the row
+  from "Missing X, Y, Z" to "Missing Y, Z" without
+  changing the partial/shipped bucket. The post-§20 score
+  remains 62 shipped / 22 partial / 3 missing.
+- No CLI / Tauri command-level tests were added; the
+  channel-stats logic is exercised via the unit tests
+  on `astroforge-core` (so `cargo test --workspace` and
+  CI's `rust` job both run them).
+
+Closes §23.1 of the §23 "Expert Comparison" spec. Next
+slice per the post-§23.1 priority list: §23.2 (FWHM
+distribution), then §23.3 (noise maps), then §23.4
+(clipping masks), or pivot to §24 Beginner mode per the
+refreshed audit priority.
+
+### Slice §20: CR-07 Post-comparison recommendation feedback loop (§20 close-out)
 
 **Scope.** Closes the §-level "Missing" flagged in the CR-07
 audit refresh as priority #1. The other recommendation rules

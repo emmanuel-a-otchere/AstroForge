@@ -902,6 +902,10 @@ fn main() {
             // + seven-number summary) for the expert FWHM
             // distribution panel.
             commands_comparison::get_version_fwhm_distribution,
+            // CR-07 §23.3: per-version 2D noise map
+            // (per-pixel local sigma field + three-number
+            // summary) for the expert noise map panel.
+            commands_comparison::get_version_noise_map,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AstroForge");

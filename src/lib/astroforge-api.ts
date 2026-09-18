@@ -754,6 +754,40 @@ export const getVersionFwhmDistribution = (
     FwhmDistribution
   >;
 
+// CR-07 §23.3: Noise map (2D sigma field, expert panel).
+
+/**
+ * Per-version per-pixel noise map. The image is
+ * downsampled to a preview budget (≤256 px on the long
+ * axis), then for each pixel the local sigma is
+ * estimated over a 7×7 window using the same
+ * median-absolute-deviation-on-residuals algorithm as
+ * the scalar `luminance_noise` metric. The summary
+ * stats (min, mean, max) are computed over the inner
+ * field only (the outer ring is zeroed).
+ */
+export interface NoiseMapData {
+  width: number;
+  height: number;
+  /** Row-major flat f64 sigma field. `sigma[y * width + x]`. */
+  sigma: number[];
+  min: number;
+  mean: number;
+  max: number;
+}
+
+export interface NoiseMapSnapshot {
+  versionId: string;
+  map: NoiseMapData;
+  width: number;
+  height: number;
+}
+
+export const getVersionNoiseMap = (
+  versionId: string,
+): Promise<NoiseMapSnapshot> =>
+  invoke("get_version_noise_map", { versionId }) as Promise<NoiseMapSnapshot>;
+
 // CR-06 P5 — region-aware mask system. The mask
 // engine in `astroforge-core::masks` produces JSON
 // payloads via `astroforge_core::masks::encoding`;

@@ -28,6 +28,7 @@
   import ExpertFwhmDistribution from "./ExpertFwhmDistribution.svelte";
   import ExpertNoiseMap from "./ExpertNoiseMap.svelte";
   import ExpertClippingMasks from "./ExpertClippingMasks.svelte";
+  import BeginnerComparePrompt from "./BeginnerComparePrompt.svelte";
   import ComparisonSetList from "./ComparisonSetList.svelte";
   import RegionPicker, { type RegionScope } from "./RegionPicker.svelte";
   import VersionDag from "./VersionDag.svelte";
@@ -394,6 +395,22 @@
     </div>
 
     {#if versionA?.primary_artifact_id && versionB?.primary_artifact_id}
+      <!-- CR-07 §24: "Which do you prefer?"
+           beginner-mode prompt. Renders a simple
+           two-button preference question above the
+           existing mode toggle. The buttons thread
+           through applyImageDecision(versionId,
+           "preferred") via the existing IPC. The
+           DecisionPanel + decision store pick up the
+           preference; the prompt collapses after
+           the user picks. -->
+      <BeginnerComparePrompt
+        aId={aId}
+        aLabel={versionA?.label ?? "A"}
+        bId={bId}
+        bLabel={versionB?.label ?? "B"}
+        selectedQualityProfile={selectedQualityProfile}
+      />
       <div class="mode-toggle">
         <button
           type="button"

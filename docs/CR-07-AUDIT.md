@@ -278,11 +278,21 @@ details" toggle on `CompareWorkspace.svelte` per the §23
 requirement. The bundle row ships + first concrete slice
 pointer updates with each sub-slice.
 
-## §24 Beginner Comparison: ⚠ Partial
+## §24 Beginner Comparison: ✅ Shipped
 
-Side-by-side A vs B is simple by default. **Missing:** the
-"Which do you prefer? [Natural] [AI Enhanced]" with one-paragraph
-explanation beneath each.
+Side-by-side A vs B is simple by default. The "Which
+do you prefer? [Natural] [AI Enhanced]" prompt with
+one-paragraph explanation beneath each option is now
+rendered above the existing comparison tools when both
+versions are selected. Each click writes the
+preference via the existing `applyImageDecision`
+IPC (`preferred` state); the `DecisionPanel` picks it
+up and persists it through the rest of the comparison
+workflow. The prompt collapses to a one-line
+"You picked X as the preferred version" summary after
+the user picks, with a "Change my pick" link to undo.
+The two options are equal-weight preference buttons
+(per §21 "No AI Winner"), not a winner-pick.
 
 ## §25 Comparison Data Model — ✅ Shipped
 
@@ -471,12 +481,11 @@ Given the refresh, the remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§24 Beginner mode** | "Which do you prefer?" + 1-paragraph explanation beneath each option. §23 Expert visualizations is now Shipped |
-| **2** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub) |
-| **3** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface |
-| **4** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
-| **5** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
-| **6** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
+| **1** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub). §23 + §24 are now both Shipped |
+| **2** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface |
+| **3** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
+| **4** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
+| **5** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
 
 ## First concrete slice (post-§23.3)
 
@@ -487,7 +496,19 @@ to the preview budget (≤256 px), then for each pixel we
 record whether it is highlight-clipped (`v >= 0.99`) or
 shadow-clipped (`v <= 0.01`). Thresholds match the
 established codebase conventions. ~600 LOC across Rust
-+ TS. **§23 closes (Shipped)** once this lands.
++ TS. **§23 closes (Shipped)** with this slice.
+
+## First concrete slice (post-§23)
+
+**§24 beginner comparison "Which do you prefer?"
+prompt** is the §24 close-out: a two-button preference
+question with 1-paragraph explanation beneath each
+option, rendered above the existing comparison tools
+when both versions are selected. Each click threads
+through `applyImageDecision(versionId, "preferred")`
+via the existing IPC; the prompt collapses after the
+user picks. Pure UI, ~250 LOC. **§24 closes
+(Shipped)** with this slice.
 
 ## Items the audit surfaced that the original implementation plan missed
 

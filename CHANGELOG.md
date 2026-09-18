@@ -2,6 +2,109 @@
 
 ## Unreleased
 
+### Slice §24: CR-07 Beginner comparison "Which do you prefer?" prompt (§24 close-out)
+
+**Scope.** Closes §24 "Beginner Comparison" called out
+by the CR-07 audit refresh as priority #1 post-§23.
+Ships the "Which do you prefer? [Natural] [AI
+Enhanced]" prompt with 1-paragraph explanation beneath
+each option, rendered above the existing comparison
+tools when both versions are selected.
+
+#### Frontend (Svelte/TS)
+
+- `src/components/BeginnerComparePrompt.svelte` (NEW,
+  ~250 LOC): Svelte 5 component using `$props()` and
+  `$state()`. Renders a two-button preference question
+  above the existing comparison surfaces. Each button
+  shows the version's label and a 1-paragraph
+  explanation of what choosing this version means:
+  "Natural: keep what the original capture gives you"
+  for A, "AI Enhanced: apply the AI's processing to
+  bring out faint details, smooth noise, and balance
+  the dynamic range" for B. Clicking a button threads
+  through `applyImageDecision(versionId, "preferred",
+  undefined, selectedQualityProfile)` via the
+  existing IPC. The prompt collapses to a one-line
+  "You picked X as the preferred version" summary
+  after the user picks, with a "Change my pick" link
+  to undo. Loading + error states are rendered
+  explicitly. Pure CSS, no new dep.
+- `src/components/CompareWorkspace.svelte` (MOD):
+  insert the `BeginnerComparePrompt` above the
+  existing `mode-toggle` block. The prompt only
+  renders when both versions have a primary
+  artifact (matching the existing comparison-tools
+  visibility condition). The existing expert
+  toggles + tools still work in beginner mode for
+  power users.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD): §24 status updated to
+  "Shipped". Bundle priority #1 updated to §19
+  close-out (new top-1, since both §23 and §24 are
+  now Shipped). "First concrete slice (post-§23)"
+  pointer updated to §24.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- 994 Rust tests pass (workspace). **0 new tests**
+  added (this slice is pure UI; existing
+  `applyImageDecision` tests cover the IPC contract).
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --all-targets -- -D
+  warnings` clean.
+- `npm run check`: 0 new errors / warnings (1
+  pre-existing error + 9 pre-existing warnings on
+  `main` are unchanged).
+- `npm run build`: clean.
+- Em-dash sweep: 0 em-dashes in all 4 changed files
+  (memory's GitHub language rule).
+
+#### Honest flags
+
+- Slice size: ~270 LOC. In line with the audit's
+  estimate for §24 (smallest "new-shape" slice). The
+  bulk is the Svelte component (~250 LOC for the
+  prompt UI + collapsed state + change-mind flow).
+- One small wiring slip caught before push: the
+  initial patch used `versionA?.id` (which doesn't
+  exist on `ImageVersion`) instead of the existing
+  `aId` state variable. The existing `aId`/`bId`
+  state vars are already used elsewhere in
+  `CompareWorkspace.svelte` (e.g. `markPreferred` at
+  line 240), so reusing them keeps the prompt
+  consistent with the existing flow.
+- **Pre-existing em-dashes on main, NOT introduced by
+  this slice.** `CompareWorkspace.svelte` already has
+  5 em-dashes in lines that pre-date this PR (e.g.
+  line 472 `versionA?.label ?? "em-dash"`). These are
+  GitHub-language-rule violations per memory's
+  directive but are out of scope for this slice
+  (per the **Coding Discipline** rule "Don't refactor
+  things that aren't broken"). They should be cleaned
+  in a separate chore PR.
+- §21 invariant preserved: the two buttons are
+  equal-weight preference buttons, not a winner-pick.
+  No AI ranking. The user decides; the system records
+  the decision.
+- The prompt's "Change my pick" link lets the user
+  re-expand the prompt and pick again. This is
+  per-page-load state (not persisted): picking again
+  overwrites the previous decision via the IPC. The
+  DecisionPanel + decision store handle persistence.
+- No new dependency. Pure CSS, no chart library, no
+  animation library.
+- Pure UI slice. No Rust changes. The CI "rust" job
+  is unchanged and runs the existing 994 tests. The
+  CI "frontend" job exercises the new component.
+
+Closes §24 of the CR-07 audit. **§24 fully shipped.**
+Next slice per the post-§24 priority list: §19 close-
+out (smallest remaining UI fix), then §26, §32, §9, §29.
+
 ### Slice §23.4: CR-07 Expert clipping masks panel (§23 sub-slice 4)
 
 **Scope.** The fourth and final §23 "Expert Comparison"

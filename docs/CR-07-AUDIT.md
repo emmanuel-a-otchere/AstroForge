@@ -200,10 +200,26 @@ Shipped in B3 (PR #324). `promote_image_version` /
 
 ## §19 Compare → Continue Workflow — ✅ Shipped
 
-Shipped in C-A1 (PR #339). CompareWorkspace's continue-bar offers
-"Mark Preferred", "Continue enhancing", "Create branch", "Export
-comparison". The first two are wired; the latter two were honest stubs
-in C-A1 (C-A2 wired export; create-branch remains a stub).
+Shipped in C-A1 (PR #339) + §19 close-out (PR #350).
+CompareWorkspace's continue-bar offers "Mark
+Preferred", "Continue enhancing", "Create branch",
+"Export comparison". All four are now wired:
+- Mark Preferred (B): wires to
+  `applyImageDecision("preferred")`.
+- Continue enhancing: navigates to Enhance with B
+  pre-selected.
+- Create branch (closed-out in this slice): wires
+  to a `createBranch()` handler that persists the
+  branch intent durably via
+  `applyImageDecision(bId, "preferred", "create_branch",
+  selectedQualityProfile)` AND navigates to Enhance.
+  The Quality Profile selection is threaded through
+  per C-A3.5. The recorded decision is the durable
+  breadcrumb that P5a's child-version IPC will
+  read when it lands (per the existing TODO at
+  `recommendationCard.svelte` line 11).
+- Export comparison: wires to `exportComparisonComposite`
+  (C-A2).
 
 ## §20 Intelligent Recommendation After Comparison: ✅ Shipped
 
@@ -481,11 +497,10 @@ Given the refresh, the remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub). §23 + §24 are now both Shipped |
-| **2** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface |
-| **3** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
-| **4** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
-| **5** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
+| **1** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface. §19 + §23 + §24 are all Shipped |
+| **2** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
+| **3** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
+| **4** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
 
 ## First concrete slice (post-§23.3)
 
@@ -498,17 +513,19 @@ shadow-clipped (`v <= 0.01`). Thresholds match the
 established codebase conventions. ~600 LOC across Rust
 + TS. **§23 closes (Shipped)** with this slice.
 
-## First concrete slice (post-§23)
+## First concrete slice (post-§24)
 
-**§24 beginner comparison "Which do you prefer?"
-prompt** is the §24 close-out: a two-button preference
-question with 1-paragraph explanation beneath each
-option, rendered above the existing comparison tools
-when both versions are selected. Each click threads
-through `applyImageDecision(versionId, "preferred")`
-via the existing IPC; the prompt collapses after the
-user picks. Pure UI, ~250 LOC. **§24 closes
-(Shipped)** with this slice.
+**§19 close-out "Create branch" stub wire** is the
+§19 close-out: enables the "Create branch" button
+that was an honest stub since C-A1. The new
+`createBranch()` handler persists the branch intent
+durably via `applyImageDecision(bId, "preferred",
+"create_branch", selectedQualityProfile)` AND
+navigates to Enhance. The recorded decision is the
+durable breadcrumb that P5a's child-version IPC will
+read when it lands. ~70 LOC. **§19 closes (already
+marked Shipped; the close-out fills the gap noted
+in the audit text).**
 
 ## Items the audit surfaced that the original implementation plan missed
 

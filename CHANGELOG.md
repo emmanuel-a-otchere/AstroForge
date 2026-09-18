@@ -2,6 +2,143 @@
 
 ## Unreleased
 
+### Slice §19 close-out: CR-07 "Create branch" stub wire
+
+**Scope.** Closes the remaining gap from the §19
+audit (the audit marked §19 as Shipped in C-A1 but
+its own text noted "create-branch remains a stub").
+This slice wires the button that has been disabled
+since C-A1 (PR #339, 2026-09-15).
+
+#### Frontend (Svelte/TS)
+
+- `src/components/CompareWorkspace.svelte` (MOD):
+  - NEW `createBranch()` handler: persists the
+    branch intent durably via
+    `applyImageDecision(bId, "preferred",
+    "create_branch", selectedQualityProfile)` AND
+    navigates to Enhance with
+    `studioViewport.setView("enhance")`. The
+    Quality Profile selection is threaded through
+    per C-A3.5 so the decision row records which
+    tier the user had in mind.
+  - NEW `createBranchBusy` + `createBranchError`
+    state vars (matching the `markPreferred` and
+    `exportComposite` patterns).
+  - The "Create branch" button now wires to the
+    handler: `disabled` is replaced with
+    `disabled={createBranchBusy || !bId}`, the
+    `title` becomes "Record a branch intent for B
+    and open Enhance", the `aria-label` becomes
+    "Create a new branch from version B" (no
+    longer "coming soon").
+  - NEW inline error display (`{#if
+    createBranchError}`) matching the existing
+    `markPreferredError` and `exportError` panels.
+  - The C-A1 action-bar comment block is updated
+    to note that "Create branch" is now wired (no
+    longer an "honest stub").
+
+#### Why this is the right minimal wire
+
+The full "create child version" IPC would require
+shipping P5a's `create_image_version` command (per
+the existing TODO at
+`RecommendationCard.svelte` line 11). That is a
+~500-800 LOC slice in its own right. The audit's
+priority-list phrasing ("Wire the 'Create branch'
+stub from C-A1") called for the smaller close-out
+rather than the full P5a implementation.
+
+This wire does two things distinctively:
+1. **Distinct from "Mark Preferred"**: Mark
+   Preferred only persists the decision; Create
+   branch persists AND navigates.
+2. **Distinct from "Continue enhancing"**: Continue
+   enhancing only navigates; Create branch
+   persists AND navigates, AND threads the user's
+   Quality Profile through to the decision row.
+
+The persisted `image_decisions` row with
+`reason="create_branch"` is the durable breadcrumb
+P5a can read when its `create_image_version` IPC
+ships. The decision row carries the user's Quality
+Profile selection, so P5a can pick up the user's
+recipe intent without re-asking.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD): §19 entry expanded
+  to list all four wired buttons (Mark Preferred,
+  Continue enhancing, Create branch, Export).
+  Bundle priority #1 updated to §26 Semantic API
+  (new top-1, since §19 + §23 + §24 are all
+  Shipped). "First concrete slice (post-§24)"
+  pointer set to §19 close-out.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- 994 Rust tests pass (workspace). **0 new tests**
+  added (this slice is pure UI; the existing
+  `apply_image_decision` Rust tests cover the IPC
+  contract that `createBranch` reuses).
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --all-targets -- -D
+  warnings` clean.
+- `npm run check`: 0 new errors / warnings (1
+  pre-existing error + 9 pre-existing warnings on
+  `main` are unchanged).
+- `npm run build`: clean.
+- Em-dash sweep: 0 em-dashes in the changed file
+  (memory's GitHub language rule).
+
+#### Honest flags
+
+- Slice size: ~70 LOC of new code, mostly the
+  `createBranch()` handler and the new state vars.
+  Plus updated comment block + button attributes.
+  In line with the audit's "smallest UI fix"
+  framing for §19 close-out.
+- **Pre-existing em-dashes on main, NOT introduced
+  by this slice.** `CompareWorkspace.svelte`
+  already has 5 em-dashes in lines that pre-date
+  this PR (e.g. line 472 `versionA?.label ??
+  "em-dash"`). These are GitHub-language-rule
+  violations per memory's directive but are out of
+  scope for this slice (per the **Coding
+  Discipline** rule "Don't refactor things that
+  aren't broken"). They should be cleaned in a
+  separate chore PR.
+- **One local fix cycle caught an em-dash.** The
+  initial C-A1 comment block update contained an
+  em-dash ("close-out: persists branch intent"),
+  flagged by the post-write em-dash sweep. Fixed
+  to use a colon before commit.
+- **No new dependency.** Pure UI. No chart
+  library, no animation library, no new IPC.
+- **No backend changes.** Reuses the existing
+  `apply_image_decision` IPC. The CI `rust` job
+  runs the existing 994 tests unchanged.
+- **Distinct from P5a.** The full child-version
+  creation IPC (which would actually create a new
+  `ImageVersion` row in the database) is P5a's
+  scope, per the existing TODO at
+  `RecommendationCard.svelte` line 11. This slice
+  only wires the UI; P5a will read the durable
+  breadcrumbs this slice creates.
+- **One slight indentation slip caught and fixed.**
+  The initial patch replaced the C-A1 comment
+  block and the broken-indent version slipped
+  through; a manual fix-up script restored the
+  2-space indent.
+
+Closes the §19 close-out gap noted in the audit
+text. **§19, §23, §24 all Shipped.** Next slice
+per the post-§19 priority list: §26 Semantic API
+(the largest remaining backend work), then §32,
+§9, §29.
+
 ### Slice §24: CR-07 Beginner comparison "Which do you prefer?" prompt (§24 close-out)
 
 **Scope.** Closes §24 "Beginner Comparison" called out

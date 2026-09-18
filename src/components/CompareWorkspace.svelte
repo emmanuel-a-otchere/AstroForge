@@ -263,6 +263,48 @@
     }
   }
 
+  // CR-07 §19 close-out: wire the "Create branch"
+  // stub from C-A1. Distinct from "Mark Preferred"
+  // (which only marks the decision) and from
+  // "Continue enhancing" (which only navigates).
+  // This handler does BOTH: it persists the
+  // branch intent durably via the existing
+  // applyImageDecision IPC (state="preferred",
+  // reason="create_branch") AND navigates to the
+  // Enhance workspace, where the user can pick
+  // a recipe tier and run the enhancement that
+  // will produce the child version. The Quality
+  // Profile selection is threaded through (per
+  // C-A3.5) so the decision row records which
+  // tier the user had in mind.
+  //
+  // The actual child-version creation IPC lands
+  // in P5a (per the existing TODO at
+  // recommendationCard.svelte line 11). Until
+  // then, the recorded decision is the durable
+  // breadcrumb P5a can read.
+  let createBranchBusy = $state(false);
+  let createBranchError = $state<string | null>(null);
+  async function createBranch(): Promise<void> {
+    if (!bId) return;
+    createBranchBusy = true;
+    createBranchError = null;
+    try {
+      await applyImageDecision(
+        bId,
+        "preferred",
+        "create_branch",
+        selectedQualityProfile,
+      );
+      studioViewport.setView("enhance");
+    } catch (e) {
+      createBranchError =
+        e instanceof Error ? e.message : String(e);
+    } finally {
+      createBranchBusy = false;
+    }
+  }
+
   /** Navigate to the Enhance workspace. The
    *  Enhance flow derives its source from the
    *  project's latest version (not from a
@@ -790,11 +832,16 @@
              2. Continue enhancing: navigates
                 to Enhance workspace with B
                 pre-selected as source.
-             3. Create branch: honest stub;
-                wired in C-A2 (quality profile
-                tier).
-             4. Export: honest stub; wired in
-                C-A3.
+             3. Create branch: wired in §19
+                close-out: persists branch
+                intent via applyImageDecision
+                (state="preferred", reason=
+                "create_branch") AND navigates
+                to Enhance. P5a will read these
+                decisions to create child
+                versions.
+             4. Export: wired in C-A2 (side-
+                by-side composite export).
              The bar only renders when both A
              and B are selected (same gate as
              the sync-nav controls). -->
@@ -822,9 +869,10 @@
             <button
               type="button"
               class="continue-cta"
-              disabled
-              title="Coming in C-A2 (quality profile tier)"
-              aria-label="Create branch from version B (coming soon)"
+              disabled={createBranchBusy || !bId}
+              onclick={createBranch}
+              title="Record a branch intent for B and open Enhance"
+              aria-label="Create a new branch from version B"
             >
               <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
               Create branch
@@ -850,6 +898,12 @@
             <p class="continue-error font-body" role="alert">
               <span class="material-symbols-outlined" aria-hidden="true">error</span>
               Export failed: {exportError}
+            </p>
+          {/if}
+          {#if createBranchError}
+            <p class="continue-error font-body" role="alert">
+              <span class="material-symbols-outlined" aria-hidden="true">error</span>
+              Create branch failed: {createBranchError}
             </p>
           {/if}
         {/if}

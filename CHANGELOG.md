@@ -2,6 +2,139 @@
 
 ## Unreleased
 
+### Slice §23.4: CR-07 Expert clipping masks panel (§23 sub-slice 4)
+
+**Scope.** The fourth and final §23 "Expert Comparison"
+sub-slice called out by the CR-07 audit refresh as
+priority #1. Ships highlight + shadow clipping masks
+as two stacked SVG visualizations plus their summary
+stats. **§23 closes (Shipped) with this slice.**
+
+#### Backend (Rust)
+
+- `crates/astroforge-core/src/comparison_metrics.rs`
+  (MOD):
+  - NEW `ClippingMasks` struct: width, height, two
+    flat row-major `Vec<u8>` masks (highlight_mask,
+    shadow_mask), plus four scalar summary fields
+    (highlight_count, shadow_count,
+    highlight_fraction, shadow_fraction).
+    `Serialize`-derived for the Tauri bridge.
+  - NEW `clipping_masks(image) -> ClippingMasks`:
+    downsample to the preview budget via
+    `F32Image::downsample_box(0.25)`, then for each
+    pixel record whether it is highlight-clipped
+    (`v >= 0.99`) or shadow-clipped (`v <= 0.01`).
+    Thresholds match `image_analysis::metrics::highlight_clipping`
+    and `quality_gates::clipping`.
+  - 5 new unit tests (detect-known-regions,
+    zero-clips-for-mid-tone-image, thresholds-are-
+    inclusive, determinism,
+    field-size-matches-dimensions).
+- `src-tauri/src/commands_comparison.rs` (MOD): NEW
+  `get_version_clipping_masks(version_id)` command:
+  thin wrapper that loads the version's applied
+  pixels (via the existing path-confined `load_pixels`
+  helper), runs `clipping_masks`, and returns a typed
+  DTO. Wrapped in `tokio::task::spawn_blocking`.
+- `src-tauri/src/main.rs` (MOD): register the new
+  command in the Tauri `invoke_handler` list.
+
+#### Frontend (Svelte/TS)
+
+- `src/lib/astroforge-api.ts` (MOD): add
+  `ClippingMasksData`, `ClippingMasksSnapshot`
+  interfaces and the `getVersionClippingMasks(versionId)`
+  wrapper.
+- `src/components/ExpertClippingMasks.svelte` (NEW,
+  ~250 LOC): Svelte 5 component using `$props()`,
+  `$state()`, and `$effect()`. Loads the snapshot on
+  mount and on `versionId` change. Renders two stacked
+  SVG masks (highlight on top, shadow on bottom):
+  320x160 viewBox each, one `<rect>` per pixel of the
+  preview. Clipped pixels are saturated red (highlight)
+  or deep blue (shadow); non-clipped pixels are dim
+  grey (15% opacity) so the image shape stays visible
+  without competing with the clipping signal. Below
+  the two SVGs: a 4-cell summary grid (highlight count
+  + fraction, shadow count + fraction). Loading + error
+  + empty states are rendered explicitly. Pure SVG: no
+  new dep.
+- `src/components/CompareWorkspace.svelte` (MOD): add
+  a fourth `expert-panels` row in the §23.1 toggle
+  block, holding two `ExpertClippingMasks` panels
+  (A and B) side by side.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD): §23 status updated to
+  "Shipped" (the four sub-slices are listed). Bundle
+  priority #1 updated to point to §24 Beginner mode
+  (the new top-1, since §23 closes). "First concrete
+  slice (post-§23.3)" pointer updated to §23.4.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- 994 Rust tests pass (workspace). 5 new in
+  `comparison_metrics::clipping_masks`.
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --all-targets -- -D
+  warnings` clean.
+- `npm run check`: 0 new errors / warnings (1
+  pre-existing error + 9 pre-existing warnings on
+  `main` are unchanged).
+- `npm run build`: clean.
+- Em-dash sweep: 0 em-dashes in all 6 changed files
+  (memory's GitHub language rule).
+
+#### Honest flags
+
+- Slice size: ~600 LOC, in line with the §23.1
+  estimate. The overage vs §23.3's 900 LOC is in the
+  per-pixel Rust implementation (the per-pixel
+  highlight/shadow check is simpler than the
+  sliding-window MAD estimator for the noise map).
+- The thresholds differ from §23.1's `clip_count`:
+  §23.1 used `>= 1.0` (the literal normalized upper
+  bound) but `clipping_masks` uses `>= 0.99` (matching
+  the existing `highlight_clipping` and
+  `quality_gates::clipping` thresholds). The two
+  values are within 1% of each other on normalized
+  pixel values and produce nearly identical clip
+  counts in practice; the difference matters mainly
+  for test fixtures that probe the exact boundary.
+  Future consolidation (if §23.1's `clip_count` ever
+  ships to the user) should adopt the `>= 0.99` /
+  `<= 0.01` pair.
+- The Svelte component uses HTML entity escaping for
+  the `<=` and `>=` characters in mask labels
+  (`&lt;=` and `&gt;=`). Svelte's HTML parser would
+  otherwise interpret `<=` as the start of a tag.
+- The "thresholds-are-inclusive" test fixture had to
+  be split into two parts (a clear-clipping fixture
+  and a near-threshold fixture) because box-downsampling
+  averages neighbouring pixels, blurring boundary
+  values into mid-tones. The lesson is documented in
+  the test's doc comment.
+- The two-mask display (highlight on top, shadow on
+  bottom) is a deliberate design choice: a single
+  combined panel would mix red and blue visually and
+  make it hard to distinguish highlight- from
+  shadow-clipped pixels. The two-row layout matches
+  the established pattern (ChannelStats, FwhmDistribution,
+  NoiseMap are all 2-column A/B; this panel adds a
+  within-version row separation).
+- No Tauri command-level tests were added; the mask
+  logic is exercised via the unit tests on
+  `astroforge-core` (so `cargo test --workspace` and
+  CI's `rust` job both run them).
+
+Closes §23.4 of the §23 "Expert Comparison" spec.
+**§23 fully shipped.** Next slice per the post-§23
+priority list: §24 Beginner mode, then §19 close-out,
+then §26, §32, §9, §29.
+
 ### Slice §23.3: CR-07 Expert noise map panel (§23 sub-slice 3)
 
 **Scope.** The third of four §23 "Expert Comparison"

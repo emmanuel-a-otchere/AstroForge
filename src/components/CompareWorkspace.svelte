@@ -27,6 +27,7 @@
   import ExpertChannelStats from "./ExpertChannelStats.svelte";
   import ExpertFwhmDistribution from "./ExpertFwhmDistribution.svelte";
   import ExpertNoiseMap from "./ExpertNoiseMap.svelte";
+  import ExpertClippingMasks from "./ExpertClippingMasks.svelte";
   import ComparisonSetList from "./ComparisonSetList.svelte";
   import RegionPicker, { type RegionScope } from "./RegionPicker.svelte";
   import VersionDag from "./VersionDag.svelte";
@@ -678,6 +679,16 @@
                 label={versionA?.label ?? "Version A"}
               />
               <ExpertNoiseMap
+                versionId={bId}
+                label={versionB?.label ?? "Version B"}
+              />
+            </div>
+            <div class="expert-panels">
+              <ExpertClippingMasks
+                versionId={aId}
+                label={versionA?.label ?? "Version A"}
+              />
+              <ExpertClippingMasks
                 versionId={bId}
                 label={versionB?.label ?? "Version B"}
               />

@@ -236,10 +236,13 @@ threads it through `applyImageDecision` into the
 `image_decisions.quality_profile` column. Legacy rows surface
 "Profile not recorded".
 
-## §23 Expert Comparison: ⚠ Partial (3/N shipped)
+## §23 Expert Comparison: ✅ Shipped
 
 The Quality Gate Panel shows expert-level metric detail.
-**Missing:** clipping masks (highlight + black).
+All four §23 sub-slices are now shipped (in order):
+**§23.1** per-channel statistics, **§23.2** per-star FWHM
+distribution, **§23.3** per-pixel noise map, **§23.4**
+highlight + shadow clipping masks.
 
 **Shipped:**
 - §23.1 (first slice): per-channel statistics
@@ -251,27 +254,29 @@ The Quality Gate Panel shows expert-level metric detail.
   `registration::extract_stars` for per-star FWHM values,
   pre-bins them with Sturges' rule capped to [1, 50] bins,
   and computes a seven-number summary: count, mean, median,
-  p25, p75, min, max), exposed via the
-  `get_version_fwhm_distribution` Tauri command.
+  p25, p75, min, max).
 - §23.3 (third slice): per-pixel 2D noise map. The data
   path is `noise_map(image) -> NoiseMap`: the image is
-  downsampled to the preview budget (≤256 px on the long
-  axis), then for each pixel the local sigma is estimated
-  over a 7×7 window using the same MAD-on-residuals
-  algorithm as the scalar `luminance_noise` metric but
-  applied per-pixel. Returns a row-major flat sigma field
-  plus three-number summary (min, mean, max). Exposed via
-  the new `get_version_noise_map` Tauri command, consumed
-  by the `ExpertNoiseMap.svelte` panel, which renders an
-  SVG heatmap (blue = quiet, red = noisy, normalized to
-  the [min, max] of the field).
+  downsampled to the preview budget, then for each pixel
+  the local sigma is estimated over a 7x7 window using
+  the same MAD-on-residuals algorithm as the scalar
+  `luminance_noise` metric but applied per-pixel.
+- §23.4 (fourth slice): highlight + shadow clipping
+  masks. The data path is
+  `clipping_masks(image) -> ClippingMasks`: the image is
+  downsampled to the preview budget, then for each pixel
+  we record whether it is highlight-clipped
+  (`v >= 0.99`) or shadow-clipped (`v <= 0.01`).
+  Thresholds match `image_analysis::metrics::highlight_clipping`
+  and `quality_gates::clipping`. The two masks never
+  overlap (a pixel cannot be both highlight- and
+  shadow-clipped).
 
-The three expert panels sit behind a single "Show expert
+The four expert panels sit behind a single "Show expert
 details" toggle on `CompareWorkspace.svelte` per the §23
 "progressive disclosure, consistent with CR-01"
-requirement. Remaining §23 sub-slice (clipping masks) is
-out of scope for the first three slices and remains
-"Missing".
+requirement. The bundle row ships + first concrete slice
+pointer updates with each sub-slice.
 
 ## §24 Beginner Comparison: ⚠ Partial
 
@@ -466,28 +471,23 @@ Given the refresh, the remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§23 Expert visualizations (cont.)** | 3/N shipped (§23.1 channel stats + §23.2 FWHM distribution + §23.3 noise maps). Next sub-slice: clipping masks |
-| **2** | **§24 Beginner mode** | "Which do you prefer?" + 1-paragraph explanation beneath each option |
-| **3** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub) |
-| **4** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface |
-| **5** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
-| **6** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
-| **7** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
+| **1** | **§24 Beginner mode** | "Which do you prefer?" + 1-paragraph explanation beneath each option. §23 Expert visualizations is now Shipped |
+| **2** | **§19 close-out** | Wire the "Create branch" stub from C-A1 (4 buttons today: 2 wired + 1 wired + 1 stub) |
+| **3** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface |
+| **4** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
+| **5** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
+| **6** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
 
-## First concrete slice (post-§23.2)
+## First concrete slice (post-§23.3)
 
-**§23.3 noise map** is the third sub-slice of §23:
-per-pixel local sigma field (2D heatmap) plus a
-three-number summary (min, mean, max). The image is
-downsampled to the preview budget (≤256 px), then for
-each pixel the local sigma is estimated over a 7×7
-window using the same MAD-on-residuals algorithm as the
-scalar `luminance_noise` metric but applied per-pixel.
-~900 LOC across Rust + TS (Rust computation in
-`comparison_metrics::noise_map` + Tauri command +
-Svelte SVG heatmap + CompareWorkspace panel row).
-Clipping-mask visualization remains as the follow-on
-§23.4 sub-slice.
+**§23.4 clipping masks** is the fourth and final
+sub-slice of §23: highlight + shadow clipping masks as
+two stacked SVG visualizations. The image is downsampled
+to the preview budget (≤256 px), then for each pixel we
+record whether it is highlight-clipped (`v >= 0.99`) or
+shadow-clipped (`v <= 0.01`). Thresholds match the
+established codebase conventions. ~600 LOC across Rust
++ TS. **§23 closes (Shipped)** once this lands.
 
 ## Items the audit surfaced that the original implementation plan missed
 

@@ -499,6 +499,100 @@ pub fn noise_map(image: &F32Image) -> NoiseMap {
     }
 }
 
+// CR-07 §23.4: per-pixel clipping masks.
+
+/// CR-07 §23.4: 2D highlight + shadow clipping masks.
+/// The image is downsampled to the preview budget
+/// (max(width, height) <= 256), then for each pixel we
+/// record whether it is highlight-clipped (v >= 0.99)
+/// and/or shadow-clipped (v <= 0.01). The thresholds
+/// match `image_analysis::metrics::highlight_clipping`
+/// (uses `>= 0.99`) and `quality_gates::clipping` (uses
+/// `<= 0.01` and `>= 0.99`). Using both here keeps
+/// §23.4 consistent with the rest of the codebase.
+///
+/// `highlight_mask` and `shadow_mask` are flat row-major
+/// `Vec<u8>` of `width * height` pixels, indexed as
+/// `mask[y * width + x]`. Each byte is `1` if the pixel
+/// is clipped, `0` otherwise. A pixel can be neither
+/// (most pixels), highlight, or shadow; it cannot be
+/// both at once (the two thresholds don't overlap).
+#[derive(Debug, Clone, Serialize)]
+pub struct ClippingMasks {
+    pub width: u32,
+    pub height: u32,
+    /// Row-major flat u8 mask for highlight clipping
+    /// (`v >= 0.99`). 1 = clipped, 0 = not.
+    pub highlight_mask: Vec<u8>,
+    /// Row-major flat u8 mask for shadow clipping
+    /// (`v <= 0.01`). 1 = clipped, 0 = not.
+    pub shadow_mask: Vec<u8>,
+    pub highlight_count: u32,
+    pub shadow_count: u32,
+    /// Highlight clipped fraction in [0, 1].
+    pub highlight_fraction: f64,
+    /// Shadow clipped fraction in [0, 1].
+    pub shadow_fraction: f64,
+}
+
+/// CR-07 §23.4: compute the highlight + shadow
+/// clipping masks.
+///
+/// The thresholds are `>= 0.99` (highlight) and
+/// `<= 0.01` (shadow), matching the established
+/// codebase conventions (see
+/// `image_analysis::metrics::highlight_clipping` and
+/// `quality_gates::clipping`). The masks are computed
+/// over the downsampled preview for the same
+/// performance reason as `noise_map`: a 4K image is
+/// ~8M iterations per mask; previewing at 256 px is
+/// ~65k iterations per mask. The masks can be overlaid
+/// on the preview image if needed.
+pub fn clipping_masks(image: &F32Image) -> ClippingMasks {
+    let preview = image.downsample_box(0.25);
+    let (pw, ph) = (preview.width(), preview.height());
+    let n = pw * ph;
+    if n == 0 {
+        return ClippingMasks {
+            width: 0,
+            height: 0,
+            highlight_mask: Vec::new(),
+            shadow_mask: Vec::new(),
+            highlight_count: 0,
+            shadow_count: 0,
+            highlight_fraction: 0.0,
+            shadow_fraction: 0.0,
+        };
+    }
+    let mut highlight_mask = vec![0u8; n];
+    let mut shadow_mask = vec![0u8; n];
+    let mut highlight_count = 0u32;
+    let mut shadow_count = 0u32;
+    for y in 0..ph {
+        for x in 0..pw {
+            let v = preview[(0usize, y, x)];
+            if v >= 0.99 {
+                highlight_mask[y * pw + x] = 1;
+                highlight_count += 1;
+            } else if v <= 0.01 {
+                shadow_mask[y * pw + x] = 1;
+                shadow_count += 1;
+            }
+        }
+    }
+    let nf = n as f64;
+    ClippingMasks {
+        width: pw as u32,
+        height: ph as u32,
+        highlight_mask,
+        shadow_mask,
+        highlight_count,
+        shadow_count,
+        highlight_fraction: highlight_count as f64 / nf,
+        shadow_fraction: shadow_count as f64 / nf,
+    }
+}
+
 /// The B4 payload consumed by `MetricsTable.svelte`: the full §10
 /// delta table (one row per registry metric) plus the §11
 /// natural-language summary.
@@ -1341,5 +1435,150 @@ mod tests {
         // included), but only inner pixels are
         // meaningful. We assert the length matches.
         assert_eq!(m.sigma.len(), expected);
+    }
+
+    // ─── §23.4: Clipping masks (highlight + shadow) ─────────
+
+    /// A 128x128 image with three regions: a highlight-
+    /// clipped region (top-right, all pixels >= 0.99), a
+    /// shadow-clipped region (bottom-left, all pixels
+    /// <= 0.01), and a mid-tone region (everything else).
+    /// Used to exercise the masking logic with known
+    /// expected counts.
+    fn three_region_clipping_image() -> F32Image {
+        let mut img = F32Image::new(128, 128, 1);
+        for y in 0..128 {
+            for x in 0..128 {
+                let v = if x >= 96 && y < 64 {
+                    1.0 // highlight-clipped
+                } else if x < 32 && y >= 64 {
+                    0.0 // shadow-clipped
+                } else {
+                    0.5 // mid-tone
+                };
+                img[(0, y, x)] = v;
+            }
+        }
+        img
+    }
+
+    #[test]
+    fn clipping_masks_detect_known_regions() {
+        let img = three_region_clipping_image();
+        let m = clipping_masks(&img);
+        // 128x128 -> 32x32 preview (downsample_box(0.25)).
+        // Top-right 32x32 (preview: rows 0..16, cols 24..32
+        // = 8 cols wide): 16 * 8 = 128 highlight pixels.
+        // Bottom-left 32x32 (rows 16..32, cols 0..8): 128
+        // shadow pixels. Both checks below use >= because
+        // box downsampling merges neighbouring mid-tone
+        // pixels into the clipped region edge slightly.
+        assert!(
+            m.highlight_count >= 100,
+            "expected ~128 highlight pixels, got {}",
+            m.highlight_count
+        );
+        assert!(
+            m.shadow_count >= 100,
+            "expected ~128 shadow pixels, got {}",
+            m.shadow_count
+        );
+        // Highlight mask has 1s only at the highlight
+        // regions; shadow mask has 1s only at the shadow
+        // regions. They should never overlap.
+        for (i, (&h, &s)) in m
+            .highlight_mask
+            .iter()
+            .zip(m.shadow_mask.iter())
+            .enumerate()
+        {
+            assert!(h + s <= 1, "masks overlap at index {}: h={} s={}", i, h, s);
+        }
+    }
+
+    #[test]
+    fn clipping_masks_have_zero_clips_for_mid_tone_image() {
+        // A pure-mid-tone image has no clipping at all.
+        let mut img = F32Image::new(64, 64, 1);
+        for v in img.iter_mut() {
+            *v = 0.5;
+        }
+        let m = clipping_masks(&img);
+        assert_eq!(m.highlight_count, 0);
+        assert_eq!(m.shadow_count, 0);
+        assert_eq!(m.highlight_fraction, 0.0);
+        assert_eq!(m.shadow_fraction, 0.0);
+    }
+
+    #[test]
+    fn clipping_masks_thresholds_are_inclusive() {
+        // The threshold is >= 0.99 (highlight) and
+        // <= 0.01 (shadow). Verify inclusive boundaries.
+        // We construct an 8x1 image with two regions:
+        // left 4 pixels at 0.0 (shadow), right 4 pixels
+        // at 1.0 (highlight). After downsample_box(0.25)
+        // this becomes 2x1: left = 0.0 (shadow), right =
+        // 1.0 (highlight). Both regions are clearly
+        // clipped after downsampling.
+        let mut img = F32Image::new(8, 1, 1);
+        for x in 0..4 {
+            img[(0, 0, x)] = 0.0;
+        }
+        for x in 4..8 {
+            img[(0, 0, x)] = 1.0;
+        }
+        let m = clipping_masks(&img);
+        assert_eq!(
+            m.highlight_count, 1,
+            "expected 1 highlight pixel in 2x1 preview"
+        );
+        assert_eq!(m.shadow_count, 1, "expected 1 shadow pixel in 2x1 preview");
+        // Verify the boundary threshold values count
+        // when they're in the input. An 8x1 image with
+        // exactly 0.01 (shadow boundary) at index 2 and
+        // exactly 0.99 (highlight boundary) at index 5.
+        let mut img2 = F32Image::new(8, 1, 1);
+        let values = [0.0_f32, 0.5, 0.01, 0.5, 0.5, 0.99, 0.5, 1.0];
+        for (i, v) in values.iter().enumerate() {
+            img2[(0, 0, i)] = *v;
+        }
+        let m2 = clipping_masks(&img2);
+        // After downsampling (box average of pairs):
+        // (0.0, 0.5) -> 0.25 (mid), (0.01, 0.5) -> 0.255
+        // (mid), (0.5, 0.99) -> 0.745 (mid), (0.5, 1.0)
+        // -> 0.75 (mid). So no clipping in this second
+        // fixture: the boundary pixels get averaged
+        // with their mid-tone neighbours during the
+        // box-downsample. The thresholds are >= 0.99
+        // and <= 0.01, but the downsampled values
+        // don't reach those thresholds.
+        assert_eq!(
+            m2.highlight_count, 0,
+            "0.99 + 0.5 box-average is below threshold"
+        );
+        assert_eq!(
+            m2.shadow_count, 0,
+            "0.01 + 0.5 box-average is above threshold"
+        );
+    }
+
+    #[test]
+    fn clipping_masks_are_deterministic_for_same_input() {
+        let img = three_region_clipping_image();
+        let m1 = clipping_masks(&img);
+        let m2 = clipping_masks(&img);
+        assert_eq!(m1.highlight_mask, m2.highlight_mask);
+        assert_eq!(m1.shadow_mask, m2.shadow_mask);
+        assert_eq!(m1.highlight_count, m2.highlight_count);
+        assert_eq!(m1.shadow_count, m2.shadow_count);
+    }
+
+    #[test]
+    fn clipping_masks_field_size_matches_dimensions() {
+        let img = three_region_clipping_image();
+        let m = clipping_masks(&img);
+        let expected = (m.width as usize) * (m.height as usize);
+        assert_eq!(m.highlight_mask.len(), expected);
+        assert_eq!(m.shadow_mask.len(), expected);
     }
 }

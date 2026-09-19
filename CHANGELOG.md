@@ -2,6 +2,126 @@
 
 ## Unreleased
 
+### Slice §8: CR-07 saturation percentage
+
+**Scope.** Closes the §8 "Saturation percentage" ❌ Missing row.
+The metric_registry slot `MetricKind::DynamicRangeSaturationPct`
+already existed (`crates/astroforge-core/src/metric_registry.rs:402`)
+with `context: "Fraction of channels saturated. Higher indicates
+color information is being lost."` and `unit: "%"`. The detector
+implementation was missing. This slice ships it.
+
+#### Rust (core)
+
+- `crates/astroforge-core/src/image_analysis/metrics.rs`:
+  - NEW `saturation_percentage(image: &F32Image) -> MetricsSample`.
+    Counts pixels whose R, G, AND B channels are all at or
+    near `1.0` (full color loss), distinct from
+    `highlight_clipping` which counts per-channel clipping.
+    Returns fraction in `[0, 1]`. ~50 LOC detector + ~80 LOC
+    tests.
+- `crates/astroforge-core/src/comparison_metrics.rs`:
+  - `metric_snapshot` (line 49) wires `saturation_percentage`
+    into the snapshot BTreeMap; the existing
+    `metric_snapshot_full` (line 175) propagates it to the
+    delta-table IPC and the per-version expert panel for free.
+  - `snapshot_covers_exactly_the_shipped_detectors` test
+    updated from 5 → 6 detectors.
+  - `metric_snapshot_full_merges_detector_and_channel_keys`
+    test updated from 20 → 21 total keys.
+- `crates/astroforge-core/src/quality.rs`:
+  - NEW `saturation: f64` field on `QualityMetricSnapshot`
+    (with `#[serde(default)]` for legacy-row compatibility).
+    Populated by `compute_metrics` via the new detector.
+- `crates/astroforge-core/src/recommendation.rs`:
+  - Test fixture for `QualityMetricSnapshot` updated to
+    populate the new `saturation: 0.0` field.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - §8 row's "Saturation percentage" entry flipped ❌ Missing
+    → ✅ `saturation_percentage`.
+  - §8 scorecard row: 10 ✅ / 5 ⚠️ / 1 ❌ → **11 ✅ / 4 ⚠️ / 1 ❌**.
+  - Scorecard total: 68/16/3 → **69/15/3** (coverage **78% → 79%**).
+  - Bundle priority #1 advanced from §11 to **§32** (B7 Perf).
+  - "First concrete slice" pointer advanced.
+  - **§11 audit-text correction**: the prior §11 row text
+    (written in PR #351) pointed at `QualityGatePanel.svelte`
+    for the §11 prose; the §11 prose actually renders in
+    `MetricsTable.svelte:179` (`<pre class="summary
+    font-body">{report.summary}</pre>`). §11 has been Shipped
+    via the B4 delta-table surface since PR #325 (B4
+    merge). Audit-text corrected to reflect this; no §11
+    slice is owed.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **999 passing** (5 new saturation
+  tests added on top of the 994 baseline; 2 existing comparison
+  tests updated).
+- `npm run check`: 1 error + 9 warnings (matches main baseline;
+  the slice adds 0 new warnings. Backend + detector only.
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **One local fix cycle caught by the six-gate.** The first
+  clippy run flagged `unnecessary_cast` on `c as usize`,
+  `h as usize`, `w as usize` (they're already usize via
+  `image.width()` etc.). One-line fix to drop the casts. Same
+  shape as the §20 + §23.2 + §24 + §9 fix cycles.
+- **One local fix cycle during detector iteration algorithm
+  rewrite.** Initial detector used `ch == 0` as the
+  pixel-boundary predicate inside `indexed_iter()`;
+  empirically the iterator doesn't reset `ch` at each pixel
+  (it visits `ch=0`'s full block, then `ch=1`, etc., in
+  C-order). Rewrote to a clean per-channel walk with
+  `image[(ch, y, x)]` indexing; the clean algorithm is also
+  faster (single contiguous pass per channel, no flush
+  bookkeeping). The debug eprintln was caught + removed
+  before commit.
+- **The detector distinguishes from `highlight_clipping`.**
+  `highlight_clipping` counts per-channel clipped values
+  (so R-clipped-only reports ~33% on a 3-channel image).
+  `saturation_percentage` counts pixels where all channels
+  are clipped (so R-clipped-only reports 0% on the same
+  image). Verified by `saturation_percentage_distinguishes_from_highlight_clipping`.
+- **`QualityMetricSnapshot.saturation` defaults to 0.0 for
+  legacy rows.** The `#[serde(default)]` attribute means
+  old `metric_snapshot_json` rows (written before this slice)
+  deserialize with `saturation: 0.0` rather than failing.
+  New rows from `compute_metrics` carry the actual detector
+  output. The `recommendation.rs` test fixture also uses
+  `0.0` (uniform-noise fixture doesn't reach saturation).
+- **The audit-row audit-claim verification found a stale
+  §11 row text** that I wrote in PR #351 (pointed at the
+  wrong panel). Corrected in this PR's audit doc + the
+  Bundle priority section now reflects that §11 was already
+  shipped via `MetricsTable.svelte:179` since B4.
+- **Pre-existing em-dashes NOT cleaned** (Rust source + audit
+  file have em-dashes in unchanged shipped lines; per Coding
+  Discipline, out of scope). All my additions are em-dash-free
+  per the GitHub language rule.
+
+#### Out-of-scope (intentional)
+
+- §8 SNR / regional noise / edge response / color gradient
+  (still ⚠️ Partial; rank #3 in the new priority list).
+- §32 + §29 (B7 Perf bundle; rank #1 + #2).
+- §11 prose-display in `QualityGatePanel.svelte` (already
+  shipped via `MetricsTable.svelte:179`; the audit-doc text
+  was wrong, corrected in this PR's audit block).
+- Pre-existing em-dashes on `main` (audit + svelte files):
+  out of scope per Coding Discipline; the slice cleans only
+  its own additions.
+
 ### Slice §13: CR-07 AI-aware comparison chip
 
 **Scope.** Closes the §13 audit row ("no single one-line 'AI was used

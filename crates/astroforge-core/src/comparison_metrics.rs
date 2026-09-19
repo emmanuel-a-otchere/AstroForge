@@ -70,6 +70,16 @@ pub fn metric_snapshot(image: &F32Image) -> BTreeMap<String, f64> {
             .to_string(),
         metrics::highlight_clipping(image).value,
     );
+    // CR-07 §8: Channel saturation percentage. Distinct
+    // from highlight_clipping: this counts pixels where
+    // every channel is at or near 1.0 (full color loss),
+    // not just any single channel clipped. Wired into
+    // the snapshot so the delta table + the per-version
+    // expert panel surface the §8 metric.
+    values.insert(
+        MetricKind::DynamicRangeSaturationPct.as_str().to_string(),
+        metrics::saturation_percentage(image).value,
+    );
     values
 }
 
@@ -725,13 +735,17 @@ mod tests {
     fn snapshot_covers_exactly_the_shipped_detectors() {
         let img = flat_image(64);
         let snap = metric_snapshot(&img);
-        assert_eq!(snap.len(), 5);
+        assert_eq!(snap.len(), 6);
         for kind in [
             MetricKind::NoiseLuminance,
             MetricKind::NoiseChrominance,
             MetricKind::SharpnessLocal,
             MetricKind::BackgroundGradient,
             MetricKind::DynamicRangeHighlightClipping,
+            // CR-07 §8: saturation_percentage wired into the
+            // snapshot so the delta table + per-version
+            // expert panel surface the §8 metric.
+            MetricKind::DynamicRangeSaturationPct,
         ] {
             assert!(snap.contains_key(kind.as_str()), "missing {}", kind);
         }
@@ -1037,13 +1051,16 @@ mod tests {
         // present.
         assert!(full.contains_key(MetricKind::NoiseLuminance.as_str()));
         assert!(full.contains_key(MetricKind::DynamicRangeHighlightClipping.as_str()));
+        // CR-07 §8: saturation percentage is in the snapshot
+        // alongside the other detector-backed keys.
+        assert!(full.contains_key(MetricKind::DynamicRangeSaturationPct.as_str()));
         // The new channel keys are present.
         assert!(full.contains_key("channel.r.mean"));
         assert!(full.contains_key("channel.g.stddev"));
         assert!(full.contains_key("channel.b.max"));
         assert!(full.contains_key("channel.b.clip_count"));
-        // 5 detector keys + 15 channel keys = 20 total.
-        assert_eq!(full.len(), 20);
+        // 6 detector keys + 15 channel keys = 21 total.
+        assert_eq!(full.len(), 21);
     }
 
     // ─── §23.2: FWHM distribution + histogram ────────────────

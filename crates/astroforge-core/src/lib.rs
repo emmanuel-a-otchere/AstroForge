@@ -20,6 +20,7 @@ pub mod decision_store;
 pub mod decoders;
 pub mod detail_enhancement;
 pub mod dialog_modes;
+pub mod diff_cache;
 pub mod difference;
 pub mod difference_normalize;
 pub mod dip;

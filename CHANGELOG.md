@@ -2,6 +2,155 @@
 
 ## Unreleased
 
+### Slice §29.2: CR-07 cached difference images
+
+**Scope.** Continues the §29 Performance foundation work
+by shipping a content-addressed difference cache
+(`DiffCache`) that lets the comparison surface re-render
+a previously-computed diff in O(1) instead of recomputing
+the per-mode walk on every toggle click.
+
+#### New public API (core)
+
+- `crates/astroforge-core/src/diff_cache.rs`: new module
+  with:
+  - `pub struct DiffCache`: single-threaded cache mapping
+    `DiffCacheKey -> Vec<u8>`. Constructors: `new()`,
+    `with_capacity(n)`. Methods: `get_or_compute`,
+    `invalidate_version`, `clear`, `len`, `is_empty`,
+    `stats`, `reset_stats`.
+  - `pub struct DiffCacheKey`: cache key with
+    `(version_a_id, version_b_id, mode, gain)`. Derives
+    `Debug`, `Clone`, `PartialEq`, `Eq`, `Hash`.
+  - `pub struct DiffCacheStats`: `hits` + `misses`
+    counters. Method: `hit_rate() -> f64` in [0, 1].
+- `crates/astroforge-core/src/difference.rs`: `DiffKind`
+  enum now derives `Hash` so it can be a `HashMap` key.
+  No behavior change.
+- `lib.rs`: `pub mod diff_cache;` added.
+
+#### Design decisions
+
+1. **Single-threaded by construction.** `get_or_compute`
+   returns `&Vec<u8>`, so the caller cannot mutate the
+   cache while holding a reference to a cached buffer.
+   Callers that need to share the cache across threads
+   should wrap it in a `Mutex` (or `RwLock` if reads
+   dominate). The §29.2 slice does not ship a
+   thread-safe wrapper.
+
+2. **Cache key = `(version_a_id, version_b_id, mode, gain)`.**
+   `gain` only matters for `Amplified` mode, but we
+   include it uniformly so the cache key is a function of
+   all four inputs. `gain` is stored as `f32::to_bits()`
+   so the key can derive `Eq + Hash`.
+
+3. **Caller-driven invalidation.** The cache does NOT
+   watch the filesystem. The caller invokes
+   `invalidate_version(version_id)` when a version's
+   primary artifact changes. The §29.2 slice does NOT
+   wire invalidation into the IPC layer; that's a
+   follow-on concern.
+
+4. **Stats track effectiveness.** `hits` + `misses`
+   counters + `hit_rate()` helper. `reset_stats()` zeros
+   the counters without dropping entries (useful for
+   per-render-window measurements).
+
+#### Tests (core)
+
+- NEW `crates/astroforge-core/tests/diff_cache.rs`: 21
+  integration tests:
+  - 3 hit/miss + byte-equivalence tests.
+  - 6 cache-key-independence tests (different
+    version_a_id, version_b_id, mode, gain, NaN-gain).
+  - 3 invalidation tests (drops matching entries, no-
+    match returns 0, post-invalidate forces recompute).
+  - 1 clear + 4 stats tracking tests.
+  - 3 cache-key API-surface tests (equality depends on
+    all fields, clone, hash agrees with eq).
+  - 1 with_capacity constructor test.
+- The 21 tests all passed on the first `cargo test`
+  invocation following the fixes below.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - §29 row updated: "Cached difference images"
+    sub-row entry removed from the open list.
+  - Scorecard: 74/9/3 → **75/8/3** (coverage
+    **85% → 86%**).
+  - Bundle priority #1 advanced from §29.2 to §29.3.
+  - "First concrete slice" pointer advanced from §29.2
+    to §29.3 (GPU/WebGPU acceleration).
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1137 passing** (21 new tests
+  on top of the 1116 baseline).
+- `npm run check`: 1 error + 9 warnings (matches main baseline;
+  slice adds 0 new warnings. Backend tests only).
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **Two local fix cycles** during compile + test resolution:
+  1. `DiffKind` did not derive `Hash`, so the cache key
+     type-check failed. Added `Hash` to the derive list.
+     No behavior change; `DiffKind` is a 4-variant enum
+     (Absolute / Signed / Amplified / Structural), each
+     a unit variant, so Hash is trivially correct.
+  2. `invalidate_version_drops_entries_with_matching_id`
+     test had wrong stats assertion (expected 0 misses
+     but the populate phase had already set misses = 4).
+     Fixed by updating the expected values to `misses == 4`
+     and `hits == 2`.
+- **IPC layer NOT wired.** The §29.2 slice ships the pure
+  Rust cache primitive only. The IPC layer wiring (state
+  container, command handler, invalidation hooks on
+  version-artifact change) is a follow-on concern.
+- **Single-threaded by construction.** `get_or_compute`
+  returns `&Vec<u8>`, so the caller cannot mutate the
+  cache while holding a reference. This is documented;
+  callers that need thread-safety wrap in a `Mutex` /
+  `RwLock`.
+- **Pure Rust slice.** 0 new IPC, 0 new UI, 0 new TS,
+  0 new deps. Just the new `diff_cache` module + the
+  `Hash` derive addition on `DiffKind` + tests.
+
+#### Out-of-scope (intentional)
+
+- §29.3 GPU/WebGPU acceleration (rank #1; next slice,
+  largest scope).
+- §8 SNR / regional noise / edge response / color
+  gradient (rank #2).
+- §32.6 (new) Wire pipeline_plan_hash +
+  RecipeAiDiffSummary through IPC (rank #3).
+- §29.4 (optional) Tile-stripe streaming: deferred to
+  a future slice if §29.3 leaves headroom.
+- IPC layer wiring for the cache (state container,
+  command handler, invalidation hooks): deferred to a
+  follow-on slice (probably §29.2a or merged into the
+  §23.5 IPC surface).
+- Split-alignment / blink-consistency /
+  overlay-accuracy sub-modes of the audit's
+  "visual regression" line: deferred to a future slice
+  that adds a DOM-rendering test runner.
+- Decision-side operations
+  (`apply_and_save_decision` /
+  `apply_and_save_decision_with_profile`): deferred to
+  a §33 ADR-side test.
+- Criterion-based release-mode benchmarks: deferred to
+  a follow-on slice.
+- Pre-existing em-dashes on `main`: out of scope per
+  Coding Discipline.
+
 ### Slice §29.1: CR-07 streaming metrics accumulator
 
 **Scope.** Closes the first sub-row of §29 Performance

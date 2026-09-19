@@ -36,7 +36,7 @@
 /// One enum, one frontend, four backend behaviours. The renderer
 /// ignores any alpha byte (index 3 of each quadruplet) and treats
 /// it as opaque in the output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DiffKind {
     /// `|A - B|` per channel, clamped to 8-bit. The default.

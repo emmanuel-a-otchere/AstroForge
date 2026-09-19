@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use astroforge_core::diff_cache::{DiffCache, DiffCacheKey, DiffCacheStats};
+use astroforge_core::difference::DiffKind;
 use astroforge_core::domain_store::DomainStore;
 use astroforge_core::fits;
 use astroforge_core::gallery::{GalleryItemUpdate, GalleryStore};
@@ -36,6 +38,16 @@ struct SessionState(Mutex<SessionStore>);
 /// Tauri-managed state: holds the RecipeStore (rusqlite) for pipeline
 /// profile persistence. Same mutex pattern as GalleryState.
 struct RecipeState(Mutex<RecipeStore>);
+
+/// CR-07 §29.2a: in-memory diff cache for `compute_diff`.
+/// Single-threaded by construction (the cache is wrapped
+/// in a Mutex<T> so multiple IPC calls are serialized).
+/// The cache is global to the app session; it lives for
+/// the lifetime of the Tauri runtime. Versions that
+/// change their primary artifact (TIFF) should call
+/// `diff_cache_invalidate_version` to drop stale
+/// entries.
+struct DiffCacheState(Mutex<DiffCache>);
 
 #[derive(Serialize)]
 struct CommandError {
@@ -501,6 +513,81 @@ fn recipe_ai_diff_summary(
     Ok(ai_diff_fn(&recipe_a, &recipe_b))
 }
 
+/// CR-07 §29.2a: get-or-compute a diff image.
+/// Cache lookup keyed by (version_a_id, version_b_id, mode, gain).
+/// On miss, computes via `compute_diff` + stores. The mode
+/// is passed as a kebab-case string ("absolute" /
+/// "signed" / "amplified" / "structural"); the
+/// `version_a_id` + `version_b_id` are opaque strings
+/// (typically the ImageVersion row id from the IPC layer).
+#[tauri::command]
+fn diff_cache_get_or_compute(
+    state: State<'_, DiffCacheState>,
+    version_a_id: String,
+    version_b_id: String,
+    mode: String,
+    gain: f32,
+    width: u32,
+    image_a: Vec<u8>,
+    image_b: Vec<u8>,
+) -> Result<Vec<u8>, CommandError> {
+    let diff_kind = match mode.as_str() {
+        "absolute" => DiffKind::Absolute,
+        "signed" => DiffKind::Signed,
+        "amplified" => DiffKind::Amplified,
+        "structural" => DiffKind::Structural,
+        _ => {
+            return Err(CommandError {
+                message: format!("unknown diff mode: {mode:?}"),
+            });
+        }
+    };
+    let key = DiffCacheKey::new(version_a_id, version_b_id, diff_kind, gain);
+    let mut cache = state.0.lock().expect("diff cache mutex poisoned");
+    let result = cache.get_or_compute(key, &image_a, &image_b, gain, width);
+    // The cache stores owned Vec<u8>; clone to return to the
+    // caller without holding the lock.
+    Ok(result.clone())
+}
+
+/// CR-07 §29.2a: invalidate every cache entry referencing
+/// the given version id. Used when a version's primary
+/// artifact (TIFF) changes. Returns the number of entries
+/// dropped.
+#[tauri::command]
+fn diff_cache_invalidate_version(
+    state: State<'_, DiffCacheState>,
+    version_id: String,
+) -> Result<usize, CommandError> {
+    let mut cache = state.0.lock().expect("diff cache mutex poisoned");
+    Ok(cache.invalidate_version(&version_id))
+}
+
+/// CR-07 §29.2a: drop every cache entry. Stats counters
+/// are preserved.
+#[tauri::command]
+fn diff_cache_clear(state: State<'_, DiffCacheState>) -> Result<(), CommandError> {
+    let mut cache = state.0.lock().expect("diff cache mutex poisoned");
+    cache.clear();
+    Ok(())
+}
+
+/// CR-07 §29.2a: get a snapshot of the cache stats
+/// (hits + misses counters).
+#[tauri::command]
+fn diff_cache_stats(state: State<'_, DiffCacheState>) -> Result<DiffCacheStats, CommandError> {
+    let cache = state.0.lock().expect("diff cache mutex poisoned");
+    Ok(cache.stats().clone())
+}
+
+/// CR-07 §29.2a: get the current cache size (number of
+/// entries).
+#[tauri::command]
+fn diff_cache_len(state: State<'_, DiffCacheState>) -> Result<usize, CommandError> {
+    let cache = state.0.lock().expect("diff cache mutex poisoned");
+    Ok(cache.len())
+}
+
 fn gallery_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     // Resolves to e.g. <app_data_dir>/gallery.sqlite. Falls back to
     // cwd if the app data dir isn't available (shouldn't happen in
@@ -644,6 +731,11 @@ fn main() {
                 .map_err(|e| format!("failed to seed recipe store: {e}"))?;
             app.manage(RecipeState(Mutex::new(recipes)));
 
+            // CR-07 §29.2a: in-memory diff cache. Global to
+            // the app session, lives for the lifetime of
+            // the Tauri runtime. No DB backing.
+            app.manage(DiffCacheState(Mutex::new(DiffCache::new())));
+
             // CR-02.6 — durable project state (additive; no existing
             // reader is touched). One global DomainStore for cross-project
             // queries, plus a ProjectManager over the projects_root.
@@ -772,6 +864,11 @@ fn main() {
             recipe_save,
             recipe_pipeline_plan_hash,
             recipe_ai_diff_summary,
+            diff_cache_get_or_compute,
+            diff_cache_invalidate_version,
+            diff_cache_clear,
+            diff_cache_stats,
+            diff_cache_len,
             // CR-05 R1 — read-only AI model catalog (Recipes/AI
             // Models/Settings/Help application-level surfaces).
             commands_ai_models::ai_model_list,

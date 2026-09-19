@@ -685,9 +685,9 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **79** | **4** | **3** | **87** |
+| **Total** | **80** | **3** | **3** | **87** |
 
-**Coverage:** 91% shipped, 5% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 92% shipped, 3% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
@@ -696,8 +696,9 @@ contextual display + §13 AI-aware badge + §8 saturation percentage
 + §29.3a WebGPU compute prototype for compute_diff
 + §29.3b.1 WGSL shaders for 3 of 4 spatial detectors
 + §29.3b.2 Vitest infra + behavioural tests for WebGPU wrappers
-+ §32.6 wire pipeline_plan_hash + RecipeAiDiffSummary through IPC).
-The scorecard now agrees with the section bodies.
++ §32.6 wire pipeline_plan_hash + RecipeAiDiffSummary through IPC
++ §29.2a wire DiffCache through IPC). The scorecard now
+agrees with the section bodies.
 
 ## Bundle status (post-§26 audit refresh)
 
@@ -749,7 +750,7 @@ the B7 Perf work are the remaining scope:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§29.3b.3 IPC layer wiring** | Wire diff cache (§29.2a) + GPU spatial detector compute through `src-tauri/`. State container + command handlers. ~200-400 LOC. |
+| **1** | **§29.3b.3 IPC layer wiring (remaining)** | Wire the GPU spatial detector compute through `src-tauri/`. The diff cache half (§29.2a) is now in `src-tauri/src/main.rs`. Remaining: spatial-detector commands + state container. ~100-200 LOC. |
 | **2** | **§29.3b.4 UI integration + retire CPU fallback** | `CompareWorkspace.svelte` picks GPU path automatically. Remove Rust-backed fallback path. Behavior change visible to user. ~200-400 LOC. |
 | **3** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
 

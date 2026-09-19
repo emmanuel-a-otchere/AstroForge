@@ -2,6 +2,107 @@
 
 ## Unreleased
 
+### Slice §32.1: CR-07 metric validation against controlled fixtures
+
+**Scope.** Closes the §32 "Metric validation against controlled
+datasets" sub-row. The other four §32 sub-rows (visual
+regression, version integrity, AI comparison, perf tests)
+remain open and will ship as §32.2..§32.5 per the established
+sub-slice cadence.
+
+#### Tests (core)
+
+- NEW `crates/astroforge-core/tests/metric_validation.rs`:
+  - 17 integration tests covering all six §8 detectors
+    (`luminance_noise`, `chromatic_noise`, `local_contrast`,
+    `background_gradient`, `highlight_clipping`,
+    `saturation_percentage`).
+  - Deterministic-fixture builders: `uniform_image`,
+    `noisy_image` (LCG hash), `ramp_image` (linear slope),
+    `step_image` (half-bright).
+  - Each detector validated against (a) a uniform baseline
+    (expected near-zero for noise/gradient/contrast) and
+    (b) a controlled non-uniform fixture (expected non-zero
+    with directional correctness: noisy > clean, ramp >
+    flat, step > uniform).
+  - Two determinism tests pinning that identical inputs
+    produce identical outputs (the detectors must be pure
+    functions).
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - §32 row updated: "Metric validation" entry removed from
+    the "Still open" list; the four remaining sub-rows
+    (visual regression, version integrity, AI comparison,
+    perf tests) listed as §32.2..§32.5 future sub-slices.
+  - Scorecard: 69/15/3 → **69/14/3** (coverage **79% → 79%**;
+    a row shifted from ⚠️ Partial toward ✅ without changing
+    the column totals because §32 as a whole remains Partial
+    until all 5 sub-rows ship).
+  - Bundle priority: §32 advanced to a 5-rank sub-slice
+    breakdown (32.2..32.5); "First concrete slice" pointer
+    advanced from §32 to **§32.2**.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1016 passing** (17 new metric
+  validation tests on top of the 999 baseline).
+- `npm run check`: 1 error + 9 warnings (matches main baseline;
+  the slice adds 0 new warnings. Backend tests only.
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **One local fix cycle caught by the six-gate.** Initial
+  test tolerance bounds for `luminance_noise` and
+  `local_contrast` were too tight (0.1 vs the detectors'
+  actual ~0.07 / ~0.024 outputs). Plus the `background_gradient`
+  detector requires image ≥ 128×128 (the 64×64 default tile
+  width catches only one tile, which leaves no slope across
+  the regression). Three one-line fixes: relaxed bounds +
+  larger fixture size.
+- **One local fix cycle for unused-variable lint.** The
+  integration test file's `indexed_iter_mut` destructures
+  used `x` and `y` separately; clippy flagged the unused
+  `x` in ramp/step fixtures. Renamed to `_x` where unused;
+  kept `x` for `noisy_image` where it's actually used in
+  the LCG hash.
+- **Test assertions pin directional behavior, not exact
+  values.** The detectors use heuristic algorithms whose
+  absolute outputs depend on the fixture's exact pixel
+  statistics. Tests pin (a) the detector's directional
+  response (noisy > clean, ramp > flat) and (b) the
+  magnitude is in a sane range. This is the right shape
+  for "validate the detector responds correctly" rather
+  than "validate the detector produces a specific number";
+  the latter would over-constrain the heuristic and
+  break every time someone tweaks the algorithm.
+- **Pure test slice.** 0 new Rust source (only the test
+  file), 0 new IPC, 0 new UI, 0 new TS, 0 new deps.
+- **Pre-existing em-dashes NOT cleaned.** Rust source + audit
+  file have em-dashes in unchanged shipped lines; per Coding
+  Discipline, out of scope. All my additions are em-dash-free.
+
+#### Out-of-scope (intentional)
+
+- §32.2 visual regression tests (rank #1 in the new
+  priority list; next sub-slice).
+- §32.3 version integrity test (rank #2).
+- §32.4 AI comparison tests (rank #3).
+- §32.5 perf tests (rank #4).
+- §29 Performance (rank #5).
+- §8 SNR / regional noise / edge response / color gradient
+  (rank #6).
+- Pre-existing em-dashes on `main`: out of scope per Coding
+  Discipline.
+
 ### Slice §8: CR-07 saturation percentage
 
 **Scope.** Closes the §8 "Saturation percentage" ❌ Missing row.

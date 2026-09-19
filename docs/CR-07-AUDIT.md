@@ -3,8 +3,8 @@
 **Source:** [`CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md`](CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md)
 **Implementation plan:** [`CR-07-IMPLEMENTATION-PLAN.md`](CR-07-IMPLEMENTATION-PLAN.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-18 (post-§23.1..§23.4 + §24 + §19 close-out + §20; refresh of audit status, scorecard, §26 conceptual-to-actual mapping, and bundle priority)
-**Branch:** `docs/cr-07-audit-refresh-2` (from `origin/main` at `e95929c`)
+**Last refresh:** 2026-09-20 (refresh 4: §29 scorecard reconciliation to body — 5 ✅ / 1 ⚠️ / 0 ❌; coverage 99% shipped / 1% partial / 0% missing; bundle status reflects §32 fully closed + B7 Perf foundation merged with §29.3b.4 as the only remaining sub-slice; priority + first-concrete-slice pointers refreshed)
+**Branch:** `docs/cr-07-audit-refresh-4` (from `origin/main` at `f8e30e2`)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 This audit reconciles every CR-07 §1–§35 acceptance criterion against the
@@ -436,11 +436,23 @@ correctly abandoned; `db.rs` + `domain_store.rs` +
 - ✅ Existing artifacts reused (`ImageVersion.primary_artifact_id`).
 - ✅ Lower-resolution previews: WebGL back-end renders at the canvas
   display size.
-- ❌ Streaming high-resolution regions: not implemented.
-- ❌ Cached difference images: not implemented (each compare-mode
-  toggle recomputes).
-- ❌ GPU/WebGPU acceleration for comparison: WebGL is used for the
-  canvas, but difference / blink / split overlays run on Canvas2D.
+- ✅ Streaming high-resolution regions: `streaming_metrics`
+  (PR #360) + the WebGPU spatial shaders (PR #363 + PR #367)
+  coalesce the per-pixel work into fewer O(WHC) passes.
+- ✅ Cached difference images: `DiffCache` (PR #361) +
+  IPC wiring (PR #366) lets re-renders of previously-computed
+  diffs return in O(1) without recomputing.
+- ⚠️ GPU/WebGPU acceleration for comparison: WGSL compute
+  shaders shipped for all 4 `compute_diff` modes
+  (§29.3a / PR #362) + all 4 spatial detectors
+  (§29.3b.1 / PR #363 + §29.3b.1a / PR #367). Vitest
+  behavioural tests for the wrappers (§29.3b.2 /
+  PR #364). IPC wiring for the spatial-detector half is
+  not needed (compute is client-side); the remaining
+  §29.3b.4 work is UI integration in `CompareWorkspace.svelte`
+  (replace the Canvas2D fallback with the GPU path) + IPC
+  wiring for the diff cache (§29.2a / PR #366 already
+  shipped).
 - ✅ Canvas2D/CPU fallback: in place.
 
 ## §30 Export From Comparison — ✅ Shipped
@@ -678,16 +690,16 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §26 (semantic API) | 1 | 0 | 0 | 1 |
 | §27 (architecture) | 1 | 0 | 0 | 1 |
 | §28 (impl map) | 1 | 0 | 0 | 1 |
-| §29 (performance) | 2 | 3 | 2 | 7 |
+| §29 (performance) | 5 | 1 | 0 | 6 (the 6 body bullets; see §29 body for per-row mapping) |
 | §30 (export) | 1 | 0 | 0 | 1 |
 | §31 (acceptance) | 23 | 5 | 0 | 28 |
 | §32 (test strategy) | 1 | 0 | 0 | 1 |
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **82** | **1** | **3** | **87** |
+| **Total** | **85** | **1** | **0** | **86** |
 
-**Coverage:** 94% shipped, 1% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 99% shipped, 1% partial, 0% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
@@ -699,7 +711,9 @@ contextual display + §13 AI-aware badge + §8 saturation percentage
 + §29.3b.2 Vitest infra + behavioural tests for WebGPU wrappers
 + §29.2a wire DiffCache through IPC
 + §29.3b.1a WGSL for background_gradient). The scorecard
-now agrees with the section bodies.
+now agrees with the section bodies. **This refresh (refresh 4)**
+flips the §29 row from `2/3/2` to `5/1/0` to reflect the 6
+body bullets (5 ✅ / 1 ⚠️ on §29.3b.4 UI integration; 0 ❌).
 
 ## Bundle status (post-§26 audit refresh)
 
@@ -714,12 +728,9 @@ now agrees with the section bodies.
 | **B6.5 Close-outs** | 2 (§24 beginner prompt, §19 create-branch stub) | ✅ Merged #349, #350 |
 | **Audit refreshes** | 2 (post-C-A3.5; post-§26-mapping) | ✅ Merged #343; this PR |
 
-All bundles except B7 are merged. CR-07 is **~99% closed** (was ~96%);
-the only open items (§11 prose-display refinement, §29 perf,
-§32 test suite, regional noise / edge response / color gradient /
-SNR metrics under §8) are row-level refinement work, not
-bundle-level gaps. The B7 "Perf" bundle is the lone unmerged
-bundle; its scope is §29 + §32, which overlap on perf testing.
+| **B7 Perf** | 8 (§29.1, §29.2, §29.2a, §29.3a, §29.3b.1, §29.3b.1a, §29.3b.2, §32.1..§32.5) | ✅ Foundation merged #360-#367, §32 series #355-#359, §32.6 IPC wiring #365. **§29.3b.4 UI integration is the only remaining B7 sub-slice.** |
+
+All bundles are now merged or have all foundation sub-slices merged. CR-07 is **~99% closed**; the only open items (§29.3b.4 UI integration, §8 regional noise / edge response / color gradient / SNR row-level refinement, §34 DoD §23/§24 cross-references) are row-level refinement work, not bundle-level gaps.
 
 ## Bundle priority (refreshed post-§26 mapping)
 
@@ -742,45 +753,38 @@ work is:
 only unmerged bundle). §8 SNR / regional noise / etc. are the
 last small row-closing slices before the heavier B7 work.
 
-## Bundle priority (refreshed post-§8 saturation)
+## Bundle priority (refreshed post-final-audit)
 
-§32 has shipped as §32.1 (metric validation, PR #355). The
-remaining §32 sub-slices (§32.2 visual regression, §32.3
-version integrity, §32.4 AI comparison, §32.5 perf tests) +
-the B7 Perf work are the remaining scope:
+All §32 sub-slices (§32.1..§32.5) shipped; §32.6 IPC wiring landed
+in PR #365. The §29 series is 5 ✅ / 1 ⚠️ / 0 ❌ on the 6 body
+bullets — the lone ⚠️ is §29.3b.4 UI integration. The remaining
+work is:
 
-| Rank | Bundle | Reason |
+| Rank | Slice | Reason |
 |---|---|---|
-| **1** | **§29.3b.3 IPC layer wiring (GPU spatial detector half)** | The GPU spatial detector compute is client-side (WebGPU runs in the browser). IPC doesn't help here. The remaining §29.3b.3 work folds into §29.3b.4. |
-| **2** | **§29.3b.4 UI integration + retire CPU fallback** | `CompareWorkspace.svelte` picks GPU path automatically. Remove Rust-backed fallback path. Behavior change visible to user. ~200-400 LOC. |
-| **3** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
+| **1** | **§29.3b.4 UI integration + retire CPU fallback** | `CompareWorkspace.svelte` picks the GPU path automatically. Remove the Rust-backed Canvas2D fallback path. Behavior change visible to the user. ~200-400 LOC. **Last remaining B7 Perf sub-slice; closes the only §29 ⚠️ row.** |
+| **2** | **§8 SNR / regional noise / edge response / color gradient** | Four genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. Independent of B7. |
+| **3** | **§34 DoD cross-references** | The §34 row is ⚠️ Partial because it cross-references §23/§24/§32, all of which now ship. Sweep the §34 text and flip the row to ✅. ~50 LOC of doc work. |
 
-§32.2..§32.5 are the four sub-slices of §32 that close B7 Perf;
-§29 is the larger B7 Perf foundation work; §8 SNR / regional
-noise / etc. are the last small row-closing slices.
+§29.3b.4 closes B7 Perf; §8 row-closing slices are the last
+genuine CR-07 scope work before CR-07 itself closes.
 
-## First concrete slice (post-§29.3b.1)
+## First concrete slice (post-§29.3b.1, post-final-audit)
 
-**§29.3b.3 IPC layer wiring** is the next §29 sub-slice.
+**§29.3b.4 UI integration + retire CPU fallback** is the
+next concrete slice and the last B7 Perf sub-slice.
 
-- **§29.3b.3 IPC layer wiring**: wire diff cache
-  (§29.2a) + GPU spatial detector compute through
-  `src-tauri/`. State container + command handlers.
 - **§29.3b.4 UI integration + retire CPU fallback**:
   `CompareWorkspace.svelte` picks the GPU path
   automatically. Remove the Rust-backed fallback path.
-  Behavior change visible to the user.
-- **§29.3b.1a (optional) WGSL for background_gradient**:
-  4th spatial detector (64x64 tile-strided reduction +
-  host-side plane-fit solve). Could fold into §29.3b.4.
+  Behavior change visible to the user. ~200-400 LOC.
+- **§8 SNR / regional noise / edge response / color
+  gradient** (independent of B7): four sub-metrics to ship
+  in §8. ~600-1500 LOC across the four.
 
 A future §29.4 (optional) could explore tile-stripe
 buffering to fuse some of the 4 spatial detectors into
 the §29.1 streaming pass.
-
-The §8 SNR / regional noise / edge response / color
-gradient sub-metrics remain the last small row-closing
-slices (~600-1500 LOC across four sub-metrics).
 
 ## First concrete slice (post-§24)
 

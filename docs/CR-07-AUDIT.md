@@ -484,19 +484,34 @@ export + "Export comparison" composite PNG works.
 ## §32 Test Strategy — ⚠️ Partial
 
 `cargo test --workspace` is exhaustive (766+ tests in `astroforge-core`
-+ 30+ in integration tests). Slice §32.1 (PR #355) closed the "Metric validation" sub-row
-and slice §32.2 (PR #356) closes the "Visual regression"
-sub-row by shipping 16 pixel-exact integration tests in
-`crates/astroforge-core/tests/visual_regression.rs` against
-`compute_diff(kind, a, b, gain, width)` in
-`crates/astroforge-core/src/difference.rs`. The tests pin all
-four `DiffKind` modes (Absolute / Signed / Amplified /
-Structural) against deterministic RGBA8 fixtures with
-pixel-exact expected output.
++ 30+ in integration tests). Slice §32.1 (PR #355) closed the "Metric validation" sub-row,
+slice §32.2 (PR #356) closes the "Visual regression" sub-row,
+and slice §32.3 (PR #357) closes the "Version integrity"
+sub-row by shipping 8 integration tests in
+`crates/astroforge-core/tests/version_integrity.rs` against
+the CR-07 ADR-07.4 ("Comparison Is Non-Destructive") contract.
+
+The tests pin:
+
+- **`compare_version_images`** (pure Rust delta-table function)
+  is deterministic + read-only by construction.
+- **`save_comparison_set`** doesn't touch `image_versions`,
+  `image_decisions`, or `decision_history` rows.
+- **`load_comparison_set`** doesn't touch any of those rows.
+- **`list_comparison_sets_for_project`** doesn't touch any of
+  those rows.
+- **`delete_comparison_set`** doesn't touch any of those rows.
+- **Full end-to-end**: stub 2 versions + decisions + history,
+  run save → load → list → delete, verify the version-side
+  tables are byte-equal across the entire lifecycle.
+- **Positive control**: pin that the `comparison_sets` table
+  DOES change across the lifecycle (guards against a test
+  suite that accidentally no-ops).
+- **Sibling-row isolation**: pin that comparison ops on a
+  (v-a, v-b) pair don't touch other versions in the same
+  project.
 
 **Still open:**
-- Version integrity test (`Version A + Version B + Comparison` doesn't
-  modify either artifact).
 - AI comparison tests (model/version/hash/classification/parameters/
   provenance surfacing).
 - Performance tests (4K/8K/16-bit/32-bit/multi-version/large-project/
@@ -510,9 +525,16 @@ require a DOM-rendering test runner (e.g. Playwright) the
 codebase doesn't ship yet. Documented as a future slice
 dependent on adding the runner.
 
-These three remaining sub-rows will land as §32.3 (version
-integrity), §32.4 (AI comparison), §32.5 (perf tests) per
-the established sub-slice cadence.
+`apply_and_save_decision` / `apply_and_save_decision_with_profile`
+are explicitly OUT OF SCOPE for this slice: those are
+*decision* operations, not comparison operations, and they DO
+mutate `image_decisions` + `decision_history` (that's their
+job). They will be covered by a §33 ADR-side test (decision
+state transitions).
+
+These two remaining sub-rows will land as §32.4 (AI
+comparison) and §32.5 (perf tests) per the established
+sub-slice cadence.
 
 ## §33 ADRs — ✅ Shipped
 
@@ -569,12 +591,13 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **70** | **13** | **3** | **87** |
+| **Total** | **71** | **12** | **3** | **87** |
 
-**Coverage:** 80% shipped, 15% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 82% shipped, 14% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
-+ §32.1 metric validation + §32.2 visual regression).
++ §32.1 metric validation + §32.2 visual regression
++ §32.3 version integrity).
 The scorecard now agrees with the section bodies.
 
 ## Bundle status (post-§26 audit refresh)
@@ -627,26 +650,34 @@ the B7 Perf work are the remaining scope:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§32.3 Version integrity test** | `Version A + Version B + Comparison` must not modify either artifact. ~100-200 LOC integration test. |
-| **2** | **§32.4 AI comparison tests** | Model / version / hash / classification / parameters / provenance surfacing. ~200-400 LOC. |
-| **3** | **§32.5 Perf tests** | 4K / 8K / 16-bit / multi-version / large-project / limited-RAM. ~200-400 LOC + new CI job. |
-| **4** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
-| **5** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
+| **1** | **§32.4 AI comparison tests** | Model / version / hash / classification / parameters / provenance surfacing. ~200-400 LOC. |
+| **2** | **§32.5 Perf tests** | 4K / 8K / 16-bit / multi-version / large-project / limited-RAM. ~200-400 LOC + new CI job. |
+| **3** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
+| **4** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
 
 §32.2..§32.5 are the four sub-slices of §32 that close B7 Perf;
 §29 is the larger B7 Perf foundation work; §8 SNR / regional
 noise / etc. are the last small row-closing slices.
 
-## First concrete slice (post-§32.2)
+## First concrete slice (post-§32.3)
 
-**§32.3 Version integrity test** is the next §32 sub-slice:
-~100-200 LOC integration test that loads two `ImageVersion`
-rows via `get_version_metric_snapshot`, runs the §32.1
-metric-validation suite on both, then asserts (a) neither
-version's persisted `metric_snapshot_json` changed and (b)
-the `ComparisonSet` row (if any) for the pair also didn't
-change. This guards the "comparison is read-only" invariant
-the spec requires. Pure Rust integration test in
+**§32.4 AI comparison tests** is the next §32 sub-slice:
+~200-400 LOC integration tests that pin the audit's
+"model/version/hash/classification/parameters/provenance
+surfacing" line by:
+
+- Building two synthetic recipes with distinct
+  `perceptual_models_used` flags and `pipeline_plan_hash`
+  values.
+- Loading both versions' metrics snapshots + recipes via
+  the existing `get_version_metric_snapshot` and
+  `recipe_get_for_image_version` IPC paths.
+- Asserting the comparison surface (delta table rows +
+  AI-used chip state) reflects each version's AI recipe
+  correctly.
+
+The test surface mirrors §32.1's metric-validation
+pattern: pure Rust integration tests under
 `crates/astroforge-core/tests/`.
 
 ## First concrete slice (post-§24)

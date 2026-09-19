@@ -362,18 +362,118 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `;
 
 /**
+ * Compute shader for `background_gradient`. One
+ * invocation per 64x64 tile.
+ *
+ * Each invocation samples a 4x4 grid of pixels from
+ * its tile (matching the Rust baseline), sorts the
+ * samples, and writes (x_center, y_center, median,
+ * has_samples) to the output buffer. The host then
+ * reads the per-tile data + performs the 2x3 plane-fit
+ * least-squares solve.
+ *
+ * Layout assumption: `image` is a row-major flat
+ * buffer of luminance values for channel 0 only.
+ * `params.pixel_count` is unused for this shader
+ * (we dispatch by tile count instead).
+ */
+export const BACKGROUND_GRADIENT_SHADER = /* wgsl */ `
+struct SpatialParams {
+  pixel_count: u32,
+  width: u32,
+  height: u32,
+  channels: u32,
+};
+
+const TILE_SIZE: u32 = 64u;
+
+@group(0) @binding(0) var<storage, read>       image:  array<f32>;
+@group(0) @binding(1) var<uniform>             params: SpatialParams;
+@group(0) @binding(2) var<storage, read_write>  out_buf: array<f32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let tile_index = gid.x;
+  let tile_cols = (params.width + TILE_SIZE - 1u) / TILE_SIZE;
+  let tile_rows = (params.height + TILE_SIZE - 1u) / TILE_SIZE;
+  let total_tiles = tile_cols * tile_rows;
+  if (tile_index >= total_tiles) {
+    return;
+  }
+  let tile_y = tile_index / tile_cols;
+  let tile_x = tile_index - tile_y * tile_cols;
+  let x0 = tile_x * TILE_SIZE;
+  let y0 = tile_y * TILE_SIZE;
+  let x1 = min(x0 + TILE_SIZE, params.width);
+  let y1 = min(y0 + TILE_SIZE, params.height);
+  let w = x1 - x0;
+  let h = y1 - y0;
+  // Sample a 4x4 grid per tile (matches Rust baseline).
+  let step_y = max(h / 4u, 1u);
+  let step_x = max(w / 4u, 1u);
+  var samples: array<f32, 16>;
+  var sample_count: u32 = 0u;
+  var sy = y0;
+  loop {
+    if (sy >= y1) { break; }
+    var sx = x0;
+    loop {
+      if (sx >= x1) { break; }
+      if (sx < x1 && sy < y1) {
+        samples[sample_count] = image[sy * params.width + sx];
+        sample_count = sample_count + 1u;
+      }
+      sx = sx + step_x;
+    }
+    sy = sy + step_y;
+  }
+  // Sort the samples (insertion sort, up to 16).
+  for (var i: u32 = 1u; i < sample_count; i = i + 1u) {
+    let key = samples[i];
+    var j = i;
+    loop {
+      if (j == 0u) { break; }
+      if (samples[j - 1u] <= key) { break; }
+      samples[j] = samples[j - 1u];
+      j = j - 1u;
+    }
+    samples[j] = key;
+  }
+  // Output: (x_center, y_center, median, has_samples).
+  let x_center = f32(x0 + x1) / 2.0;
+  let y_center = f32(y0 + y1) / 2.0;
+  let median = if (sample_count > 0u) {
+    samples[sample_count / 2u]
+  } else {
+    0.0
+  };
+  let has_samples = if (sample_count > 0u) { 1.0 } else { 0.0 };
+  let base_out = tile_index * 4u;
+  out_buf[base_out + 0u] = x_center;
+  out_buf[base_out + 1u] = y_center;
+  out_buf[base_out + 2u] = median;
+  out_buf[base_out + 3u] = has_samples;
+}
+`;
+
+/**
  * Map a `SpatialMode` string to the corresponding WGSL
  * shader source. The shader compiles once per
  * `WebGpuSpatialCompute` instance and is reused across
  * dispatches.
  */
-export type SpatialMode = "luminance_noise" | "chromatic_noise" | "local_contrast";
+export type SpatialMode =
+  | "luminance_noise"
+  | "chromatic_noise"
+  | "local_contrast"
+  | "background_gradient";
 
 export function shaderForSpatial(mode: SpatialMode): string {
   switch (mode) {
-    case "luminance_noise": return LUMINANCE_NOISE_SHADER;
-    case "chromatic_noise": return CHROMATIC_NOISE_SHADER;
-    case "local_contrast":  return LOCAL_CONTRAST_SHADER;
+    case "luminance_noise":    return LUMINANCE_NOISE_SHADER;
+    case "chromatic_noise":    return CHROMATIC_NOISE_SHADER;
+    case "local_contrast":     return LOCAL_CONTRAST_SHADER;
+    case "background_gradient": return BACKGROUND_GRADIENT_SHADER;
   }
 }
 
@@ -391,5 +491,20 @@ export function spatialOutputSize(mode: SpatialMode, pixelCount: number, workgro
       // 4 floats per workgroup (3 partial sums + count).
       const workgroupCount = Math.ceil(pixelCount / workgroupSize);
       return workgroupCount * 4;
+    case "background_gradient":
+      // Per-tile output: (x_center, y_center, median) +
+      // (x_center, y_center, median) + ... The host code
+      // reads the first 3 f32s per tile + the per-tile
+      // count (encoded in the 4th f32 as a flag: 1.0 for
+      // tiles with samples, 0.0 for empty tiles). The
+      // host output size matches the Rust baseline: one
+      // tile row + one tile column, with up to
+      // (W/64 + 1) * (H/64 + 1) tiles. For simplicity,
+      // we allocate a worst-case 4 f32s per tile (x, y,
+      // median, has_samples).
+      // The tile count is (ceil(W/64) + 1) * (ceil(H/64) + 1).
+      // The output size is computed in the wrapper; here
+      // we return 0 to indicate "compute dynamically".
+      return 0;
   }
 }

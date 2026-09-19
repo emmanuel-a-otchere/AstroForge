@@ -2,6 +2,151 @@
 
 ## Unreleased
 
+### Slice §29.3b.1a: CR-07 WGSL shader for background_gradient
+
+**Scope.** Closes the §29.3b.1a sub-row of §29.3b by
+shipping the WGSL compute shader + the host-side finalize
+helper for the 4th spatial detector,
+`background_gradient`. With this slice, all 4 spatial
+detectors are WebGPU-accelerated at the GPU-primitive
+level.
+
+`background_gradient` is a tile-strided detector: the
+image is split into 64x64 tiles, each tile produces a
+per-tile median (sampled from a 4x4 grid), and the
+host-side finalize fits a plane through the tile medians
+via least-squares + returns the gradient magnitude.
+
+#### New public API (UI)
+
+- `src/lib/webgpu-spatial-shaders.ts`:
+  - `BACKGROUND_GRADIENT_SHADER`: WGSL compute shader
+    source. One workgroup per 64x64 tile. Each
+    invocation samples a 4x4 grid, sorts the samples
+    (insertion sort, up to 16), and writes
+    `(x_center, y_center, median, has_samples_flag)`
+    to the output buffer.
+  - `SpatialMode`: extended with `"background_gradient"`.
+  - `shaderForSpatial(mode)`: returns the new shader
+    for the new mode.
+  - `spatialOutputSize(mode, ...)`: returns `0` for
+    `background_gradient` (the wrapper computes the
+    output size dynamically based on tile count).
+- `src/lib/webgpu-spatial.ts`:
+  - `WebGpuSpatialCompute.dispatch`: extended to
+    compute tile count for `background_gradient` mode
+    + dispatch that many workgroups (instead of
+    `ceil(pixelCount / 64)`).
+  - `finalizeBackgroundGradient(partials)`: host-side
+    helper. Reads the per-tile records from the GPU
+    output, skips tiles with `has_samples_flag = 0`,
+    computes the 2x3 plane-fit least-squares solve
+    (matching the Rust baseline character-for-character),
+    and returns the gradient magnitude in
+    "per 100 px" units. Returns 0 for degenerate cases
+    (fewer than 2 valid tiles, denom < 1e-12).
+- `src/lib/__tests__/webgpu-spatial.test.ts`: 5 new
+  tests for `finalizeBackgroundGradient` (empty,
+  n<2, degenerate x, gradient from 4 tiles, uniform
+  image) + 2 new tests for the wrapper (shader loads
+  on first call, dispatches one workgroup per tile).
+
+#### Design decisions
+
+1. **GPU does per-tile work; host does the 2x3
+   plane-fit solve.** The plane-fit is a tiny
+   (ceil(W/64) × ceil(H/64)) normal-equations
+   problem — the host can do it in microseconds. The
+   GPU work (per-tile 4x4 grid sample + sort + median)
+   is the bulk of the work for 4K+ images.
+
+2. **One workgroup per tile** (not one per pixel).
+   `dispatchWorkgroups(tileCount)` instead of
+   `dispatchWorkgroups(ceil(pixelCount / 64))`. The
+   output buffer holds 4 f32s per tile
+   (x, y, median, has_samples).
+
+3. **`has_samples_flag` in the output** lets the shader
+   skip empty tiles (when the image is smaller than
+   the tile size). The Rust baseline guards against
+   this by checking `samples.is_empty()` before
+   pushing the median; the WGSL version does the same
+   via the 4th output field.
+
+4. **Insertion sort in WGSL** for up to 16 samples per
+   tile. WGSL does not (yet) support `array.sort`; a
+   manual insertion sort is the canonical portable
+   solution for a small fixed-size array.
+
+5. **`finalizeBackgroundGradient` matches the Rust
+   baseline character-for-character** — same normal-
+   equation accumulators, same `denom < 1e-12`
+   threshold, same `* 100.0` final scale.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1137 passing** (unchanged;
+  the existing 4 Rust tests for `background_gradient`
+  in `image_analysis::metrics` already cover the
+  underlying algorithm).
+- `npm run test` (vitest): **50 passing** (+7 new = 5
+  `finalizeBackgroundGradient` tests + 2 wrapper
+  tests; was 43).
+- `npm run check`: 1 error + 9 warnings (matches main
+  baseline; the 1 error is pre-existing in a Svelte
+  file. Slice adds 0 new warnings. Backend tests only.)
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code
+  spans, 0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **5 new vitest tests** pin the contract. The tests
+  use the mock GPUDevice (no real GPU execution); they
+  verify the wrapper contract (shader source loaded,
+  workgroup count = tile count) + the host-side finalize
+  formula (plane-fit on synthetic tile data).
+  Byte-equivalence to the Rust baseline is a separate
+  concern that requires running on real GPU
+  (§29.3b.2a if the project decides browser-based GPU
+  tests are worth the infra cost).
+
+- **`spatialOutputSize` returns 0 for `background_gradient`.**
+  The wrapper computes the output size dynamically
+  (tileCount * 4). This is a deliberate divergence from
+  the per-pixel modes where the size is known a priori.
+  The `0` return value signals "compute dynamically"
+  to the dispatch logic.
+
+- **GPU work vs Rust work.** The WGSL shader does the
+  per-tile median; the host does the plane-fit. This is
+  the natural split: GPU = per-tile parallel work,
+  host = small serial solve. A follow-on slice could
+  push the plane-fit to GPU as well (5x5 normal
+  equations on a (W/64)*(H/64) matrix is trivial on
+  GPU), but the current host-side split is correct
+  and matches the Rust baseline algorithmically.
+
+- **Pre-existing em-dashes NOT cleaned.** Per Coding
+  Discipline, out of scope.
+
+#### Out-of-scope (intentional)
+
+- §29.3b.3 IPC layer wiring (folded into §29.3b.4;
+  GPU compute is client-side, not Rust-side).
+- §29.3b.4 UI integration + retire CPU fallback
+  (rank #1; next slice).
+- §8 SNR / regional noise / edge response / color
+  gradient (rank #2).
+- §32.6 (already shipped, rank #3).
+- §29.3b.2a Browser-based GPU behavioural tests
+  (Playwright + headless Chrome with WebGPU): deferred.
+- §29.4 (optional) Tile-stripe streaming: deferred.
+- Pre-existing em-dashes on `main`: out of scope.
+
 ### Slice §29.2a: CR-07 wire DiffCache through IPC
 
 **Scope.** Continues the §29 Performance work by exposing

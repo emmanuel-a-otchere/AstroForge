@@ -22,6 +22,7 @@ import {
   finalizeLuminanceNoise,
   finalizeChromaticNoise,
   finalizeLocalContrast,
+  finalizeBackgroundGradient,
 } from "../webgpu-spatial";
 import { MockGpuDevice, makeF32Image } from "./mock-gpu";
 
@@ -62,6 +63,30 @@ describe("WebGpuSpatialCompute", () => {
     // The local_contrast shader computes the 3x3 sum and
     // divides by 9 for the mean.
     expect(mock.shaders[0]!.code).toContain("let mean = sum / 9.0");
+  });
+
+  it("loads the background_gradient shader on first call", async () => {
+    // Use an image at least 64x64 so the shader dispatches
+    // at least one tile. Set readback data large enough
+    // to hold one tile record (4 floats * 1 tile = 4 floats).
+    const image = makeF32Image(64, 64, 1);
+    mock.setReadbackData(new ArrayBuffer(4 * 4));
+    await compute.compute("background_gradient", image, 64, 64, 1);
+    expect(mock.shaders).toHaveLength(1);
+    // The shader's source contains the unique TILE_SIZE
+    // constant declaration.
+    expect(mock.shaders[0]!.code).toContain("const TILE_SIZE: u32 = 64u");
+  });
+
+  it("dispatches one workgroup per 64x64 tile for background_gradient", async () => {
+    // 128x128 image = 2x2 = 4 tiles.
+    const image = makeF32Image(128, 128, 1);
+    mock.setReadbackData(new ArrayBuffer(4 * 4 * 4));
+    await compute.compute("background_gradient", image, 128, 128, 1);
+    const pass = mock.lastComputePass();
+    expect(pass).toBeDefined();
+    expect(pass!.dispatchedWorkgroups).toHaveLength(1);
+    expect(pass!.dispatchedWorkgroups[0]!.x).toBe(4);
   });
 
   it("caches compiled pipelines across calls", async () => {
@@ -228,5 +253,60 @@ describe("finalizeLocalContrast", () => {
 
   it("returns 0 for all-zero residuals", () => {
     expect(finalizeLocalContrast(new Float32Array([0, 0, 0, 0]))).toBe(0.0);
+  });
+});
+describe("finalizeBackgroundGradient", () => {
+  it("returns 0 for empty partials", () => {
+    expect(finalizeBackgroundGradient(new Float32Array(0))).toBe(0.0);
+  });
+
+  it("returns 0 when fewer than 2 tiles have samples", () => {
+    // 1 tile with samples + 1 tile without = 1 valid tile < 2.
+    const partials = new Float32Array([
+      32, 32, 0.5, 1.0, // x=32, y=32, median=0.5, has_samples=1
+      96, 32, 0.0, 0.0, // has_samples=0, skipped
+    ]);
+    expect(finalizeBackgroundGradient(partials)).toBe(0.0);
+  });
+
+  it("returns 0 when denom is degenerate (all x equal)", () => {
+    // All tiles have x=64 (constant x). The x-variance
+    // is zero, so the plane-fit is degenerate.
+    const partials = new Float32Array([
+      64, 32, 0.5, 1.0,
+      64, 96, 0.7, 1.0,
+    ]);
+    expect(finalizeBackgroundGradient(partials)).toBe(0.0);
+  });
+
+  it("computes gradient magnitude from 4 tiles", () => {
+    // 4 tiles at the corners of a 128x128 image:
+    //   (32, 32)  -> 0.0
+    //   (96, 32)  -> 0.5
+    //   (32, 96)  -> 1.0
+    //   (96, 96)  -> 1.5
+    // This is a plane z = 0 + 0.5*(x-32)/64 + 1.0*(y-32)/64.
+    // a = 0.5/64 = 0.0078125, b = 1.0/64 = 0.015625.
+    // mag = sqrt(0.0078125^2 + 0.015625^2) = 0.01736...
+    // per 100 px = 1.736...
+    const partials = new Float32Array([
+      32, 32, 0.0, 1.0,
+      96, 32, 0.5, 1.0,
+      32, 96, 1.0, 1.0,
+      96, 96, 1.5, 1.0,
+    ]);
+    const expected = Math.sqrt(0.5 * 0.5 + 1.0 * 1.0) / 64 * 100;
+    expect(finalizeBackgroundGradient(partials)).toBeCloseTo(expected, 2);
+  });
+
+  it("returns 0 for a uniform image (all medians equal)", () => {
+    // 4 tiles, all with median = 0.5. The plane is flat.
+    const partials = new Float32Array([
+      32, 32, 0.5, 1.0,
+      96, 32, 0.5, 1.0,
+      32, 96, 0.5, 1.0,
+      96, 96, 0.5, 1.0,
+    ]);
+    expect(finalizeBackgroundGradient(partials)).toBe(0.0);
   });
 });

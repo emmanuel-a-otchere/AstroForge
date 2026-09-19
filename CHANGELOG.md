@@ -2,6 +2,204 @@
 
 ## Unreleased
 
+### Slice §29.3b.2: CR-07 Vitest infra + behavioural tests for WebGPU wrappers
+
+**Scope.** Continues the §29.3 GPU/WebGPU acceleration
+work by adding Vitest as the project's JS-side test
+runner + shipping behavioural tests for the two
+existing WebGPU wrappers (`webgpu-diff.ts` from §29.3a
++ `webgpu-spatial.ts` from §29.3b.1). The slice ships
+the test infra + 43 tests + fixes 3 real bugs uncovered
+by writing the tests.
+
+#### New public API (UI)
+
+- `package.json`: adds `vitest@^2.1.9`,
+  `jsdom@^25.0.1`, `@vitest/coverage-v8@^2.1.9` to
+  devDependencies. Adds 3 npm scripts: `test`
+  (`vitest run`), `test:watch` (`vitest`), and
+  `test:coverage` (`vitest run --coverage`).
+- `vitest.config.ts`: jsdom environment, globals
+  enabled (describe/it/expect without imports),
+  setupFiles reference `./vitest.setup.ts`,
+  include patterns `src/**/__tests__/**/*.test.ts`
+  + `src/**/*.test.ts`, v8 coverage provider.
+- `vitest.setup.ts`: empty placeholder for future
+  global polyfills + matcher extensions.
+
+#### Bug fixes uncovered by writing tests
+
+The §29.3a + §29.3b.1 WebGPU wrappers had 3 latent
+bugs that didn't surface without runtime exercise.
+The slice's behavioural tests caught all 3.
+
+1. **`GPUBufferUsage` / `GPUShaderStage` / `GPUMapMode`
+   not globally available at runtime.** The §29.3a slice
+   declared these as `interface` + paired `const` values
+   in `webgpu-types.ts`, but the consts were
+   MODULE-LOCAL (not visible to other modules at
+   runtime). The jsdom test environment does not provide
+   these globals like a real browser does, so the
+   wrapper code crashed with `ReferenceError: GPUBufferUsage
+   is not defined`. **Fix:** wrap all WebGPU consts in
+   `declare global { const X: ... }` blocks + add
+   explicit runtime polyfill assignments at module
+   load (guarded by `typeof === "undefined"` checks).
+
+2. **Uniform buffer writeBuffer ran BEFORE pipeline
+   creation.** The §29.3a wrapper wrote the uniform
+   buffer BEFORE calling `pipelineFor(mode)`, but
+   `pipelineFor` is what lazily creates the uniform
+   buffer on the first call. On the first call,
+   `this.uniformBuffer` was null, so the writeBuffer
+   was skipped — meaning the shader received
+   uninitialized uniform data. **Fix:** call
+   `pipelineFor(mode)` first to ensure the uniform
+   buffer exists, THEN write the per-call params.
+
+3. **The `compute` method returned `Promise<Uint8Array>`
+   disguised as `Uint8Array`** via a type assertion.
+   Real WebGPU readback is asynchronous; the wrapper
+   returned the Promise synchronously via
+   `as unknown as Uint8Array`. Callers that awaited
+   the result would have gotten a `Promise<Promise<...>>`
+   — almost certainly a downstream bug waiting to
+   happen. **Fix:** make `compute` + `dispatch` properly
+   `async` + return `Promise<Uint8Array | null>` /
+   `Promise<Float32Array | null>`.
+
+#### New tests (43 total)
+
+- `src/lib/__tests__/mock-gpu.ts`: a complete
+  `MockGpuDevice` + `MockGPUBuffer` + `MockGPUQueue`
+  + `MockCommandEncoder` + `MockComputePassEncoder`
+  test infrastructure. Records every API call
+  (shader loads, buffer creates, queue writes,
+  compute passes, workgroup dispatch counts, bind
+  groups, command encoders) so tests can assert
+  the right structure. Returns pre-defined readback
+  data so the wrapper's full code path runs.
+- `src/lib/__tests__/webgpu-diff.test.ts`: 20 tests
+  covering shader-source matching per DiffMode,
+  pipeline caching across calls, buffer allocation
+  counts, workgroup dispatch counts (64/65 pixel
+  cases), uniform-buffer param encoding, gain
+  clamping (negative + NaN + Infinity), input
+  validation (length mismatch + non-multiple-of-4),
+  uniform-buffer reuse across calls, transient
+  buffer destruction after dispatch, return-value
+  type + length, dispose() semantics, and
+  `acquireWebGpuDevice()` fallback paths.
+- `src/lib/__tests__/webgpu-spatial.test.ts`: 23
+  tests covering shader-source matching per
+  SpatialMode, pipeline caching, workgroup dispatch,
+  uniform-buffer param encoding, length-validation,
+  transient buffer destruction, return-value
+  shapes (per-pixel vs per-workgroup), dispose(),
+  and the 3 host-side finalize helpers:
+  - `finalizeLuminanceNoise`: empty / sigma formula
+    (1.4826 × median) / zero residuals.
+  - `finalizeChromaticNoise`: empty / zero count /
+    total < 1e-12 / correct ratio stddev / multi-
+    workgroup aggregation.
+  - `finalizeLocalContrast`: empty / correct mean /
+    zero residuals.
+
+#### Design decisions
+
+1. **jsdom over happy-dom.** jsdom provides a more
+   complete DOM + Window + Navigator polyfill, which
+   is required by the WebGPU module (`navigator.gpu
+   .requestAdapter`). The mock GPUDevice tests don't
+   actually use the navigator, but jsdom is chosen
+   for future Svelte-component tests.
+
+2. **Globals enabled.** Tests use `describe`, `it`,
+   `expect`, `vi`, etc. without explicit imports.
+   Reduces boilerplate for the 43 tests.
+
+3. **Runtime polyfills for WebGPU constants.** The
+   wrapper code references `GPUBufferUsage.UNIFORM`
+   etc. as runtime values. A real browser provides
+   these; jsdom doesn't. The polyfills are guarded
+   by `typeof === "undefined"` so they don't override
+   the real browser values.
+
+4. **Mock GPUDevice records API calls, doesn't
+   actually compute.** The mock is a structural test
+   harness, not a GPU simulator. It records what the
+   wrapper did so tests can assert the right structure
+   was invoked. Real GPU behaviour verification is
+   deferred to browser-based tests (Playwright +
+   headless Chrome with WebGPU) which are §29.3b.2a
+   (a follow-on if the project decides browser-based
+   GPU tests are worth the infra cost).
+
+5. **Vitest NOT wired to CI gate.** The CI gate is
+   `npm run check` (svelte-check) which is unchanged
+   by this slice. Adding vitest to CI is a follow-on
+   decision (the project's CI currently runs ~3.5 min
+   for 6 jobs; adding vitest would add 1-2 min).
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1137 passing** (unchanged;
+  slice adds 0 Rust code).
+- `npm run test` (vitest): **43 passing** (NEW).
+- `npm run check`: 1 error + 9 warnings (matches main
+  baseline; the 1 error is pre-existing in a Svelte
+  file. Slice adds 0 new warnings. Backend tests only.)
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code
+  spans, 0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **Three real bugs caught by writing the tests.**
+  See "Bug fixes uncovered by writing tests" above.
+  None of these bugs would have surfaced under
+  `npm run check` alone. The slice's value-add is
+  not just "more tests" — it's "the existing GPU
+  wrappers are now actually correct".
+
+- **No GPU simulator.** The mock is structural; it
+  records API calls but doesn't simulate GPU
+  computation. Tests verify the WRAPPER contract, not
+  the SHADER contract. Shader correctness (byte-
+  equivalence to the Rust backend) is a separate
+  concern that requires running on real GPU. Deferred
+  to §29.3b.2a if the project decides browser-based
+  GPU tests are worth the infra cost (Playwright +
+  headless Chrome with WebGPU enabled).
+
+- **Vitest NOT wired to CI.** `npm run test` works
+  locally + in this slice's PR check. The CI gate is
+  still `npm run check` (svelte-check). Adding vitest
+  to CI is a separate decision.
+
+- **Pre-existing em-dashes NOT cleaned.** Per Coding
+  Discipline, out of scope.
+
+#### Out-of-scope (intentional)
+
+- §29.3b.3 IPC layer wiring (rank #1; next slice).
+- §29.3b.4 UI integration + retire CPU fallback
+  (rank #2).
+- §29.3b.1a WGSL for `background_gradient` (rank #3).
+- §29.3b.2a Browser-based GPU behavioural tests
+  (Playwright + headless Chrome with WebGPU): deferred
+  to a separate slice if the project wants browser-
+  based GPU tests.
+- §8 SNR / regional noise / edge response / color
+  gradient (rank #4).
+- §32.6 (new) Wire `pipeline_plan_hash` +
+  `RecipeAiDiffSummary` through IPC.
+- §29.4 (optional) Tile-stripe streaming: deferred.
+- Pre-existing em-dashes on `main`: out of scope.
+
 ### Slice §29.3b.1: CR-07 WGSL shaders for spatial detectors
 
 **Scope.** Continues the §29.3 GPU/WebGPU acceleration

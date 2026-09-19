@@ -161,14 +161,19 @@ export class WebGpuDiffCompute {
    * created (caller should fall back to the Rust
    * backend). Throws on length mismatch (matching the
    * Rust `debug_assert_eq!`).
+   *
+   * Async: the GPU readback is asynchronous in real
+   * WebGPU implementations, so the call returns a
+   * Promise. Callers `await compute(...)` and check
+   ` the result for null on GPU failure.
    */
-  compute(
+  async compute(
     mode: DiffMode,
     a: Uint8Array,
     b: Uint8Array,
     gain: number,
     width: number,
-  ): Uint8Array | null {
+  ): Promise<Uint8Array | null> {
     if (a.length !== b.length) {
       throw new Error(
         `compute_diff: a/b length mismatch (${a.length} vs ${b.length})`,
@@ -184,7 +189,7 @@ export class WebGpuDiffCompute {
     const clampedGain =
       Number.isFinite(gain) && gain > 0 ? gain : 1.0;
     try {
-      return this.dispatch(mode, a, b, clampedGain, width, pixelCount);
+      return await this.dispatch(mode, a, b, clampedGain, width, pixelCount);
     } catch (err) {
       // Surface the GPU failure to the caller as null
       // so they can fall back to the Rust path.
@@ -193,14 +198,14 @@ export class WebGpuDiffCompute {
     }
   }
 
-  private dispatch(
+  private async dispatch(
     mode: DiffMode,
     a: Uint8Array,
     b: Uint8Array,
     gain: number,
     width: number,
     pixelCount: number,
-  ): Uint8Array {
+  ): Promise<Uint8Array<ArrayBufferLike>> {
     const device = this.device;
     // Pack a + b into u32 arrays (4 bytes per pixel).
     const aPacked = new Uint32Array(pixelCount);
@@ -236,12 +241,14 @@ export class WebGpuDiffCompute {
     f32[1] = gain;
     u32[2] = width;
     u32[3] = 0; // pad
-    if (this.uniformBuffer) {
-      device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
-    }
     const pipeline = this.pipelineFor(mode);
     if (!this.bindGroupLayout) {
       throw new Error("bind group layout not initialized");
+    }
+    // Now that pipelineFor has ensured the uniform
+    // buffer exists, write the per-call params.
+    if (this.uniformBuffer) {
+      device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
     }
     const bindGroup = device.createBindGroup({
       layout: this.bindGroupLayout,
@@ -266,12 +273,13 @@ export class WebGpuDiffCompute {
     encoder.copyBufferToBuffer(outBuf, readback, 0, outBuf.size);
     const commandBuffer = encoder.finish();
     device.queue.submit([commandBuffer]);
-    // Destroy transient buffers; keep `uniformBuffer`
-    // for reuse.
     aBuf.destroy();
     bBuf.destroy();
     outBuf.destroy();
-    return new Promise<Uint8Array>((resolve, reject) => {
+    // Await the GPU readback. Real WebGPU is
+    // asynchronous; the mock is synchronous but we
+    // await anyway to match the production semantics.
+    return new Promise<Uint8Array<ArrayBufferLike>>((resolve, reject) => {
       readback.mapAsync(GPUMapMode.READ).then(
         () => {
           const copy = new Uint32Array(readback.getMappedRange()).slice();
@@ -293,7 +301,7 @@ export class WebGpuDiffCompute {
           reject(err);
         },
       );
-    }) as unknown as Uint8Array;
+    });
   }
 
   /**

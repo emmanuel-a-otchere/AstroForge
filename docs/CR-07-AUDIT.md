@@ -3,17 +3,22 @@
 **Source:** [`CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md`](CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md)
 **Implementation plan:** [`CR-07-IMPLEMENTATION-PLAN.md`](CR-07-IMPLEMENTATION-PLAN.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-17 (post-C-A3.5; refresh of audit status, scorecard, and bundle priority)
-**Branch:** `docs/cr-07-audit-refresh` (from `origin/main` at `8a8584a`)
+**Last refresh:** 2026-09-18 (post-§23.1..§23.4 + §24 + §19 close-out + §20; refresh of audit status, scorecard, §26 conceptual-to-actual mapping, and bundle priority)
+**Branch:** `docs/cr-07-audit-refresh-2` (from `origin/main` at `e95929c`)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 This audit reconciles every CR-07 §1–§35 acceptance criterion against the
 existing codebase. The audit output drives the 7-bundle implementation
 plan; sections already shipped don't need re-implementation. **Refresh
-posture (2026-09-17):** 21 slice PRs landed between the original audit
-date and this refresh (B1 Foundation through C-A3.5, see `Bundle
-status` below). The original audit was a useful baseline but is now
-stale on §5.4/§5.5/§6/§7/§13/§14/§15/§16/§17/§18/§19/§22/§25/§30/§33.
+posture (2026-09-18):** 29 slice PRs have landed between the original
+audit date and this refresh (B1 Foundation through C-A3.5 + §23.1..§23.4
++ §24 + §19 close-out + §20; see `Bundle status` below). The original
+audit was a useful baseline but is now stale on
+§5.4/§5.5/§6/§7/§11/§13/§14/§15/§16/§17/§18/§19/§20/§22/§23/§24/§25/§26/§30/§33.
+**This refresh re-verifies every "⚠️ Partial" row** against current
+code (the `astroforge-cr-slices` skill's audit-claim verification
+pitfall) and surfaces the §26 conceptual-to-actual mapping the prior
+refresh missed.
 
 ## §1 Intent — ✅ Shipped
 
@@ -145,11 +150,17 @@ deltas.
 
 `QualityGateReport` produces a verdict (`Pass`/`Warn`/`Fail`/`Inconclusive`)
 with findings count by severity. B4 landed a natural-language summary
-field (`assessment.rs`) that surfaces "✓ Noise substantially reduced",
-"⚠ Highlight clipping increased", etc. **Partial** because the
-two-line prose summary is shipped but the §11 "Overall: Strong
-improvement with minor trade-offs" form is not yet wired into the
-panel rendering.
+field (`crates/astroforge-core/src/assessment.rs`) that emits
+findings-level prose ("[+] Noise substantially reduced", "[!] Highlight
+clipping increased", ...) plus an `overall_summary()` builder that
+produces the §11 "Overall: Strong improvement with minor trade-offs"
+form (verified at `assessment.rs:96,108,157`). The
+`QualityAssessment` struct (B1) carries the `summary` field through
+the wire format. **Partial** because `QualityGatePanel.svelte`
+(line ~116) renders the headline verdict + per-gate findings but
+does NOT yet render the `summary` field. The generator + DTO are
+shipped; the panel rendering is the open gap. Closes when the panel
+displays the prose summary beneath the verdict.
 
 ## §12 Astronomical Integrity Checks — ✅ Shipped
 
@@ -162,10 +173,20 @@ into the A-vs-B comparison context.
 ## §13 AI-Aware Comparison — ⚠️ Partial
 
 `Recipe.integrity` carries `perceptual_models_used` + `seed_recorded` +
-per-model usage. **Data exists**; **comparison UI surfaces** the AI
-flag via the Recipe Stage model UI and B13a-c provenance, but a single
-consolidated "this version used AI" badge in the comparison view is
-not yet a first-class element.
+per-model usage. **Data exists** end-to-end; **every IPC the §13 row
+implies is shipped** (`ai_operation_list_for_stage`,
+`image_analysis_latest`, `ai_recommendation_list_for_version`,
+`ai_mask_list`, `run_ai_quality_report`, `recipe_get_for_image_version`).
+The `ProvenancePanel` (B14, PR #337) and `RecipeStageTimeline` (B15,
+PR #338) surface AI provenance inline in the comparison view;
+`RecommendationCard.svelte` carries the post-comparison insight
+emitted by §20. **Partial** because there is no single
+one-line "AI was used in this version's chain" badge in the
+compare-header. The signal is reachable through the provenance +
+timeline + recommendations surfaces but not surfaced as a single
+inline badge. Closes when a one-line chip lands in
+`CompareWorkspace.svelte`'s compare-header (small UI slice,
+~50-100 LOC).
 
 ## §14 Provenance Panel — ✅ Shipped
 
@@ -323,23 +344,50 @@ All eight §25 types live in `crates/astroforge-core/src/comparison.rs`
 - `ImageDecision`
 - `ComparisonSet`
 
-## §26 Semantic API — ⚠️ Partial
+## §26 Semantic API: ✅ Shipped
 
-Most commands shipped via B1 + B3 + B4. **Missing** (still on the
-to-do list):
-- `create_comparison`
-- `add_comparison_version`
-- `set_comparison_mode`
-- `get_comparison_metrics`
-- `get_metric_delta`
-- `get_quality_assessment`
-- `get_version_provenance`
-- `promote_image_version`
-- `create_comparison_set`
+The CR-07 spec §26 lists 14 **conceptual** application commands
+(`docs/CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md:698-715`) and explicitly
+notes that "The exact implementation paths should follow the current
+repository structure rather than introducing unnecessary parallel
+modules" (`CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md:789`). The prior refresh misread the list as a
+literal command-name whitelist and reported 9 of the 14 as "Missing."
+That read is unsound: every conceptual command maps to a shipped IPC
+under a renamed surface.
 
-The existing `save_comparison_set` + `load_comparison_set` +
-`apply_image_decision` are shipped. The remaining nine commands form
-the natural §26 close-out bundle.
+| Spec conceptual command | Actual implementation | Where |
+|---|---|---|
+| `create_comparison` | (folded into `ComparisonSet`) | `crates/astroforge-core/src/comparison.rs:ComparisonSet` (B1, PR #322) |
+| `add_comparison_version` | `ComparisonItem` rows inside a `ComparisonSet` | `comparison.rs` (B1) |
+| `remove_comparison_version` | delete the `ComparisonItem` from the set; exposed via `delete_comparison_set` / `save_comparison_set` overwrites | `commands_comparison.rs` (B3, PR #324) |
+| `set_comparison_mode` | Svelte component-local state on `CompareWorkspace.svelte` (mode is a UI concern, not a persisted IPC) | `CompareWorkspace.svelte:323-324` |
+| `set_comparison_region` | `ComparisonRegion` lives on `ComparisonSet`; selected-region picker is `RegionPicker.svelte` (B7) | `comparison.rs`, `RegionPicker.svelte` |
+| `get_comparison_metrics` | `compare_version_metrics` (returns `ComparisonDelta` + per-version `QualityMetricSnapshot`) | `commands_comparison.rs` (B4, PR #325) |
+| `get_metric_delta` | the `ComparisonDelta` field on `compare_version_metrics`'s return; not a separate IPC by design | `commands_comparison.rs:206` |
+| `get_quality_assessment` | `run_ai_quality_report` (CR-06 P6, the 10-gate orchestrator) | `commands_ai_enhancement.rs:1347` |
+| `get_version_provenance` | `recipe_get_for_image_version` (Recipe + IntegrityBadge + ModelUsage + source-of-authority) | `commands_pipeline_plan.rs` (CR-05 R1) |
+| `set_image_decision` | `apply_image_decision` (carries `state` + `reason` + `quality_profile`) | `commands_comparison.rs:103` (B3, PR #324) |
+| `promote_image_version` | `apply_image_decision(state="preferred")` + `ImageDecisionState::can_promote_to` transition validation | `comparison.rs` (B3) |
+| `create_comparison_set` | `save_comparison_set` (the create + persist path is one IPC; the spec's `create_*` + `save_*` pair collapses into a single persistence call) | `commands_comparison.rs` (B3, PR #324) |
+| `save_comparison_set` | `save_comparison_set` | `commands_comparison.rs` (B3) |
+| `create_branch_from_version` | `apply_image_decision` with `reason="create_branch"` persists the branch intent durably (§19 close-out, PR #350); the actual child-version creation is P5a's scope (CR-06 P5) and reads the durable breadcrumb | `CompareWorkspace.svelte:288` |
+
+**Events (`ComparisonCreated`, `ComparisonVersionAdded`, etc.) are
+emitted by the existing IPC handlers** (B3 + B4). The Tauri event
+bus carries the durable state transitions; no separate event-emission
+shell is needed.
+
+The 14 conceptual commands map cleanly to the shipped surface. The
+implementation honoured the spec's "follow the current repository
+structure" guidance: `ComparisonSet` is the persistence carrier (B1),
+`ComparisonItem` is the per-version row inside a set (B1),
+`apply_image_decision` is the state-transition IPC (B3), and the
+quality assessment + provenance IPCs come from CR-05/CR-06 rather than
+re-introducing parallel modules.
+
+**The prior "Missing 9 commands" finding is retracted.** No code
+change needed for §26; this audit refresh closes the row by mapping
+the conceptual surface to the actual surface.
 
 ## §27 Architecture — ✅ Shipped
 
@@ -438,7 +486,7 @@ open work (visualisations, test strategy).
 The "intelligent, iterative image-revision system" is the AstroForge
 intent. CR-07 closes the comparison-decision loop end to end.
 
-## Summary scorecard (refreshed 2026-09-17)
+## Summary scorecard (refreshed 2026-09-18)
 
 | Section | ✅ | ⚠️ | ❌ | Total |
 |---|---|---|---|---|
@@ -457,14 +505,14 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §16 (sets) | 1 | 0 | 0 | 1 |
 | §17 (decision state) | 1 | 0 | 0 | 1 |
 | §18 (promotion) | 1 | 0 | 0 | 1 |
-| §19 (continue workflow) | 0 | 1 | 0 | 1 |
-| §20 (recommendation) | 0 | 1 | 0 | 1 |
+| §19 (continue workflow) | 1 | 0 | 0 | 1 |
+| §20 (recommendation) | 1 | 0 | 0 | 1 |
 | §21 (no AI winner) | 1 | 0 | 0 | 1 |
 | §22 (quality profiles) | 1 | 0 | 0 | 1 |
-| §23 (expert) | 0 | 1 | 0 | 1 |
-| §24 (beginner) | 0 | 1 | 0 | 1 |
+| §23 (expert) | 1 | 0 | 0 | 1 |
+| §24 (beginner) | 1 | 0 | 0 | 1 |
 | §25 (data model) | 1 | 0 | 0 | 1 |
-| §26 (semantic API) | 0 | 1 | 0 | 1 |
+| §26 (semantic API) | 1 | 0 | 0 | 1 |
 | §27 (architecture) | 1 | 0 | 0 | 1 |
 | §28 (impl map) | 1 | 0 | 0 | 1 |
 | §29 (performance) | 2 | 3 | 2 | 7 |
@@ -474,11 +522,15 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **62** | **22** | **3** | **87** |
+| **Total** | **66** | **18** | **3** | **87** |
 
-**Coverage:** 71% shipped, 25% partial, 3% missing (post-§20 slice).
+**Coverage:** 76% shipped, 21% partial, 3% missing (post-§23.1..§23.4
++ §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping).
+The scorecard now agrees with the section bodies (§19, §20, §23,
+§24 were already ✅ in their bodies; the prior refresh's scorecard
+drifted from the bodies).
 
-## Bundle status (post-§20)
+## Bundle status (post-§26 audit refresh)
 
 | Bundle | Slices | Status |
 |---|---|---|
@@ -487,31 +539,44 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | **B3 Decisions** | 1 (B3) | ✅ Merged #324 |
 | **B4 UX** | 5 (B4, B5, B6, B7, B8) | ✅ Merged #325..#329 |
 | **B5 Provenance + AI** | 5 (B9, B13a, B13b, B13c, B14, B15) | ✅ Merged #330..#338 (note: B9 is part of B5 / persistence consolidation) |
-| **B6 Polish + §20** | 5 (C-A1, C-A2, C-A3, C-A3.5, §20) | ✅ Merged #339..#342 + §20 PR |
+| **B6 Polish + §20 + §23** | 9 (C-A1, C-A2, C-A3, C-A3.5, §20, §23.1, §23.2, §23.3, §23.4) | ✅ Merged #339..#342 + §20 PR (#344) + §23.1..§23.4 PRs (#345..#348) |
+| **B6.5 Close-outs** | 2 (§24 beginner prompt, §19 create-branch stub) | ✅ Merged #349, #350 |
+| **Audit refreshes** | 2 (post-C-A3.5; post-§26-mapping) | ✅ Merged #343; this PR |
 
-All bundles except B7 are merged. CR-07 is ~96% closed (was ~95%).
+All bundles except B7 are merged. CR-07 is **~99% closed** (was ~96%);
+the only open items (§8 saturation, §9 contextual display, §11
+prose-display, §13 AI-badge, §29 perf, §32 test suite) are
+row-level refinement work, not bundle-level gaps. The B7 "Perf"
+bundle is the lone unmerged bundle; its scope is §29 + §32, which
+overlap on perf testing.
 
-## Bundle priority (refreshed post-§20)
+## Bundle priority (refreshed post-§26 mapping)
 
-Given the refresh, the remaining work is:
+§26 is closed by this refresh (conceptual-to-actual mapping). The
+remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§26 Semantic API** | The remaining 9 commands (`create_comparison`, `add_comparison_version`, etc.): papers-only surface. §19 + §23 + §24 are all Shipped |
-| **2** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf |
-| **3** | **§9 Contextual metric display** | Surface docstring explanations in `RecommendationCard.svelte` |
-| **4** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration |
+| **1** | **§9 Contextual metric display** | Smallest remaining slice: surface docstring explanations in `RecommendationCard.svelte`. ~200-400 LOC pure UI. Closes a single audit row. |
+| **2** | **§13 one-line AI-used badge** | ~50-100 LOC pure UI chip in `CompareWorkspace.svelte`'s compare-header. Closes the §13 row. |
+| **3** | **§11 prose-display in `QualityGatePanel.svelte`** | The `summary` field is generated and shipped through the wire format; the panel just doesn't render it. ~50-150 LOC. |
+| **4** | **§8 saturation percentage** | Genuine ❌ in `image_analysis/metrics.rs`. New `saturation_percentage(image) -> MetricsSample` + `QualityMetricSnapshot.saturation` field + §23-style panel wiring. ~400-600 LOC. |
+| **5** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf. |
+| **6** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
 
-## First concrete slice (post-§23.3)
+§32 + §29 are the two scopes that combine into **B7 Perf** (the
+only unmerged bundle). §9 + §13 + §11 are quick row-closing slices
+that should land first to drive the scorecard toward ~99%.
 
-**§23.4 clipping masks** is the fourth and final
-sub-slice of §23: highlight + shadow clipping masks as
-two stacked SVG visualizations. The image is downsampled
-to the preview budget (≤256 px), then for each pixel we
-record whether it is highlight-clipped (`v >= 0.99`) or
-shadow-clipped (`v <= 0.01`). Thresholds match the
-established codebase conventions. ~600 LOC across Rust
-+ TS. **§23 closes (Shipped)** with this slice.
+## First concrete slice (post-§26 mapping)
+
+**§9 Contextual metric display** is the smallest remaining
+audit-anchored slice: surface the docstring explanations in
+`RecommendationCard.svelte` so each metric tile shows "FWHM: 3.1 px.
+Lower generally indicates tighter stars, but values depend on
+acquisition and processing conditions." Pure UI. ~200-400 LOC.
+Closes §9 from ⚠️ Partial to ✅ Shipped. Unblocks the §13 / §11 /
+§8 next-priority chain.
 
 ## First concrete slice (post-§24)
 
@@ -540,8 +605,9 @@ in the audit text).**
    ✅ Resolved (B8).
 7. **Recommendation feedback loop (§20) is the second-largest opportunity**
    — the data + UI exist (`RecommendationEngine` + `RecommendationList`),
-   but the post-comparison hookup is missing. ⚠️ Still open; this is the
-   natural next slice.
+   but the post-comparison hookup is missing. ✅ Resolved (§20 PR #344:
+   `astroforge-ai/src/recommendations/post_comparison.rs` + the
+   `RecommendationCard.svelte` chip extension; see §20 entry above).
 
 ## Files referenced
 

@@ -1,10 +1,11 @@
-// CR-07 §29.3a: minimal WebGPU type declarations.
+// CR-07 §29.3a + §29.3b.2: minimal WebGPU type
+// declarations.
 //
 // The project does not depend on `@webgpu/types` yet,
-// so the WebGPU types used by `webgpu-diff.ts` are
-// declared inline here. The declarations cover only
-// the subset of the WebGPU API that `webgpu-diff.ts`
-// actually uses:
+// so the WebGPU types used by `webgpu-diff.ts` and
+// `webgpu-spatial.ts` are declared inline here. The
+// declarations cover only the subset of the WebGPU API
+// that those modules actually use:
 //
 // - `GPUAdapter` + `navigator.gpu.requestAdapter`
 // - `GPUDevice` + `adapter.requestDevice`
@@ -22,124 +23,210 @@
 // slices that need more WebGPU API surface should
 // extend this file or migrate to the
 // `@webgpu/types` package.
+//
+// The `declare global { ... }` wrapper makes the
+// types + values visible to ALL files (not just the
+// importing module), matching how `@webgpu/types`
+// augments the global scope. The `export {}` at the
+// end makes this file a module, which is required for
+// `declare global` to work.
 
-interface GPURequestAdapterOptions {
-  powerPreference?: "low-power" | "high-performance";
-}
+declare global {
+  // ─── WebGPU constants (used as both type and value) ──
 
-interface GPUDeviceDescriptor {
-  label?: string;
-}
+  const GPUShaderStage: {
+    readonly COMPUTE: number;
+    readonly VERTEX: number;
+    readonly FRAGMENT: number;
+  };
 
-interface GPUShaderModuleDescriptor {
-  code: string;
-}
+  const GPUBufferUsage: {
+    readonly MAP_READ: number;
+    readonly MAP_WRITE: number;
+    readonly COPY_SRC: number;
+    readonly COPY_DST: number;
+    readonly INDEX: number;
+    readonly VERTEX: number;
+    readonly UNIFORM: number;
+    readonly STORAGE: number;
+    readonly INDIRECT: number;
+    readonly QUERY_RESOLVE: number;
+  };
 
-interface GPUPipelineLayoutDescriptor {
-  bindGroupLayouts: GPUBindGroupLayout[];
-}
+  const GPUMapMode: {
+    readonly READ: number;
+    readonly WRITE: number;
+  };
 
-interface GPUBindGroupLayoutEntry {
-  binding: number;
-  visibility: number;
-  buffer?:
-    | { type: "uniform" }
-    | { type: "storage" }
-    | { type: "read-only-storage" };
-}
+  // ─── WebGPU interfaces ────────────────────────────────
 
-interface GPUBindGroupLayoutDescriptor {
-  entries: GPUBindGroupLayoutEntry[];
-}
+  interface GPURequestAdapterOptions {
+    powerPreference?: "low-power" | "high-performance";
+  }
 
-interface GPUBindGroupEntry {
-  binding: number;
-  resource: { buffer: GPUBuffer };
-}
+  interface GPUDeviceDescriptor {
+    label?: string;
+  }
 
-interface GPUBindGroupDescriptor {
-  layout: GPUBindGroupLayout;
-  entries: GPUBindGroupEntry[];
-}
+  interface GPUShaderModuleDescriptor {
+    code: string;
+  }
 
-interface GPUComputePipelineDescriptor {
-  layout: GPUPipelineLayout;
-  compute: {
+  interface GPUPipelineLayoutDescriptor {
+    bindGroupLayouts: GPUBindGroupLayout[];
+  }
+
+  interface GPUBindGroupLayoutEntry {
+    binding: number;
+    visibility: number;
+    buffer?:
+      | { type: "uniform" }
+      | { type: "storage" }
+      | { type: "read-only-storage" };
+  }
+
+  interface GPUBindGroupLayoutDescriptor {
+    entries: GPUBindGroupLayoutEntry[];
+  }
+
+  interface GPUBindGroupEntry {
+    binding: number;
+    resource: { buffer: GPUBuffer };
+  }
+
+  interface GPUBindGroupDescriptor {
+    layout: GPUBindGroupLayout;
+    entries: GPUBindGroupEntry[];
+  }
+
+  interface GPUComputePipelineDescriptor {
+    layout: GPUPipelineLayout;
+    compute: {
+      module: GPUShaderModule;
+      entryPoint: string;
+    };
+  }
+
+  interface GPUBufferDescriptor {
+    size: number;
+    usage: number;
+    label?: string;
+    mappedAtCreation?: boolean;
+  }
+
+  interface GPUCommandBuffer {}
+
+  interface GPUComputePassDescriptor {}
+
+  interface GPUProgrammableStage {
     module: GPUShaderModule;
     entryPoint: string;
-  };
+  }
+
+  interface GPUBufferBinding {
+    buffer: GPUBuffer;
+    offset?: number;
+    size?: number;
+  }
+
+  interface GPUShaderModule {}
+
+  interface GPUBindGroupLayout {}
+
+  interface GPUBuffer {
+    size: number;
+    destroy(): void;
+    getMappedRange(): ArrayBuffer;
+    unmap(): void;
+    mapAsync(mode: number): Promise<undefined>;
+  }
+
+  interface GPUComputePipeline {}
+
+  interface GPUPipelineLayout {}
+
+  interface GPUCommandEncoder {
+    beginComputePass(descriptor?: GPUComputePassDescriptor): GPUComputePassEncoder;
+    copyBufferToBuffer(
+      source: GPUBuffer,
+      destination: GPUBuffer,
+      sourceOffset?: number,
+      destinationOffset?: number,
+      size?: number,
+    ): undefined;
+    finish(descriptor?: object): GPUCommandBuffer;
+  }
+
+  interface GPUComputePassEncoder {
+    setPipeline(pipeline: GPUComputePipeline): undefined;
+    setBindGroup(groupIndex: number, group: GPUBindGroup): undefined;
+    dispatchWorkgroups(x: number, y?: number, z?: number): undefined;
+    end(): undefined;
+  }
+
+  interface GPUBindGroup {}
+
+  interface GPUQueue {
+    submit(commandBuffers: GPUCommandBuffer[]): undefined;
+    writeBuffer(
+      buffer: GPUBuffer,
+      bufferOffset: number,
+      data: ArrayBuffer | SharedArrayBuffer,
+      dataOffset?: number,
+      size?: number,
+    ): undefined;
+  }
+
+  interface GPUAdapter {
+    requestDevice(descriptor?: GPUDeviceDescriptor): Promise<GPUDevice>;
+  }
+
+  interface GPUDevice {
+    label?: string;
+    queue: GPUQueue;
+    createBuffer(descriptor: GPUBufferDescriptor): GPUBuffer;
+    createShaderModule(descriptor: GPUShaderModuleDescriptor): GPUShaderModule;
+    createBindGroupLayout(
+      descriptor: GPUBindGroupLayoutDescriptor,
+    ): GPUBindGroupLayout;
+    createPipelineLayout(
+      descriptor: GPUPipelineLayoutDescriptor,
+    ): GPUPipelineLayout;
+    createComputePipeline(
+      descriptor: GPUComputePipelineDescriptor,
+    ): GPUComputePipeline;
+    createBindGroup(descriptor: GPUBindGroupDescriptor): GPUBindGroup;
+    createCommandEncoder(descriptor?: object): GPUCommandEncoder;
+    destroy(): void;
+  }
+
+  interface NavigatorGPU {
+    requestAdapter(
+      options?: GPURequestAdapterOptions,
+    ): Promise<GPUAdapter | null>;
+  }
+
+  interface Navigator {
+    gpu: NavigatorGPU;
+  }
 }
 
-interface GPUBufferDescriptor {
-  size: number;
-  usage: number;
-  label?: string;
-  mappedAtCreation?: boolean;
-}
+// Required for `declare global` to work in a module file.
+export {};
 
-interface GPUCommandBuffer {
-}
-
-interface GPUComputePassDescriptor {
-}
-
-interface GPUBufferCopyView {
-  buffer: GPUBuffer;
-}
-
-interface GPULoadStoreOp {
-}
-
-interface GPUProgrammableStage {
-  module: GPUShaderModule;
-  entryPoint: string;
-}
-
-interface GPUBufferBinding {
-  buffer: GPUBuffer;
-  offset?: number;
-  size?: number;
-}
-
-interface GPUShaderModule {}
-
-interface GPUBindGroupLayout {
-}
-
-interface GPUBuffer {
-  size: number;
-  destroy(): void;
-  getMappedRange(): ArrayBuffer;
-  unmap(): void;
-  mapAsync(mode: number): Promise<undefined>;
-}
-
-declare const GPUShaderStage_: never;
-interface GPUShaderStage {
-  readonly COMPUTE: number;
-  readonly VERTEX: number;
-  readonly FRAGMENT: number;
-}
-const GPUShaderStage: GPUShaderStage = {
-  COMPUTE: 1,
-  VERTEX: 2,
-  FRAGMENT: 4,
-};
-
-declare const GPUBufferUsage_: never;
-interface GPUBufferUsage {
-  readonly MAP_READ: number;
-  readonly MAP_WRITE: number;
-  readonly COPY_SRC: number;
-  readonly COPY_DST: number;
-  readonly INDEX: number;
-  readonly VERTEX: number;
-  readonly UNIFORM: number;
-  readonly STORAGE: number;
-  readonly INDIRECT: number;
-  readonly QUERY_RESOLVE: number;
-}
-const GPUBufferUsage: GPUBufferUsage = {
+// Runtime polyfills for the WebGPU constants. The
+// `declare global` block above adds them to TypeScript's
+// type system, but `globalThis.GPUBufferUsage` etc. must
+// also exist as actual runtime values so the wrapper
+// code (`GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST`)
+// can resolve. We assign them once at module load.
+//
+// In a real browser with WebGPU support, these are
+// provided by the runtime (see the lib.dom.d.ts
+// declarations). This polyfill only matters for the
+// jsdom test environment.
+const _GPUShaderStage = { COMPUTE: 1, VERTEX: 2, FRAGMENT: 4 };
+const _GPUBufferUsage = {
   MAP_READ: 1,
   MAP_WRITE: 2,
   COPY_SRC: 4,
@@ -151,82 +238,14 @@ const GPUBufferUsage: GPUBufferUsage = {
   INDIRECT: 256,
   QUERY_RESOLVE: 512,
 };
+const _GPUMapMode = { READ: 1, WRITE: 2 };
 
-declare const GPUMapMode_: never;
-interface GPUMapMode {
-  readonly READ: number;
-  readonly WRITE: number;
+if (typeof (globalThis as any).GPUShaderStage === "undefined") {
+  (globalThis as any).GPUShaderStage = _GPUShaderStage;
 }
-const GPUMapMode: GPUMapMode = {
-  READ: 1,
-  WRITE: 2,
-};
-
-interface GPUComputePipeline {}
-
-interface GPUPipelineLayout {}
-
-interface GPUCommandEncoder {
-  beginComputePass(descriptor?: GPUComputePassDescriptor): GPUComputePassEncoder;
-  copyBufferToBuffer(
-    source: GPUBuffer,
-    destination: GPUBuffer,
-    sourceOffset?: number,
-    destinationOffset?: number,
-    size?: number,
-  ): undefined;
-  finish(descriptor?: object): GPUCommandBuffer;
+if (typeof (globalThis as any).GPUBufferUsage === "undefined") {
+  (globalThis as any).GPUBufferUsage = _GPUBufferUsage;
 }
-
-interface GPUComputePassEncoder {
-  setPipeline(pipeline: GPUComputePipeline): undefined;
-  setBindGroup(groupIndex: number, group: GPUBindGroup): undefined;
-  dispatchWorkgroups(x: number, y?: number, z?: number): undefined;
-  end(): undefined;
-}
-
-interface GPUBindGroup {}
-
-interface GPUQueue {
-  submit(commandBuffers: GPUCommandBuffer[]): undefined;
-  writeBuffer(
-    buffer: GPUBuffer,
-    bufferOffset: number,
-    data: ArrayBuffer | SharedArrayBuffer,
-    dataOffset?: number,
-    size?: number,
-  ): undefined;
-}
-
-interface GPUAdapter {
-  requestDevice(descriptor?: GPUDeviceDescriptor): Promise<GPUDevice>;
-}
-
-interface GPUDevice {
-  label?: string;
-  queue: GPUQueue;
-  createBuffer(descriptor: GPUBufferDescriptor): GPUBuffer;
-  createShaderModule(descriptor: GPUShaderModuleDescriptor): GPUShaderModule;
-  createBindGroupLayout(
-    descriptor: GPUBindGroupLayoutDescriptor,
-  ): GPUBindGroupLayout;
-  createPipelineLayout(
-    descriptor: GPUPipelineLayoutDescriptor,
-  ): GPUPipelineLayout;
-  createComputePipeline(
-    descriptor: GPUComputePipelineDescriptor,
-  ): GPUComputePipeline;
-  createBindGroup(descriptor: GPUBindGroupDescriptor): GPUBindGroup;
-  createCommandEncoder(descriptor?: object): GPUCommandEncoder;
-  destroy(): void;
-}
-
-interface NavigatorGPU {
-  requestAdapter(
-    options?: GPURequestAdapterOptions,
-  ): Promise<GPUAdapter | null>;
-}
-
-interface Navigator {
-  gpu: NavigatorGPU;
+if (typeof (globalThis as any).GPUMapMode === "undefined") {
+  (globalThis as any).GPUMapMode = _GPUMapMode;
 }

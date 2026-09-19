@@ -210,6 +210,10 @@ export class WebGpuSpatialCompute {
    * above. Returns `null` on GPU failure so the caller
    * can fall back to the Rust-backed path.
    *
+   * Async: GPU readback is asynchronous in real WebGPU;
+   * the mock is synchronous but we await anyway to
+   * match the production semantics.
+   *
    * Parameters:
    * - `mode`: which detector to run.
    * - `image`: f32 image data, row-major over (y, x),
@@ -217,13 +221,13 @@ export class WebGpuSpatialCompute {
    *   Matches Rust `image[(c, y, x)]` indexing.
    * - `width`, `height`, `channels`: image dimensions.
    */
-  compute(
+  async compute(
     mode: SpatialMode,
     image: Float32Array,
     width: number,
     height: number,
     channels: number,
-  ): SpatialPartialResult | null {
+  ): Promise<SpatialPartialResult | null> {
     if (image.length !== width * height * channels) {
       throw new Error(
         `spatial compute: image length ${image.length} does not match width*height*channels = ${width * height * channels}`,
@@ -231,21 +235,21 @@ export class WebGpuSpatialCompute {
     }
     const pixelCount = width * height;
     try {
-      return this.dispatch(mode, image, width, height, channels, pixelCount);
+      return await this.dispatch(mode, image, width, height, channels, pixelCount);
     } catch (err) {
       console.warn("[webgpu-spatial] dispatch failed; falling back", err);
       return null;
     }
   }
 
-  private dispatch(
+  private async dispatch(
     mode: SpatialMode,
     image: Float32Array,
     width: number,
     height: number,
     channels: number,
     pixelCount: number,
-  ): Float32Array {
+  ): Promise<Float32Array<ArrayBufferLike>> {
     const device = this.device;
     const inputBuf = device.createBuffer({
       size: image.byteLength,
@@ -266,12 +270,14 @@ export class WebGpuSpatialCompute {
     u32[1] = width;
     u32[2] = height;
     u32[3] = channels;
-    if (this.uniformBuffer) {
-      device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
-    }
     const pipeline = this.pipelineFor(mode);
     if (!this.bindGroupLayout) {
       throw new Error("bind group layout not initialized");
+    }
+    // Now that pipelineFor has ensured the uniform
+    // buffer exists, write the per-call params.
+    if (this.uniformBuffer) {
+      device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
     }
     const bindGroup = device.createBindGroup({
       layout: this.bindGroupLayout,
@@ -297,7 +303,7 @@ export class WebGpuSpatialCompute {
     device.queue.submit([commandBuffer]);
     inputBuf.destroy();
     outputBuf.destroy();
-    return new Promise<Float32Array>((resolve, reject) => {
+    return new Promise<Float32Array<ArrayBufferLike>>((resolve, reject) => {
       readback.mapAsync(GPUMapMode.READ).then(
         () => {
           const copy = new Float32Array(readback.getMappedRange()).slice();
@@ -310,7 +316,7 @@ export class WebGpuSpatialCompute {
           reject(err);
         },
       );
-    }) as unknown as Float32Array;
+    });
   }
 
   /**

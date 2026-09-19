@@ -9,7 +9,7 @@ use astroforge_core::gallery::{GalleryItemUpdate, GalleryStore};
 use astroforge_core::ingest::{self, FrameInfo};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig, PipelineResult, Verbosity};
 use astroforge_core::project::ProjectManager;
-use astroforge_core::recipe::{QualityProfile, Recipe};
+use astroforge_core::recipe::{QualityProfile, Recipe, RecipeAiDiffSummary};
 use astroforge_core::recipe_store::{RecipeStore, RecipeSummary, RecipeVersion};
 use astroforge_core::session::SessionStore;
 use serde::Serialize;
@@ -469,6 +469,38 @@ fn recipe_get_for_image_version(
     }
 }
 
+/// CR-07 §32.6: compute the pipeline plan hash for a Recipe.
+/// Pure function: loads the Recipe, calls `pipeline_plan_hash()`.
+/// Returns CommandError if the Recipe is not found.
+#[tauri::command]
+fn recipe_pipeline_plan_hash(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+    version: u32,
+) -> Result<String, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe = store.get(&profile_id, version)?;
+    Ok(recipe.pipeline_plan_hash())
+}
+
+/// CR-07 §32.6: compute the AI-diff summary for two Recipes.
+/// Pure function: loads both Recipes, calls `recipe_ai_diff_summary`.
+/// Returns CommandError if either Recipe is not found.
+#[tauri::command]
+fn recipe_ai_diff_summary(
+    state: State<'_, RecipeState>,
+    profile_id_a: String,
+    version_a: u32,
+    profile_id_b: String,
+    version_b: u32,
+) -> Result<RecipeAiDiffSummary, CommandError> {
+    use astroforge_core::recipe::recipe_ai_diff_summary as ai_diff_fn;
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe_a = store.get(&profile_id_a, version_a)?;
+    let recipe_b = store.get(&profile_id_b, version_b)?;
+    Ok(ai_diff_fn(&recipe_a, &recipe_b))
+}
+
 fn gallery_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     // Resolves to e.g. <app_data_dir>/gallery.sqlite. Falls back to
     // cwd if the app data dir isn't available (shouldn't happen in
@@ -738,6 +770,8 @@ fn main() {
             recipe_get_head,
             recipe_get_for_image_version,
             recipe_save,
+            recipe_pipeline_plan_hash,
+            recipe_ai_diff_summary,
             // CR-05 R1 — read-only AI model catalog (Recipes/AI
             // Models/Settings/Help application-level surfaces).
             commands_ai_models::ai_model_list,

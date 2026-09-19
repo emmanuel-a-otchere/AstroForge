@@ -2,6 +2,121 @@
 
 ## Unreleased
 
+### Slice §32.6: CR-07 wire pipeline_plan_hash + RecipeAiDiffSummary through IPC
+
+**Scope.** Closes the §32.6 sub-row of §32 by exposing
+`Recipe::pipeline_plan_hash()` + `recipe_ai_diff_summary()`
+through Tauri IPC + the Svelte API wrapper. The Rust
+public API was shipped in §32.4; this slice wires it
+through so a future UI consumer (or follow-on slice)
+can call it directly.
+
+#### New public API
+
+- `src-tauri/src/main.rs`: adds 2 Tauri commands:
+  - `recipe_pipeline_plan_hash(profile_id: String,
+    version: u32) -> Result<String, CommandError>`:
+    loads the Recipe, returns the lowercase hex
+    SHA-256 of the canonicalized pipeline plan.
+  - `recipe_ai_diff_summary(profile_id_a, version_a,
+    profile_id_b, version_b) -> Result<RecipeAiDiffSummary,
+    CommandError>`: loads both Recipes, returns the
+    diff summary struct.
+- `src-tauri/src/main.rs`: imports
+  `RecipeAiDiffSummary` from `astroforge_core::recipe`.
+- `src/lib/astroforge-api.ts`: adds 2 invoke wrappers +
+  a typed `RecipeAiDiffSummaryFromRust` interface:
+  - `recipePipelinePlanHash(profileId, version):
+    Promise<string>`
+  - `recipeAiDiffSummary(profileIdA, versionA,
+    profileIdB, versionB): Promise<RecipeAiDiffSummaryFromRust>`
+  - `RecipeAiDiffSummaryFromRust` interface: mirrors
+    the Rust struct (14 fields: hash_a, hash_b,
+    hash_differs, ai_used_a, ai_used_b, ai_classification_differs,
+    version_a, version_b, schema_version_a,
+    schema_version_b, quality_profile_a,
+    quality_profile_b, required_models_differ,
+    provenance).
+
+#### Design decisions
+
+1. **No UI consumer shipped.** The slice wires the
+   IPC + TS wrappers only. A follow-on UI slice
+   (§32.7 or merged into the §29.3b.4 production
+   rollout) will render the hash + diff in the
+   comparison surface.
+
+2. **Pure server-side computation.** Both commands
+   are thin wrappers: load the Recipe from the
+   `RecipeStore`, call the pure function, return
+   the result. No DB writes, no side effects.
+
+3. **`profile_id` + `version` as the IPC key.** Matches
+   the existing `recipe_get` / `recipe_get_head` /
+   `recipe_save` IPC commands. Future work could
+   collapse these into a single `recipe_get_id`
+   helper.
+
+4. **QualityProfile serialized as lowercase enum
+   name.** Matches the Rust serde `rename_all =
+   "kebab-case"` contract: `natural` / `detail` /
+   `clean` / `publication`. The TS interface uses
+   `string` (not a strict union) for the QualityProfile
+   field because the Rust enum is open to extension;
+   callers should treat the value as opaque.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1137 passing** (unchanged;
+  slice adds 0 new tests; the existing 18 §32.4
+  inline tests + 18 §32.4 integration tests already
+  cover the underlying Rust functions).
+- `npm run test` (vitest): **43 passing** (unchanged;
+  slice adds 0 JS tests).
+- `npm run check`: 1 error + 9 warnings (matches main
+  baseline; the 1 error is pre-existing in a Svelte
+  file. Slice adds 0 new warnings. Backend tests only.)
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code
+  spans, 0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **No UI consumer.** The slice wires the IPC + TS
+  wrappers only. The hash + diff summary are
+  accessible via `invoke()` calls but no Svelte
+  component renders them yet. UI integration is a
+  follow-on slice (§32.7 or folded into §29.3b.4).
+
+- **No new tests.** The underlying Rust functions
+  (`pipeline_plan_hash`, `recipe_ai_diff_summary`)
+  are already covered by 36 tests in §32.4 (18
+  inline + 18 integration). The IPC wrapper is
+  thin enough that the existing tests + a passing
+  build are sufficient evidence. Adding IPC-level
+  tests would require a Tauri mock harness
+  (separate slice).
+
+- **Pre-existing em-dashes NOT cleaned.** Per Coding
+  Discipline, out of scope.
+
+#### Out-of-scope (intentional)
+
+- §29.3b.3 IPC layer wiring (rank #1; next slice).
+- §29.3b.4 UI integration + retire CPU fallback
+  (rank #2).
+- §8 SNR / regional noise / edge response / color
+  gradient (rank #3).
+- §32.7 (optional) UI consumer for pipeline_plan_hash
+  + RecipeAiDiffSummary (folded into §29.3b.4).
+- §29.3b.1a WGSL for `background_gradient`.
+- §29.3b.2a Browser-based GPU behavioural tests.
+- §29.4 (optional) Tile-stripe streaming: deferred.
+- Pre-existing em-dashes on `main`: out of scope.
+
 ### Slice §29.3b.2: CR-07 Vitest infra + behavioural tests for WebGPU wrappers
 
 **Scope.** Continues the §29.3 GPU/WebGPU acceleration

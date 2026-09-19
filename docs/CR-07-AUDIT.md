@@ -685,9 +685,9 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **78** | **5** | **3** | **87** |
+| **Total** | **79** | **4** | **3** | **87** |
 
-**Coverage:** 90% shipped, 6% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 91% shipped, 5% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
@@ -695,7 +695,8 @@ contextual display + §13 AI-aware badge + §8 saturation percentage
 + §29.1 streaming metrics + §29.2 cached difference images
 + §29.3a WebGPU compute prototype for compute_diff
 + §29.3b.1 WGSL shaders for 3 of 4 spatial detectors
-+ §29.3b.2 Vitest infra + behavioural tests for WebGPU wrappers).
++ §29.3b.2 Vitest infra + behavioural tests for WebGPU wrappers
++ §32.6 wire pipeline_plan_hash + RecipeAiDiffSummary through IPC).
 The scorecard now agrees with the section bodies.
 
 ## Bundle status (post-§26 audit refresh)
@@ -751,7 +752,6 @@ the B7 Perf work are the remaining scope:
 | **1** | **§29.3b.3 IPC layer wiring** | Wire diff cache (§29.2a) + GPU spatial detector compute through `src-tauri/`. State container + command handlers. ~200-400 LOC. |
 | **2** | **§29.3b.4 UI integration + retire CPU fallback** | `CompareWorkspace.svelte` picks GPU path automatically. Remove Rust-backed fallback path. Behavior change visible to user. ~200-400 LOC. |
 | **3** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
-| **4** | **§32.6 (new) Wire pipeline_plan_hash + RecipeAiDiffSummary through IPC** | §32.4 added Rust-only public API; the comparison UI can't display hash / provenance yet. ~100-300 LOC IPC + TS + UI. |
 
 §32.2..§32.5 are the four sub-slices of §32 that close B7 Perf;
 §29 is the larger B7 Perf foundation work; §8 SNR / regional
@@ -760,10 +760,6 @@ noise / etc. are the last small row-closing slices.
 ## First concrete slice (post-§29.3b.1)
 
 **§29.3b.3 IPC layer wiring** is the next §29 sub-slice.
-The §32 series + §29.1 + §29.2 + §29.3a + §29.3b.1 +
-§29.3b.2 together close the streaming + cached-diffs +
-GPU-prototype + GPU-spatial-shaders + Vitest-infra
-halves of B7 Perf. The remaining §29 work is:
 
 - **§29.3b.3 IPC layer wiring**: wire diff cache
   (§29.2a) + GPU spatial detector compute through

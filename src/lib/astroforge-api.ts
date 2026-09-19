@@ -466,6 +466,52 @@ export const recipeGetForImageVersion = (
     RecipeFromRust | null
   >;
 
+// CR-07 §32.6: compute the pipeline plan hash for a Recipe.
+// Pure server-side computation. Returns the lowercase
+// hex SHA-256 of the canonicalized Recipe. Throws
+// CommandError if the Recipe is not found.
+export const recipePipelinePlanHash = (
+  profileId: string,
+  version: number,
+): Promise<string> =>
+  invoke("recipe_pipeline_plan_hash", { profileId, version }) as Promise<string>;
+
+// CR-07 §32.6: AI comparison surface between two Recipes.
+// Mirrors the Rust `RecipeAiDiffSummary` struct. Surfaces
+// model / version / hash / classification / parameters /
+// provenance differences in a single typed payload that
+// the comparison UI can render directly.
+export interface RecipeAiDiffSummaryFromRust {
+  hash_a: string;
+  hash_b: string;
+  hash_differs: boolean;
+  ai_used_a: boolean;
+  ai_used_b: boolean;
+  ai_classification_differs: boolean;
+  version_a: number;
+  version_b: number;
+  schema_version_a: string;
+  schema_version_b: string;
+  quality_profile_a: string;
+  quality_profile_b: string;
+  required_models_differ: boolean;
+  /** Names of perceptual models used by Recipe A (may be empty). */
+  provenance: string[];
+}
+
+export const recipeAiDiffSummary = (
+  profileIdA: string,
+  versionA: number,
+  profileIdB: string,
+  versionB: number,
+): Promise<RecipeAiDiffSummaryFromRust> =>
+  invoke("recipe_ai_diff_summary", {
+    profileIdA,
+    versionA,
+    profileIdB,
+    versionB,
+  }) as Promise<RecipeAiDiffSummaryFromRust>;
+
 // CR-07 B13c: local mirror of the Rust `Recipe` shape on
 // the IPC wire. The Svelte `Recipe` type in profile-store.ts
 // mirrors the same fields with camelCase. The IPC command

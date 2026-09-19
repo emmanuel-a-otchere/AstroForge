@@ -2,6 +2,118 @@
 
 ## Unreleased
 
+### Slice §32.3: CR-07 version integrity test
+
+**Scope.** Closes the §32 "Version integrity" sub-row.
+Pins the CR-07 ADR-07.4 ("Comparison Is Non-Destructive")
+contract: running any comparison-side operation must not
+modify either the `image_versions`, `image_decisions`, or
+`decision_history` rows of the two versions being compared.
+
+#### Tests (core)
+
+- NEW `crates/astroforge-core/tests/version_integrity.rs`:
+  - 8 integration tests using an in-memory `DomainStore`
+    (`DomainStore::new(&PathBuf::from(":memory:"))`).
+  - **§32.3.1**: `compare_version_images` (pure Rust
+    delta-table function) is deterministic across
+    invocations for identical input.
+  - **§32.3.2**: `save_comparison_set` doesn't touch
+    `image_versions`, `image_decisions`, or
+    `decision_history` rows.
+  - **§32.3.3**: `load_comparison_set` doesn't touch any
+    of those rows.
+  - **§32.3.4**: `list_comparison_sets_for_project` doesn't
+    touch any of those rows.
+  - **§32.3.5**: `delete_comparison_set` doesn't touch any
+    of those rows.
+  - **§32.3.6**: Full end-to-end: stub 2 versions +
+    decisions + history, run save → load → list → delete,
+    verify the version-side tables are byte-equal across
+    the entire lifecycle.
+  - **§32.3.7**: Positive control: pin that the
+    `comparison_sets` table DOES change across the
+    lifecycle (guards against the test suite accidentally
+    no-opping).
+  - **§32.3.8**: Sibling-row isolation: pin that comparison
+    ops on a (v-a, v-b) pair don't touch other versions in
+    the same project.
+  - Fingerprint helpers: `image_versions_fingerprint`,
+    `image_decisions_fingerprint`,
+    `decision_history_fingerprint` produce a stable
+    string from every column of every relevant row, so
+    pre- and post-operation snapshots can be compared
+    byte-exactly.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - §32 row updated: "Version integrity" entry removed
+    from the open list.
+  - Scorecard: 70/13/3 → **71/12/3** (coverage **80% → 82%**).
+  - Bundle priority: §32.3 removed; new #1 is §32.4.
+  - "First concrete slice" pointer advanced from §32.3 to
+    §32.4 (AI comparison tests).
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1040 passing** (8 new version
+  integrity tests on top of the 1032 baseline).
+- `npm run check`: 1 error + 9 warnings (matches main baseline;
+  slice adds 0 new warnings. Backend tests only.
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **Zero local fix cycles.** First compile of the test
+  file had three import errors caught by clippy:
+  `ComparisonSet` was imported via the wrong path
+  (decision_store re-export vs. comparison module), and
+  one test had a broken call to a non-existent
+  `metric_snapshot_full_for_test` helper. All three fixed
+  inline before running `cargo test`. The first
+  `cargo test` invocation passed all 8 tests on the first
+  try.
+- **Pure test slice.** 0 new Rust source (only the test
+  file), 0 new IPC, 0 new UI, 0 new TS, 0 new dependencies.
+- **Out-of-scope operations documented.** The decision-side
+  operations (`apply_and_save_decision`,
+  `apply_and_save_decision_with_profile`) are explicitly
+  NOT covered by this slice. They mutate
+  `image_decisions` + `decision_history` (that's their job).
+  They will be covered by a §33 ADR-side test (decision
+  state transitions).
+- **No fixture / no DOM-rendering runner.** Pure Rust in-
+  memory SQLite (`DomainStore::new(&:memory:)`) is the
+  test surface. No JSDOM, no Playwright, no fixtures.
+- **Pre-existing em-dashes NOT cleaned** (per Coding
+  Discipline; out of scope). All my additions are
+  em-dash-free.
+
+#### Out-of-scope (intentional)
+
+- §32.4 AI comparison tests (rank #1; next slice).
+- §32.5 perf tests (rank #2).
+- §29 Performance (rank #3).
+- §8 SNR / regional noise / edge response / color gradient
+  (rank #4).
+- Split-alignment / blink-consistency / overlay-accuracy
+  sub-modes of the audit's "visual regression" line:
+  deferred to a future slice that adds a DOM-rendering
+  test runner (Playwright or equivalent).
+- Decision-side operations
+  (`apply_and_save_decision` /
+  `apply_and_save_decision_with_profile`): deferred to a
+  §33 ADR-side test (decision state transitions).
+- Pre-existing em-dashes on `main`: out of scope per Coding
+  Discipline.
+
 ### Slice §32.2: CR-07 visual regression tests for diff renderer
 
 **Scope.** Closes the §32 "Visual regression" sub-row (the

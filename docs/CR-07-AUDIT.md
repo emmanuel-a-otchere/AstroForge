@@ -132,13 +132,31 @@ exposes the "selected region" and "specific feature" scope axes.
 Star metrics moved from "Missing" to "Shipped" via the structures
 module. Saturation and full SNR remain open.
 
-## §9 Metrics Must Be Contextual — ⚠️ Partial
+## §9 Metrics Must Be Contextual: ✅ Shipped
 
-Each metric function has a docstring, but the UI presentation does not
-yet include the contextual explanation CR-07 §9 calls for (e.g. "FWHM:
-3.1 px — Lower generally indicates tighter stars, but values depend
-on acquisition and processing conditions"). Improvement pending in
-`RecommendationCard.svelte`.
+The contextual explanation data is fully shipped via
+`MetricSpec::context` in `crates/astroforge-core/src/metric_registry.rs`
+(25 metrics, lines 246-467; each entry is a one-sentence
+explanation of what the metric means + how to interpret it).
+The `MetricDeltaRow.context` field carries it through the IPC
+(`commands_comparison.rs:206` + `src/lib/astroforge-api.ts:583`).
+The previous refresh marked this row as `⚠️ Partial` because
+`MetricsTable.svelte` only exposed `row.context` as a hover
+tooltip (`title=` on the `<tr>`), making it invisible by
+default. Slice §9 (PR #352) renders the context as inline
+sub-text under each metric label, so every metric the user
+sees carries its "what does this mean, why does it matter"
+sentence visibly. The hover tooltip on the `<tr>` remains
+as a fallback for users who want the full text on hover
+without the table-cell reflow.
+
+The prior `RecommendationCard.svelte` placeholder note in
+the audit's gap text was a misread: `RecommendationCard.svelte`
+renders AI recommendations (tone / stars / color / noise /
+stretch), not metric tiles. The metric-context rendering lives
+in `MetricsTable.svelte` (the delta table), which is the
+single component in this codebase that surfaces the
+`MetricDeltaRow.context` field.
 
 ## §10 Delta Analysis — ✅ Shipped
 
@@ -495,7 +513,7 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §6 (sync nav) | 1 | 0 | 0 | 1 |
 | §7 (scope) | 1 | 0 | 0 | 1 |
 | §8 (metrics) | 10 | 5 | 1 | 16 |
-| §9 (contextual) | 0 | 1 | 0 | 1 |
+| §9 (contextual) | 1 | 0 | 0 | 1 |
 | §10 (delta) | 1 | 0 | 0 | 1 |
 | §11 (assessment) | 0 | 1 | 0 | 1 |
 | §12 (integrity) | 1 | 0 | 0 | 1 |
@@ -522,12 +540,13 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **66** | **18** | **3** | **87** |
+| **Total** | **67** | **17** | **3** | **87** |
 
-**Coverage:** 76% shipped, 21% partial, 3% missing (post-§23.1..§23.4
-+ §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping).
-The scorecard now agrees with the section bodies (§19, §20, §23,
-§24 were already ✅ in their bodies; the prior refresh's scorecard
+**Coverage:** 77% shipped, 20% partial, 3% missing (post-§23.1..§23.4
++ §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
+contextual display).
+The scorecard now agrees with the section bodies (§9, §19, §20, §23,
+§24, §26 were already ✅ in their bodies; the prior refresh's scorecard
 drifted from the bodies).
 
 ## Bundle status (post-§26 audit refresh)
@@ -544,11 +563,11 @@ drifted from the bodies).
 | **Audit refreshes** | 2 (post-C-A3.5; post-§26-mapping) | ✅ Merged #343; this PR |
 
 All bundles except B7 are merged. CR-07 is **~99% closed** (was ~96%);
-the only open items (§8 saturation, §9 contextual display, §11
-prose-display, §13 AI-badge, §29 perf, §32 test suite) are
-row-level refinement work, not bundle-level gaps. The B7 "Perf"
-bundle is the lone unmerged bundle; its scope is §29 + §32, which
-overlap on perf testing.
+the only open items (§8 saturation, §11 prose-display, §13
+AI-badge, §29 perf, §32 test suite) are row-level refinement
+work, not bundle-level gaps. The B7 "Perf" bundle is the lone
+unmerged bundle; its scope is §29 + §32, which overlap on
+perf testing.
 
 ## Bundle priority (refreshed post-§26 mapping)
 
@@ -557,26 +576,24 @@ remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§9 Contextual metric display** | Smallest remaining slice: surface docstring explanations in `RecommendationCard.svelte`. ~200-400 LOC pure UI. Closes a single audit row. |
-| **2** | **§13 one-line AI-used badge** | ~50-100 LOC pure UI chip in `CompareWorkspace.svelte`'s compare-header. Closes the §13 row. |
-| **3** | **§11 prose-display in `QualityGatePanel.svelte`** | The `summary` field is generated and shipped through the wire format; the panel just doesn't render it. ~50-150 LOC. |
-| **4** | **§8 saturation percentage** | Genuine ❌ in `image_analysis/metrics.rs`. New `saturation_percentage(image) -> MetricsSample` + `QualityMetricSnapshot.saturation` field + §23-style panel wiring. ~400-600 LOC. |
-| **5** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf. |
-| **6** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
+| **1** | **§13 one-line AI-used badge** | ~50-100 LOC pure UI chip in `CompareWorkspace.svelte`'s compare-header. Closes the §13 row. |
+| **2** | **§11 prose-display in `QualityGatePanel.svelte`** | The `summary` field is generated and shipped through the wire format; the panel just doesn't render it. ~50-150 LOC. |
+| **3** | **§8 saturation percentage** | Genuine ❌ in `image_analysis/metrics.rs`. New `saturation_percentage(image) -> MetricsSample` + `QualityMetricSnapshot.saturation` field + §23-style panel wiring. ~400-600 LOC. |
+| **4** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf. |
+| **5** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
 
 §32 + §29 are the two scopes that combine into **B7 Perf** (the
-only unmerged bundle). §9 + §13 + §11 are quick row-closing slices
+only unmerged bundle). §13 + §11 are quick row-closing slices
 that should land first to drive the scorecard toward ~99%.
 
 ## First concrete slice (post-§26 mapping)
 
-**§9 Contextual metric display** is the smallest remaining
-audit-anchored slice: surface the docstring explanations in
-`RecommendationCard.svelte` so each metric tile shows "FWHM: 3.1 px.
-Lower generally indicates tighter stars, but values depend on
-acquisition and processing conditions." Pure UI. ~200-400 LOC.
-Closes §9 from ⚠️ Partial to ✅ Shipped. Unblocks the §13 / §11 /
-§8 next-priority chain.
+**§13 one-line AI-used badge** is the smallest remaining
+audit-anchored slice: a one-line chip in `CompareWorkspace.svelte`'s
+compare-header that surfaces "AI used" when the version's
+recipe chain includes any AI operation (read from
+`Recipe.integrity.perceptual_models_used` per the §13 spec).
+Pure UI. ~50-100 LOC. Closes §13 from ⚠️ Partial to ✅ Shipped.
 
 ## First concrete slice (post-§24)
 

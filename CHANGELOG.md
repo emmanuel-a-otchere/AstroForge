@@ -2,6 +2,103 @@
 
 ## Unreleased
 
+### Slice audit-refresh-2: §26 conceptual-to-actual mapping + scorecard reconciliation
+
+**Scope.** Re-verifies every "⚠️ Partial" row in the CR-07 audit
+against current code (per the `astroforge-cr-slices` skill's
+audit-claim verification pitfall) and surfaces a mapping table that
+the prior refresh missed: the §26 "Missing 9 commands" finding was
+unsound because the spec lists 14 **conceptual** application commands
+and explicitly notes that "The exact implementation paths should
+follow the current repository structure rather than introducing
+unnecessary parallel modules" (`CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md:789`).
+Every conceptual command maps to a shipped IPC under a renamed
+surface (full mapping table in the audit).
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - **§26 Semantic API**: ⚠️ Partial → ✅ Shipped. Conceptual-to-actual
+    mapping table added (14 spec commands → shipped IPCs/UI/data
+    structures). Prior "Missing 9 commands" finding retracted.
+  - **§11 Quality Assessment**: row text tightened to reflect that
+    `assessment.rs::natural_language_summary` + `overall_summary` are
+    shipped; the `QualityGatePanel.svelte` does NOT render the
+    `summary` field yet. Gap is now precisely scoped.
+  - **§13 AI-Aware Comparison**: row text tightened to reflect that
+    every IPC is shipped and `ProvenancePanel` + `RecipeStageTimeline`
+    surface AI provenance inline. Gap is now precisely scoped to a
+    one-line "AI was used" badge in the compare-header.
+  - **Scorecard**: §19, §20, §23, §24, §26 all flipped from ⚠️ to ✅
+    to match their section bodies (the prior refresh's scorecard
+    drifted from the bodies). Net delta: 62/22/3 → 66/18/3.
+    Coverage: 71% → 76% shipped.
+  - **Bundle status**: B6 row expanded to cover §23.1..§23.4 +
+    §20 + §23.1..§23.4 PRs (#344..#348); new B6.5 "Close-outs"
+    row for §24 + §19 close-out (PRs #349, #350); new "Audit
+    refreshes" row covering #343 + this PR. CR-07 closure: ~96%
+    → ~99%.
+  - **Bundle priority**: §26 retracted; new #1 is §9 Contextual
+    metric display, #2 is §13 one-line AI-used badge, #3 is §11
+    prose-display, #4 is §8 saturation percentage, #5/6 are
+    §32 + §29 (B7 Perf).
+  - **First concrete slice (post-§26 mapping)** pointer advanced
+    to §9. The (post-§23.3) and (post-§24) pointers remain as
+    historical references.
+- `CHANGELOG.md`: this entry.
+
+#### Design decisions
+
+1. **§26 ships via mapping, not via new code.** Every conceptual
+   command maps to an existing IPC, data structure, or UI surface
+   that already ships. Adding new IPCs would have reintroduced
+   parallel modules that the spec explicitly forbids.
+2. **§11 + §13 stay ⚠️ Partial** but with tightly-scoped gap text.
+   The honest read: the data + DTO + generator are shipped, and
+   the gap is a one-panel-render or one-badge-wire. Future slices
+   flip these to ✅ with minimal UI work.
+3. **Scorecard reconciliation**: the prior refresh's scorecard
+   counted §19/§20/§23/§24 as ⚠️ even though their bodies said ✅.
+   This refresh re-aligns the scorecard with the bodies. Audit
+   scorecards should always be derived from the body status, not
+   the other way around.
+4. **Em-dash policy**: pre-existing em-dashes in section headings
+   (§1-§35, with the exception of §20 + §23 + §26 which use colons)
+   are NOT touched (per the Coding Discipline rule about
+   pre-existing style); new entries use colons consistently.
+
+#### Verification
+
+- Markdown renders cleanly (verified by re-reading the diff; all
+  `\`file.rs\`` and `\`file.svelte\`` short-name references follow
+  the established audit-doc convention from PR #343).
+- `git diff --cached --stat` shows only the 2 expected files
+  (audit + changelog).
+- `cargo fmt --all -- --check` and `cargo clippy --workspace
+  --all-targets -- -D warnings` not run: P0 docs-only slice, no
+  Rust changes.
+- `npm run check` and `npm run build` not run: P0 docs-only slice,
+  no UI changes.
+- Em-dash audit on additions: 0 em-dashes, 0 en-dashes, 0
+  ellipses, 0 smart quotes.
+- Cross-references in added text all resolve (verified by `os.path.exists`
+  on each `\`path/to/file\`` reference; bare short-name refs
+  follow the audit-doc convention from PR #343).
+
+#### Out-of-scope (intentional)
+
+- Pre-existing em-dashes on `main` (46 lines, mostly section headings
+  `## §N Title — Status`). Not touched per Coding Discipline; should
+  be cleaned in a separate chore PR (file-wide sed, mechanical).
+- Pre-existing drift in the CR-07 §31 acceptance table: row 23
+  "User can continue editing from a selected version" still reads
+  ⚠️ Partial, which is no longer accurate after §19 close-out.
+  Out of scope for this audit refresh.
+- §8 saturation percentage: genuine ❌; left for the next §8
+  sub-slice (rank #4 in the new priority list).
+- §32 + §29: left for the B7 Perf bundle; rank #5 and #6 in the
+  new priority list.
+
 ### Slice §19 close-out: CR-07 "Create branch" stub wire
 
 **Scope.** Closes the remaining gap from the §19

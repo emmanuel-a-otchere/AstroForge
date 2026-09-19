@@ -568,13 +568,18 @@ The §29.2 slice:
   a follow-on concern (probably §29.2a or merged into
   the §23.5 IPC surface).
 
-**§29 series in progress.** The first three §29 sub-slices
+**§29 series in progress.** The first four §29 sub-slices
 (§29.1 streaming + §29.2 cached diffs + §29.3a WebGPU
-compute prototype for `compute_diff`) are landed. The
-remaining §29 work is §29.3b (production rollout: extend
-the WebGPU compute path to the spatial detectors, wire
-to the IPC layer, retire the CPU fallback path) plus the
-§29.2a IPC wiring for the diff cache.
+compute prototype for `compute_diff` + §29.3b.1 WGSL
+shaders for the spatial detectors) are landed. The
+remaining §29 work is §29.3b.2 (Vitest infra +
+behavioural tests), §29.3b.3 (IPC layer wiring for the
+diff cache + GPU spatial detectors), and §29.3b.4 (UI
+integration + retire CPU fallback path). The 4th spatial
+detector (`background_gradient`) requires 64x64 tile-
+strided reduction + a host-side plane-fit solve and is
+not yet covered by WGSL; that lands in §29.3b.1a or
+folds into §29.3b.4.
 
 - **`compute_diff` at 4K (3840×2160) and 8K (7680×4320)**:
   8 tests, all 4 `DiffKind` modes (Absolute, Signed,
@@ -680,15 +685,16 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **76** | **7** | **3** | **87** |
+| **Total** | **77** | **6** | **3** | **87** |
 
-**Coverage:** 87% shipped, 8% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 88% shipped, 7% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
 + §32.3 version integrity + §32.4 AI comparison + §32.5 perf tests
 + §29.1 streaming metrics + §29.2 cached difference images
-+ §29.3a WebGPU compute prototype for compute_diff).
++ §29.3a WebGPU compute prototype for compute_diff
++ §29.3b.1 WGSL shaders for 3 of 4 spatial detectors).
 The scorecard now agrees with the section bodies.
 
 ## Bundle status (post-§26 audit refresh)
@@ -741,27 +747,38 @@ the B7 Perf work are the remaining scope:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§29.3b Production rollout** | Extend the WebGPU compute path to the spatial detectors (`luminance_noise`, `chromatic_noise`, `local_contrast`, `background_gradient`), wire to the IPC layer, retire the CPU fallback path. The §29.2a IPC wiring for the diff cache can be folded into this slice. |
-| **2** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
-| **3** | **§32.6 (new) Wire pipeline_plan_hash + RecipeAiDiffSummary through IPC** | §32.4 added Rust-only public API; the comparison UI can't display hash / provenance yet. ~100-300 LOC IPC + TS + UI. |
+| **1** | **§29.3b.2 Vitest infra + behavioural tests** | Add vitest.config.ts + setup; tests for §29.3a + §29.3b.1 via mock GPU device. Enables all future JS-side tests. ~200-300 LOC. |
+| **2** | **§29.3b.3 IPC layer wiring** | Wire diff cache (§29.2a) + GPU spatial detector compute through `src-tauri/`. State container + command handlers. ~200-400 LOC. |
+| **3** | **§29.3b.4 UI integration + retire CPU fallback** | `CompareWorkspace.svelte` picks GPU path automatically. Remove Rust-backed fallback path. Behavior change visible to user. ~200-400 LOC. |
+| **4** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
+| **5** | **§32.6 (new) Wire pipeline_plan_hash + RecipeAiDiffSummary through IPC** | §32.4 added Rust-only public API; the comparison UI can't display hash / provenance yet. ~100-300 LOC IPC + TS + UI. |
 
 §32.2..§32.5 are the four sub-slices of §32 that close B7 Perf;
 §29 is the larger B7 Perf foundation work; §8 SNR / regional
 noise / etc. are the last small row-closing slices.
 
-## First concrete slice (post-§29.3a)
+## First concrete slice (post-§29.3b.1)
 
-**§29.3b Production rollout** is the next §29 sub-slice.
-The §32 series + §29.1 + §29.2 + §29.3a together close
-the streaming + cached-diffs + GPU-prototype halves of
+**§29.3b.2 Vitest infra + behavioural tests** is the
+next §29 sub-slice. The §32 series + §29.1 + §29.2 +
+§29.3a + §29.3b.1 together close the streaming + cached-
+diffs + GPU-prototype + GPU-spatial-shaders halves of
 B7 Perf. The remaining §29 work is:
 
-- **§29.3b Production rollout**: extend the WebGPU
-  compute path to the spatial detectors (4 §8 detectors
-  that need neighbor-pixel relationships), wire the
-  GPU path to the IPC layer, retire the CPU fallback
-  path. The §29.2a IPC wiring for the diff cache can be
-  folded into this slice.
+- **§29.3b.2 Vitest infra + behavioural tests**: add
+  vitest.config.ts + setup, then ship behavioural
+  tests for §29.3a + §29.3b.1 via a mock GPU device.
+  Enables all future JS-side tests.
+- **§29.3b.3 IPC layer wiring**: wire diff cache
+  (§29.2a) + GPU spatial detector compute through
+  `src-tauri/`. State container + command handlers.
+- **§29.3b.4 UI integration + retire CPU fallback**:
+  `CompareWorkspace.svelte` picks the GPU path
+  automatically. Remove the Rust-backed fallback path.
+  Behavior change visible to the user.
+- **§29.3b.1a (optional) WGSL for background_gradient**:
+  4th spatial detector (64x64 tile-strided reduction +
+  host-side plane-fit solve). Could fold into §29.3b.4.
 
 A future §29.4 (optional) could explore tile-stripe
 buffering to fuse some of the 4 spatial detectors into

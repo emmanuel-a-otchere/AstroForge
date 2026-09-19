@@ -2,6 +2,167 @@
 
 ## Unreleased
 
+### Slice §29.3b.1: CR-07 WGSL shaders for spatial detectors
+
+**Scope.** Continues the §29.3 GPU/WebGPU acceleration
+work by shipping WGSL compute shaders + a TypeScript
+wrapper for 3 of the 4 spatial metrics detectors:
+`luminance_noise`, `chromatic_noise`, and
+`local_contrast`. The 4th detector (`background_gradient`)
+requires 64x64 tile-strided reduction + a host-side
+plane-fit solve and is not yet covered by WGSL; that
+lands in §29.3b.1a or folds into §29.3b.4.
+
+The slice ships the GPU primitives only. The IPC layer
+wiring + UI consumer + behavioural tests are §29.3b.2 /
+§29.3b.3 / §29.3b.4 (follow-on sub-slices).
+
+#### New public API (UI)
+
+- `src/lib/webgpu-spatial-shaders.ts`: WGSL compute
+  shader source for the 3 spatial detectors:
+  - `LUMINANCE_NOISE_SHADER`: per-pixel residual
+    `|pixel - median_3x3|` for the luminance channel
+    (channel 0) of a downsampled preview image. Edge
+    pixels (first / last row + column) write 0.
+    Includes a hand-written sort network (no loops,
+    no function calls beyond `min` / `max` / `abs` on
+    f32) that sorts 9 elements in 25 comparisons to
+    extract the median. The host then computes
+    `sigma = 1.4826 * MAD` after a host-side sort.
+  - `CHROMATIC_NOISE_SHADER`: per-pixel workgroup
+    reduction that updates per-channel sums +
+    pixel count. Uses WGSL workgroup-shared memory
+    + `atomicAdd` for the count. The host computes
+    the channel ratios + stddev.
+  - `LOCAL_CONTRAST_SHADER`: per-pixel residual
+    `|pixel - mean_3x3|` for the luminance channel.
+    Edge pixels write 0. The host computes the
+    global mean.
+  - `shaderForSpatial(mode)`: returns the shader
+    source for a given `SpatialMode` string union.
+  - `spatialOutputSize(mode, pixelCount,
+    workgroupSize)`: returns the GPU output buffer
+    size in f32 elements.
+- `src/lib/webgpu-spatial.ts`: TypeScript wrapper:
+  - `class WebGpuSpatialCompute`: owns the compiled
+    pipelines + bind group layout + uniform buffer.
+    Lazily compiles each shader on first use; reuses
+    pipelines across calls. Methods:
+    `compute(mode, image, width, height, channels)`,
+    `dispose()`.
+  - `finalizeLuminanceNoise(residuals)`: computes
+    `sigma = 1.4826 * MAD(median(residuals))` on the
+    host.
+  - `finalizeChromaticNoise(partials)`: sums the
+    per-workgroup partials, computes the channel
+    means + ratios + stddev. Returns 0.0 when the
+    total mean is below 1e-12 (matching the Rust
+    baseline).
+  - `finalizeLocalContrast(residuals)`: returns the
+    global mean of the per-pixel residuals.
+  - `type SpatialPartialResult = Float32Array`.
+  - `type SpatialMode` re-exported.
+
+#### Design decisions
+
+1. **GPU does the per-pixel work; host does the
+   reduction.** The expensive part is the per-pixel
+   3x3 neighbourhood access; the host-side reduction
+   (sort + MAD, ratio + stddev, global mean) is
+   trivial (one or two divisions + a single sort).
+   Splitting along this boundary keeps the WGSL
+   kernels simple while letting the GPU handle the
+   bulk of the work.
+
+2. **Hand-written sort network in WGSL.** The
+   `luminance_noise` shader sorts 9 elements per
+   pixel using a 25-step comparison network. WGSL
+   does not (yet) support `array.sort`; a manual
+   network is the canonical portable solution. The
+   network uses `min` / `max` / `abs` on f32 + is
+   type-correct for the median extraction.
+
+3. **`chromatic_noise` uses workgroup-shared memory +
+   `atomicAdd`.** Each invocation accumulates into
+   per-lane workgroup slots; the LAST thread in the
+   workgroup sums the partials across lanes + writes
+   them to the output buffer. The host then sums
+   across workgroups.
+
+4. **`background_gradient` NOT shipped.** It requires
+   64x64 tile-strided reduction + a host-side
+   plane-fit solve (5x5 normal equations on a small
+   `(W/64) * (H/64)` matrix). The slice ships the 3
+   detectors that cleanly fit a per-pixel compute
+   kernel; the 4th lands in a follow-on.
+
+5. **Pure TypeScript slice.** 0 new Rust code, 0 new
+   IPC, 0 new UI consumers. The wrapper is opt-in;
+   callers instantiate `WebGpuSpatialCompute`
+   explicitly + handle the `null`-on-fallback
+   contract.
+
+6. **JS-side test runner not added in this slice.**
+   The project does not yet have a JS-side test
+   runner (no Vitest). The slice relies on
+   `npm run check` for type validation. Behavioural
+   tests via browser-based GPU (Playwright + headless
+   Chrome with WebGPU) ship in §29.3b.2.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1137 passing** (unchanged;
+  slice adds 0 Rust code).
+- `npm run check`: 1 error + 9 warnings (matches main
+  baseline; the 1 error is pre-existing in a Svelte
+  file, NOT introduced by this slice. Slice adds 0
+  new warnings. Backend tests only.)
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code
+  spans, 0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **3 of 4 spatial detectors shipped.** `luminance_noise`,
+  `chromatic_noise`, and `local_contrast` are now
+  WebGPU-accelerated. `background_gradient` remains on
+  the Rust baseline for now and lands in §29.3b.1a or
+  §29.3b.4.
+
+- **Behavioural tests NOT shipped.** Browser-based GPU
+  tests require Vitest infrastructure (not yet present
+  in the project) + Playwright + headless Chrome with
+  WebGPU enabled. §29.3b.2 territory.
+
+- **No IPC wiring, no UI consumer.** The wrapper is
+  opt-in. Callers must explicitly instantiate
+  `WebGpuSpatialCompute` + handle the `null`-on-fallback
+  contract.
+
+- **Pure TypeScript slice.** No Rust changes.
+
+- **Pre-existing em-dashes NOT cleaned.** Per Coding
+  Discipline, out of scope.
+
+#### Out-of-scope (intentional)
+
+- §29.3b.2 Vitest infra + behavioural tests (rank #1;
+  next slice).
+- §29.3b.3 IPC layer wiring (rank #2).
+- §29.3b.4 UI integration + retire CPU fallback
+  (rank #3).
+- §29.3b.1a WGSL for `background_gradient` (rank #4).
+- §8 SNR / regional noise / edge response / color
+  gradient (rank #5).
+- §32.6 (new) Wire `pipeline_plan_hash` +
+  `RecipeAiDiffSummary` through IPC.
+- §29.4 (optional) Tile-stripe streaming: deferred.
+- Pre-existing em-dashes on `main`: out of scope.
+
 ### Slice §29.3a: CR-07 WebGPU compute prototype for compute_diff
 
 **Scope.** Starts the §29.3 GPU/WebGPU acceleration work

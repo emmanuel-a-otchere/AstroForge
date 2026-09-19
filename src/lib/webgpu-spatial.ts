@@ -137,6 +137,76 @@ export function finalizeLocalContrast(residuals: Float32Array): number {
 }
 
 /**
+ * Compute the background gradient magnitude from the
+ * GPU's per-tile output. Mirrors the Rust baseline:
+ * fit plane z = a*x + b*y + c via least-squares over the
+ * tile medians, return sqrt(a² + b²) * 100 (so a flat
+ * image returns ~0 and a typical gradient returns ~5-50).
+ *
+ * The GPU shader writes one record per tile:
+ * (x_center, y_center, median, has_samples_flag).
+ * Tiles with `has_samples_flag = 0` are skipped (empty
+ * tiles can occur when the image is smaller than the
+ * tile size).
+ *
+ * Mirrors the Rust baseline's:
+ * - returns 0.0 when n < 2 valid tiles
+ * - returns 0.0 when denom < 1e-12 (degenerate fit)
+ * - multiplies the per-pixel magnitude by 100 to report
+ *   the gradient "per 100 px" (matching the original
+ *   unit).
+ */
+export function finalizeBackgroundGradient(partials: Float32Array): number {
+  const STRIDE = 4;
+  if (partials.length < STRIDE * 2) return 0.0;
+  // First pass: collect valid (x, y, v) tuples.
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const vs: number[] = [];
+  for (let i = 0; i + STRIDE <= partials.length; i += STRIDE) {
+    const hasSamples = partials[i + 3]!;
+    if (hasSamples > 0.5) {
+      xs.push(partials[i + 0]!);
+      ys.push(partials[i + 1]!);
+      vs.push(partials[i + 2]!);
+    }
+  }
+  const n = xs.length;
+  if (n < 2) return 0.0;
+  // Second pass: least-squares normal-equation
+  // accumulators. Mirrors the Rust baseline
+  // character-for-character.
+  let sX = 0, sY = 0, sZ = 0;
+  let sXX = 0, sXY = 0, sXZ = 0;
+  let sYY = 0, sYZ = 0;
+  for (let i = 0; i < n; i++) {
+    const x = xs[i]!, y = ys[i]!, v = vs[i]!;
+    sX += x;
+    sY += y;
+    sZ += v;
+    sXX += x * x;
+    sXY += x * y;
+    sXZ += x * v;
+    sYY += y * y;
+    sYZ += y * v;
+  }
+  const meanX = sX / n;
+  const meanY = sY / n;
+  const meanZ = sZ / n;
+  const sXXc = sXX / n - meanX * meanX;
+  const sXYc = sXY / n - meanX * meanY;
+  const sXZc = sXZ / n - meanX * meanZ;
+  const sYYc = sYY / n - meanY * meanY;
+  const sYZc = sYZ / n - meanY * meanZ;
+  const denom = sXXc * sYYc - sXYc * sXYc;
+  if (Math.abs(denom) < 1e-12) return 0.0;
+  const a = (sYYc * sXZc - sXYc * sYZc) / denom;
+  const b = (sXXc * sYZc - sXYc * sXZc) / denom;
+  const magPerPx = Math.sqrt(a * a + b * b);
+  return magPerPx * 100.0;
+}
+
+/**
  * Compute the luminance noise sigma from the GPU's
  * per-pixel residual output. Mirrors the Rust baseline:
  * sigma = 1.4826 * MAD(median(|residuals|)).
@@ -258,7 +328,18 @@ export class WebGpuSpatialCompute {
     });
     new Float32Array(inputBuf.getMappedRange()).set(image);
     inputBuf.unmap();
-    const outputSize = spatialOutputSize(mode, pixelCount, WORKGROUP_SIZE);
+    // `background_gradient` is dispatched by tile count
+    // (one workgroup per 64x64 tile) instead of by pixel
+    // count. The output buffer holds 4 f32s per tile.
+    const TILE_SIZE = 64;
+    const tileCount =
+      mode === "background_gradient"
+        ? Math.ceil(width / TILE_SIZE) * Math.ceil(height / TILE_SIZE)
+        : 0;
+    const outputSize =
+      mode === "background_gradient"
+        ? tileCount * 4
+        : spatialOutputSize(mode, pixelCount, WORKGROUP_SIZE);
     const outputBuf = device.createBuffer({
       size: Math.max(outputSize, 1) * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
@@ -291,7 +372,11 @@ export class WebGpuSpatialCompute {
     const pass = encoder.beginComputePass();
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(Math.ceil(pixelCount / WORKGROUP_SIZE));
+    const workgroups =
+      mode === "background_gradient"
+        ? tileCount
+        : Math.ceil(pixelCount / WORKGROUP_SIZE);
+    pass.dispatchWorkgroups(Math.max(workgroups, 1));
     pass.end();
     // Read back the output buffer.
     const readback = device.createBuffer({

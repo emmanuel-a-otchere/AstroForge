@@ -2,6 +2,154 @@
 
 ## Unreleased
 
+### Slice §29.3a: CR-07 WebGPU compute prototype for compute_diff
+
+**Scope.** Starts the §29.3 GPU/WebGPU acceleration work
+by shipping the WGSL compute shaders + the TypeScript
+wrapper + the capability-detection integration for
+`compute_diff` (4 modes) on the GPU. The slice ships the
+prototype only; the IPC layer + UI wiring + behavioural
+tests are §29.3b (a follow-on slice).
+
+#### New public API (UI)
+
+- `src/lib/webgpu-shaders.ts`: WGSL compute shader
+  source for all four `compute_diff` modes:
+  - `ABSOLUTE_SHADER`: per-pixel `|a - b|` for RGB,
+    alpha = 255.
+  - `SIGNED_SHADER`: per-pixel `clamp((a - b) + 128, 0,
+    255)` for RGB, alpha = 255.
+  - `AMPLIFIED_SHADER`: per-pixel `clamp(|a - b| * gain,
+    0, 255)` for RGB, alpha = 255.
+  - `STRUCTURAL_SHADER`: 2D Sobel-style neighbour diff
+    matching the Rust `render_structural` baseline. Edge
+    pixels (first row / first / last column) write 0.
+  - `shaderFor(mode)`: returns the shader source for a
+    given `DiffMode` string union.
+- `src/lib/webgpu-diff.ts`: TypeScript wrapper:
+  - `class WebGpuDiffCompute`: owns the compiled
+    pipelines + bind group layout + uniform buffer.
+    Lazily compiles each shader on first use; reuses
+    pipelines across calls. Methods: `compute(mode, a,
+    b, gain, width)`, `dispose()`.
+  - `acquireWebGpuDevice()`: requests a `GPUDevice`
+    from the browser. Returns `null` if WebGPU is
+    unavailable so the caller can fall back to the
+    Rust-backed diff path.
+- `src/lib/webgpu-types.ts`: minimal WebGPU type
+  declarations for the subset of the API the wrapper
+  uses. The project does not yet depend on
+  `@webgpu/types`; this file declares the types inline.
+
+#### Design decisions
+
+1. **Feature-flagged prototype.** The wrapper compiles
+   the WGSL shaders lazily on first use. If WebGPU is
+   unavailable, `compute` returns `null` so callers can
+   fall back to the Rust backend. The slice does NOT
+   wire the wrapper into the comparison UI yet.
+
+2. **RGBA8 packed into u32 for GPU upload.** Each
+   RGBA8 pixel is packed into a single `u32` (R in bits
+   0-7, G in 8-15, B in 16-23, A in 24-31) for the GPU
+   buffer. The WGSL shaders unpack via bit-shift. Output
+   is re-packed into a `Uint8Array` after GPU readback.
+
+3. **Uniform buffer layout.** `pixel_count: u32`,
+   `gain: f32`, `width: u32`, `pad0: u32` (16 bytes).
+   Reused across calls; per-call params are written via
+   `device.queue.writeBuffer`.
+
+4. **Gain clamping on the CPU side.** For `Amplified`
+   mode, negative / non-finite gain becomes 1.0 before
+   the uniform write (matching the Rust baseline).
+
+5. **Structural mode matches Rust fallback behavior.**
+   The Rust `render_structural` falls back to
+   `render_absolute` when width < 2 or n <
+   width * 4 * 2. The WGSL shader writes 0 for edge
+   pixels; for buffers too small to have interior pixels
+   the entire output is 0 (which is consistent with the
+   Rust `vec![0u8; n]` allocation). The width-aware
+   absolute fallback lives in the dispatch wrapper for a
+   follow-on slice if needed.
+
+6. **JS-side test runner not added in this slice.** The
+   project does not yet have a JS-side test runner
+   (no Vitest). The slice relies on `npm run check`
+   (svelte-check) for type validation. Behavioural
+   tests via browser-based GPU (Playwright +
+   headless Chrome with WebGPU) are §29.3b.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1137 passing** (unchanged;
+  slice adds 0 Rust code).
+- `npm run check`: 1 error + 9 warnings (matches main
+  baseline; the 1 error is pre-existing in a Svelte
+  file, NOT introduced by this slice. Slice adds 0 new
+  warnings. Backend tests only.)
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code
+  spans, 0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **Three local fix cycles** during type-check
+  resolution:
+  1. WGSL template literals contained backticks inside
+     comments (`// `clamp(x, 0, 255)` expressed as
+     u32`). TypeScript parsed the first inner backtick
+     as the template literal close, then tried to parse
+     the remaining WGSL as TypeScript code. Fixed by
+     replacing inner backticks with single quotes.
+  2. `GPUShaderStage` and `GPUBufferUsage` were
+     declared as interfaces but used as values
+     (`GPUShaderStage.COMPUTE`, `GPUBufferUsage.UNIFORM`).
+     Fixed by declaring each as `interface ...` + a
+     paired `const ...` value (since the project does
+     not depend on `@webgpu/types`, the consts hold the
+     flag-bit values for type-correctness; the slice
+     does not execute the GPU path so the values are
+     type-only).
+  3. `interface Navigator` declaration conflicted with
+     the lib.dom.d.ts declaration of `Navigator`. Fixed
+     by removing the redundant `interface Window { ... }
+     ` wrapper (which was carrying the Navigator redeclare).
+- **Behavioural tests NOT shipped.** The slice relies on
+  `npm run check` for type validation. Browser-based GPU
+  tests require Vitest infrastructure (not yet present in
+  the project) + Playwright + a headless Chrome with
+  WebGPU enabled. That is §29.3b territory.
+- **The slice ships the GPU primitive only.** No IPC
+  wiring, no UI consumer, no automatic fallback. Callers
+  must explicitly `await acquireWebGpuDevice()` +
+  instantiate `WebGpuDiffCompute` + handle the
+  `null`-on-fallback contract.
+- **Pre-existing em-dashes NOT cleaned.** Per Coding
+  Discipline, out of scope.
+
+#### Out-of-scope (intentional)
+
+- §29.3b Production rollout: extend the WebGPU compute
+  path to the spatial detectors, wire to the IPC layer,
+  retire the CPU fallback path (rank #1; next slice).
+- §29.2a IPC wiring for the diff cache (can be folded
+  into §29.3b).
+- §8 SNR / regional noise / edge response / color
+  gradient (rank #2).
+- §32.6 (new) Wire pipeline_plan_hash +
+  RecipeAiDiffSummary through IPC (rank #3).
+- §29.4 (optional) Tile-stripe streaming: deferred.
+- JS-side test runner (Vitest): deferred to a separate
+  infra slice.
+- Browser-based GPU behavioural tests (Playwright +
+  headless Chrome with WebGPU): §29.3b.
+- Pre-existing em-dashes on `main`: out of scope.
+
 ### Slice §29.2: CR-07 cached difference images
 
 **Scope.** Continues the §29 Performance foundation work

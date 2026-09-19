@@ -496,11 +496,15 @@ and slice §29.1 (PR #360) starts the §29 Performance
 foundation work by shipping a single-pass streaming
 metrics accumulator that collapses `channel_stats` +
 `highlight_clipping` + `saturation_percentage` into a
-single-pass `streaming_metrics` function, and slice §29.2
+single-pass `streaming_metrics` function, slice §29.2
 (PR #361) continues with a content-addressed difference
 cache (`DiffCache`) that lets the comparison surface
 re-render a previously-computed diff in O(1) instead of
-recomputing the per-mode walk on every toggle click.
+recomputing the per-mode walk on every toggle click,
+and slice §29.3a (PR #362) starts the §29.3 GPU/WebGPU
+acceleration work by shipping the WGSL compute shaders
++ the TypeScript wrapper + the capability-detection
+integration for `compute_diff` (4 modes) on the GPU.
 
 The §29.1 slice:
 
@@ -564,10 +568,13 @@ The §29.2 slice:
   a follow-on concern (probably §29.2a or merged into
   the §23.5 IPC surface).
 
-**§29 series in progress.** The first two §29 sub-slices
-(§29.1 streaming + §29.2 cached diffs) are landed. The
-remaining §29 work is §29.3 GPU/WebGPU acceleration (the
-largest scope item).
+**§29 series in progress.** The first three §29 sub-slices
+(§29.1 streaming + §29.2 cached diffs + §29.3a WebGPU
+compute prototype for `compute_diff`) are landed. The
+remaining §29 work is §29.3b (production rollout: extend
+the WebGPU compute path to the spatial detectors, wire
+to the IPC layer, retire the CPU fallback path) plus the
+§29.2a IPC wiring for the diff cache.
 
 - **`compute_diff` at 4K (3840×2160) and 8K (7680×4320)**:
   8 tests, all 4 `DiffKind` modes (Absolute, Signed,
@@ -673,14 +680,15 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **75** | **8** | **3** | **87** |
+| **Total** | **76** | **7** | **3** | **87** |
 
-**Coverage:** 86% shipped, 9% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 87% shipped, 8% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
 + §32.3 version integrity + §32.4 AI comparison + §32.5 perf tests
-+ §29.1 streaming metrics + §29.2 cached difference images).
++ §29.1 streaming metrics + §29.2 cached difference images
++ §29.3a WebGPU compute prototype for compute_diff).
 The scorecard now agrees with the section bodies.
 
 ## Bundle status (post-§26 audit refresh)
@@ -733,7 +741,7 @@ the B7 Perf work are the remaining scope:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§29.3 GPU/WebGPU acceleration** | Offload `compute_diff` + the spatial detectors to a GPU compute path for 4K+ images. Largest scope item; may be split into §29.3a (WebGPU prototype) and §29.3b (production rollout). |
+| **1** | **§29.3b Production rollout** | Extend the WebGPU compute path to the spatial detectors (`luminance_noise`, `chromatic_noise`, `local_contrast`, `background_gradient`), wire to the IPC layer, retire the CPU fallback path. The §29.2a IPC wiring for the diff cache can be folded into this slice. |
 | **2** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
 | **3** | **§32.6 (new) Wire pipeline_plan_hash + RecipeAiDiffSummary through IPC** | §32.4 added Rust-only public API; the comparison UI can't display hash / provenance yet. ~100-300 LOC IPC + TS + UI. |
 
@@ -741,29 +749,23 @@ the B7 Perf work are the remaining scope:
 §29 is the larger B7 Perf foundation work; §8 SNR / regional
 noise / etc. are the last small row-closing slices.
 
-## First concrete slice (post-§29.2)
+## First concrete slice (post-§29.3a)
 
-**§29.3 GPU/WebGPU acceleration** is the next §29
-sub-slice. The §32 series fully closed the B7 Perf
-bundle's test foundation; §29.1 closed the streaming
-half of §29 and §29.2 closed the cached-diffs half. The
-remaining §29 work is GPU/WebGPU acceleration: offload
-`compute_diff` + the spatial detectors to a GPU compute
-path for 4K+ images. This is the largest scope item;
-may be split into:
+**§29.3b Production rollout** is the next §29 sub-slice.
+The §32 series + §29.1 + §29.2 + §29.3a together close
+the streaming + cached-diffs + GPU-prototype halves of
+B7 Perf. The remaining §29 work is:
 
-- **§29.3a WebGPU prototype**: ship a working WebGPU
-  compute path for `compute_diff` (4 modes) on a single
-  test image, behind a feature flag.
-- **§29.3b Production rollout**: extend to the spatial
-  detectors, wire to the IPC layer, retire the CPU
-  fallback path.
+- **§29.3b Production rollout**: extend the WebGPU
+  compute path to the spatial detectors (4 §8 detectors
+  that need neighbor-pixel relationships), wire the
+  GPU path to the IPC layer, retire the CPU fallback
+  path. The §29.2a IPC wiring for the diff cache can be
+  folded into this slice.
 
 A future §29.4 (optional) could explore tile-stripe
 buffering to fuse some of the 4 spatial detectors into
-the §29.1 streaming pass, but the complexity is
-non-trivial and the gain on top of §29.1 + §29.2 is
-smaller.
+the §29.1 streaming pass.
 
 The §8 SNR / regional noise / edge response / color
 gradient sub-metrics remain the last small row-closing

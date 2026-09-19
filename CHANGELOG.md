@@ -2,6 +2,115 @@
 
 ## Unreleased
 
+### Slice §13: CR-07 AI-aware comparison chip
+
+**Scope.** Closes the §13 audit row ("no single one-line 'AI was used
+in this version's chain' badge in the compare-header"). The data path
+was already fully shipped: `Recipe.integrity.perceptual_models_used`
+(`crates/astroforge-core/src/recipe.rs:82`) flows through the IPC via
+`RecipeFromRust.integrity.perceptual_models_used`
+(`src/lib/astroforge-api.ts:488`) and is read by `ProvenancePanel`
+(B14) + `RecipeStageTimeline` (B15). The gap was UI: no chip in the
+compare-header. This slice adds a one-line "AI used" chip in
+`CompareWorkspace.svelte`'s per-side `pane-header` so the user sees,
+at a glance, which side(s) of the comparison used AI in their Recipe
+chain.
+
+#### Frontend (Svelte)
+
+- `src/components/CompareWorkspace.svelte` (MOD):
+  - New `aiUsedA` + `aiUsedB` `$state<boolean | null>` slots
+    (one per side).
+  - Two `$effect` blocks watch `versionA?.version_id` and
+    `versionB?.version_id` and call `recipeGetForImageVersion(id)`
+    on change. The chip renders only when the Recipe's
+    `integrity.perceptual_models_used === true`.
+  - Three-state model: `true` (chip on), `false` (deterministic-only
+    chain, chip off), `null` (still loading or IPC failed, chip
+    hidden: honest "unknown" rather than misleading "AI used").
+  - New `.ai-used-chip` CSS class: amber palette
+    (`rgba(255, 144, 74, 0.18)` background + `#ff904a` text),
+    Material Symbols' `auto_awesome` icon, 0.7rem uppercase
+    treatment matching `status-pill` shape.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - §13 row flipped from `⚠️ Partial` to `✅ Shipped`.
+  - Scorecard: §13 row flipped from 0 ✅ / 1 ⚠️ to 1 ✅ / 0 ⚠️.
+    Net delta: 67/17/3 → 68/16/3. Coverage: 77% → 78% shipped.
+  - Bundle priority updated: §13 removed from the priority list;
+    new #1 is §11 prose-display.
+  - "First concrete slice (post-§26 mapping)" pointer advanced
+    from §13 to §11.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: 994 passing (unchanged).
+- `npm run check`: 1 error + 9 warnings (matches main baseline;
+  the slice adds 0 new warnings. The new Svelte template + CSS
+  compile clean.
+- `npm run build`: clean (CSS +0.36 kB, JS +1.14 kB for the
+  chip + effects).
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **No backend change.** The data path was already shipped; the
+  slice is purely UI + one IPC call per side. 0 new Rust, 0 new
+  IPC, 0 new TS, 0 new dependencies.
+- **Honest "unknown" on IPC failure.** When `recipeGetForImageVersion`
+  fails (network, decode, store issue), the chip stays hidden
+  rather than rendering a misleading "AI used" badge for a
+  version whose chain we couldn't read. The ProvenancePanel
+  surfaces the full error separately.
+- **Race-safe via cancellation flag.** Each `$effect` registers
+  a `cancelled` flag in its cleanup closure; if the user clicks
+  another version while the IPC is in flight, the stale result
+  is ignored. Mirrors the pattern in `provenance-store.ts:114`.
+- **No new dependency.** Material Symbols icons are already
+  loaded by the rest of the AI-aware UI; the `auto_awesome`
+  glyph is reused from the existing icon set.
+- **Color palette choice.** Warm amber (`#ff904a`) was selected
+  to match the existing AI-recommendation treatment elsewhere
+  in the codebase (e.g. `MetricsTable.svelte`'s `scope-chip`
+  feature color). Visual hierarchy: the amber chip + icon
+  reads as a deliberate "AI used" marker, distinct from the
+  neutral gray `status-pill` below it.
+- **Honest stub buttons pattern does not apply here.** §13 is
+  a single chip + IPC call per side; the slice renders the
+  full §13 surface in one PR with no follow-up wire-up needed.
+- **The "post-§23.3" + "post-§24" first-concrete-slice pointers
+  are retained as historical references.** The new
+  "post-§26 mapping" pointer advances to §11. The slice loop
+  has accumulated three generations of pointers; the audit
+  doc keeps all three so a reader can trace the priority
+  evolution.
+- **Zero local fix cycles caught by the six-gate.** This is
+  the first slice in the CR-07 §23..§13 run that shipped
+  the six-gate sequence without requiring a local fix.
+  The pattern is the same as §23.1..§23.4 + §24 + §19 + §9.
+  Small pure-UI slices with no Rust changes have a low
+  fix-cycle count. The §20 + §23.2 + §24 slices had one
+  fix cycle each.
+
+#### Out-of-scope (intentional)
+
+- §8 saturation percentage (genuine ❌ in
+  `image_analysis/metrics.rs`; rank #2 in the new priority
+  list).
+- §11 prose-display in `QualityGatePanel.svelte` (rank #1;
+  next slice).
+- §32 + §29 (B7 Perf bundle; rank #3 + #4).
+- Pre-existing em-dashes on `main` (audit + svelte files):
+  out of scope per Coding Discipline; the slice cleans only
+  its own additions.
+
 ### Slice §9: CR-07 contextual metric display
 
 **Scope.** Closes the §9 audit row ("A metric should never be

@@ -37,7 +37,7 @@
   import QualityProfilePicker from "./QualityProfilePicker.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
   import { studioViewport } from "../state/application";
-  import { applyImageDecision } from "../lib/astroforge-api";
+  import { applyImageDecision, recipeGetForImageVersion } from "../lib/astroforge-api";
   import {
     exportComparisonComposite,
     downloadBlob,
@@ -137,6 +137,63 @@
   const versionB = $derived<ImageVersion | null>(
     $versionStore.versions.find((v) => v.version_id === bId) ?? null,
   );
+
+  // CR-07 §13 AI-aware comparison badge. The compare-header
+  // shows a one-line chip when the version's Recipe chain
+  // includes a perceptual (AI) model. Data path:
+  // `recipeGetForImageVersion(versionId)` returns the Recipe
+  // whose `integrity.perceptual_models_used` boolean is read
+  // here. Three-state model: `true` (chip on), `false` (chip
+  // off, deterministic-only chain), `null` (still loading or
+  // no Recipe recorded). The recipe store is per-version, so
+  // we load both A and B independently.
+  let aiUsedA = $state<boolean | null>(null);
+  let aiUsedB = $state<boolean | null>(null);
+  $effect(() => {
+    const id = versionA?.version_id ?? null;
+    if (!id) {
+      aiUsedA = null;
+      return;
+    }
+    let cancelled = false;
+    recipeGetForImageVersion(id)
+      .then((r) => {
+        if (cancelled) return;
+        aiUsedA = r?.integrity.perceptual_models_used ?? false;
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Honest "unknown": the IPC failed; the chip
+        // stays hidden rather than rendering a misleading
+        // "AI used" badge for a version whose chain we
+        // couldn't read. The provenance panel surfaces the
+        // full error separately.
+        aiUsedA = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+  $effect(() => {
+    const id = versionB?.version_id ?? null;
+    if (!id) {
+      aiUsedB = null;
+      return;
+    }
+    let cancelled = false;
+    recipeGetForImageVersion(id)
+      .then((r) => {
+        if (cancelled) return;
+        aiUsedB = r?.integrity.perceptual_models_used ?? false;
+      })
+      .catch(() => {
+        if (cancelled) return;
+        aiUsedB = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   function swap() {
     [aId, bId] = [bId, aId];
@@ -530,6 +587,18 @@
           <h2 class="pane-title font-display">
             {versionA?.label ?? "—"}
           </h2>
+          {#if aiUsedA === true}
+            <span
+              class="ai-used-chip font-label"
+              data-side="A"
+              title="This version's Recipe chain includes a perceptual (AI) model."
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">
+                auto_awesome
+              </span>
+              AI used
+            </span>
+          {/if}
         </header>
         {#if versionA}
           <dl class="meta">
@@ -593,6 +662,18 @@
           <h2 class="pane-title font-display">
             {versionB?.label ?? "—"}
           </h2>
+          {#if aiUsedB === true}
+            <span
+              class="ai-used-chip font-label"
+              data-side="B"
+              title="This version's Recipe chain includes a perceptual (AI) model."
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">
+                auto_awesome
+              </span>
+              AI used
+            </span>
+          {/if}
         </header>
         {#if versionB}
           <dl class="meta">
@@ -1109,6 +1190,35 @@
   .status-pill[data-status="in_review"] {
     background: rgba(33, 150, 243, 0.2);
     color: #64b5f6;
+  }
+
+  /* CR-07 §13 AI-aware comparison chip. Surfaces in
+     the compare-header next to the version label when
+     the version's Recipe chain includes a perceptual
+     (AI) model. Color palette: warm amber (matches the
+     AI-recommendation treatment in the codebase) to
+     visually distinguish from the neutral status pills
+     below. The `auto_awesome` icon is the Material
+     Symbols "AI" glyph, consistent with the rest of
+     the AI-aware UI. The chip is small (0.7rem, same
+     uppercase treatment as status-pill) so it doesn't
+     dominate the header. */
+  .ai-used-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px var(--sp-xs);
+    border-radius: var(--radius-full);
+    background: rgba(255, 144, 74, 0.18);
+    color: #ff904a;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid rgba(255, 144, 74, 0.3);
+  }
+
+  .ai-used-chip .material-symbols-outlined {
+    font-size: 12px;
   }
 
   /* CR-07 C-A1: continue-from-comparison

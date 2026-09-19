@@ -488,10 +488,59 @@ export + "Export comparison" composite PNG works.
 slice §32.2 (PR #356) closes the "Visual regression" sub-row,
 slice §32.3 (PR #357) closes the "Version integrity" sub-row,
 slice §32.4 (PR #358) closes the "AI comparison" sub-row,
-and slice §32.5 (PR #359) closes the "Performance" sub-row
+slice §32.5 (PR #359) closes the "Performance" sub-row
 (the fifth and final §32 sub-slice) by shipping 21 wall-clock-
 bounded perf tests in `crates/astroforge-core/tests/perf.rs`
-covering the B7 Perf bundle's Rust-testable surface:
+covering the B7 Perf bundle's Rust-testable surface,
+and slice §29.1 (PR #360) starts the §29 Performance
+foundation work by shipping a single-pass streaming
+metrics accumulator that collapses `channel_stats` +
+`highlight_clipping` + `saturation_percentage` into a
+single-pass `streaming_metrics` function.
+
+The §29.1 slice:
+
+- Adds `pub fn streaming_metrics(image: &F32Image) -> BTreeMap<String, f64>`
+  in the new `crates/astroforge-core/src/streaming_metrics.rs`
+  module. Output is byte-equivalent to the multi-pass
+  baseline (`channel_stats` ∪ `highlight_clipping` ∪
+  `saturation_percentage`) on every fixture tested
+  (uniform, noisy, clipped, near-clip, single-channel,
+  4-channel, grayscale). 16 equivalence tests pin this
+  contract in `tests/streaming_metrics.rs`.
+- Updates `metric_snapshot_full` to call `streaming_metrics`
+  instead of the redundant `highlight_clipping` +
+  `saturation_percentage` calls. Pass count drops from 7
+  to 5 per snapshot call.
+- Adds 3 perf tests in `tests/streaming_perf.rs` that
+  pin a regression-guard bound: streaming must be at most
+  3x `channel_stats` runtime. On 4K RGBA, streaming takes
+  ~3 seconds vs `channel_stats` ~1.3 seconds (ratio 2.2x).
+
+The "8 sequential extractions" framing in the original §29
+audit was approximate. The actual work pattern is:
+
+- Before §29.1: 7 O(WHC) passes per `metric_snapshot_full`
+  call (6 §8 detectors + 1 channel_stats).
+- After §29.1: 5 O(WHC) passes per call (4 spatial detectors
+  + 1 channel_stats + 1 streaming pass).
+- Net saving: 2 O(WHC) passes per call. On 4K RGBA, that's
+  ~66M float ops saved per snapshot call. For an A/B toggle
+  that snapshots both versions, that's 132M float ops saved.
+
+The 4 spatial detectors (`luminance_noise`, `chromatic_noise`,
+`local_contrast`, `background_gradient`) stay as separate
+passes because they require neighbor-pixel or tile
+relationships that streaming can't supply without buffering
+or recomputation. A future slice (§29.4 or similar) could
+explore tile-stripe buffering to fuse some of these into
+the streaming pass, but the complexity is non-trivial and
+the gain on top of §29.1 is smaller.
+
+**§32 series fully closed.** The B7 Perf bundle's test
+foundation is complete. The remaining B7 Perf work is the
+§29 Performance foundation (streaming / cached diff / GPU
+acceleration); §29.1 is the first sub-slice of that work.
 
 - **`compute_diff` at 4K (3840×2160) and 8K (7680×4320)**:
   8 tests, all 4 `DiffKind` modes (Absolute, Signed,
@@ -597,17 +646,15 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **73** | **10** | **3** | **87** |
+| **Total** | **74** | **9** | **3** | **87** |
 
-**Coverage:** 84% shipped, 11% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 85% shipped, 10% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
-+ §32.3 version integrity + §32.4 AI comparison + §32.5 perf tests).
-The scorecard now agrees with the section bodies. The §32 series
-is fully closed; remaining work is the B7 Perf foundation (§29)
-plus the §8 SNR / regional noise / edge response / color
-gradient sub-metrics.
++ §32.3 version integrity + §32.4 AI comparison + §32.5 perf tests
++ §29.1 streaming metrics).
+The scorecard now agrees with the section bodies.
 
 ## Bundle status (post-§26 audit refresh)
 
@@ -659,30 +706,35 @@ the B7 Perf work are the remaining scope:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
-| **2** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
-| **3** | **§32.6 (new) Wire pipeline_plan_hash + RecipeAiDiffSummary through IPC** | §32.4 added Rust-only public API; the comparison UI can't display hash / provenance yet. ~100-300 LOC IPC + TS + UI. |
+| **1** | **§29.2 Cached difference images** | Cache the per-mode difference output keyed by (version_a_id, version_b_id, diff_mode) so re-rendering a previously-computed comparison is O(1). ~300-600 LOC. |
+| **2** | **§29.3 GPU/WebGPU acceleration** | Offload `compute_diff` + the spatial detectors to a GPU compute path for 4K+ images. Largest scope item; may be split into §29.3a (WebGPU prototype) and §29.3b (production rollout). |
+| **3** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
+| **4** | **§32.6 (new) Wire pipeline_plan_hash + RecipeAiDiffSummary through IPC** | §32.4 added Rust-only public API; the comparison UI can't display hash / provenance yet. ~100-300 LOC IPC + TS + UI. |
 
 §32.2..§32.5 are the four sub-slices of §32 that close B7 Perf;
 §29 is the larger B7 Perf foundation work; §8 SNR / regional
 noise / etc. are the last small row-closing slices.
 
-## First concrete slice (post-§32.5)
+## First concrete slice (post-§29.1)
 
-**§29 Performance** is the next slice. The §32 series
-fully closed the B7 Perf bundle's test foundation. The
-remaining B7 Perf work is §29 itself: streaming high-res
-regions, cached difference images, GPU/WebGPU acceleration.
-This is the real B7 close-out after §32.
+**§29.2 Cached difference images** is the next §29
+sub-slice. The §32 series fully closed the B7 Perf
+bundle's test foundation; §29.1 closed the streaming
+half of §29 by collapsing 2 O(WHC) passes per snapshot
+call. The remaining §29 work is:
 
-§29 is the largest open slice in CR-07 (~800-1500 LOC).
-It is a foundation slice: the goal is to replace the
-current "8 sequential extractions on a 4K image" A/B
-toggle path with a streaming path that reads pixels
-once + a cached diff layer that re-uses the diff result
-across modes. The work is observable to the user as a
-"Compare Version A and B" toggle that doesn't stutter
-on 4K+ images.
+- **§29.2 Cached difference images**: cache the per-mode
+  difference output keyed by
+  `(version_a_id, version_b_id, diff_mode)` so re-rendering
+  a previously-computed comparison is O(1). ~300-600 LOC.
+- **§29.3 GPU/WebGPU acceleration**: offload `compute_diff`
+  + the spatial detectors to a GPU compute path for 4K+
+  images. Largest scope item; may be split into §29.3a
+  (WebGPU prototype) and §29.3b (production rollout).
+- **§29.4 (optional) Tile-stripe streaming**: explore
+  tile-stripe buffering to fuse some of the 4 spatial
+  detectors into the streaming pass. Non-trivial
+  complexity; smaller gain on top of §29.1.
 
 The §8 SNR / regional noise / edge response / color
 gradient sub-metrics remain the last small row-closing

@@ -68,6 +68,7 @@ pub mod session_grouping;
 pub mod stacking;
 pub mod stage_error;
 pub mod star_segmentation;
+pub mod streaming_metrics;
 pub mod stretching;
 pub mod target_detection;
 pub mod telemetry;

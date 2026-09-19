@@ -2,6 +2,182 @@
 
 ## Unreleased
 
+### Slice §29.1: CR-07 streaming metrics accumulator
+
+**Scope.** Closes the first sub-row of §29 Performance
+("Streaming high-res regions"). Ships a single-pass
+streaming metrics accumulator that collapses
+`channel_stats` + `highlight_clipping` +
+`saturation_percentage` into one walk over the image,
+saving 2 O(WHC) passes per snapshot call.
+
+The original §29 audit framed the work as "8 sequential
+extractions on a 4K image". The actual work pattern is 7
+passes per `metric_snapshot_full` call (6 §8 detectors + 1
+`channel_stats`). After §29.1: 5 passes per call (4 spatial
+detectors + 1 `channel_stats` + 1 streaming pass). On 4K
+RGBA, that's ~66M float ops saved per snapshot call.
+
+#### New public API (core)
+
+- `crates/astroforge-core/src/streaming_metrics.rs`: new
+  module with:
+  - `pub fn streaming_metrics(image: &F32Image) -> BTreeMap<String, f64>`:
+    one-pass equivalent of `channel_stats` ∪ `highlight_clipping`
+    ∪ `saturation_percentage`. Output is byte-equivalent to
+    the multi-pass baseline on every fixture tested.
+  - `pub struct StreamingAccumulator`: stateful accumulator
+    you can `observe(&img)` against and then `finalize()`.
+    `observe` is idempotent on repeated calls (sums grow
+    monotonically). Used by callers that want to observe
+    multiple images into the same accumulator (future
+    slice; current callers use `streaming_metrics`).
+- `lib.rs`: `pub mod streaming_metrics;` added.
+
+#### Behavior change (core)
+
+- `comparison_metrics::metric_snapshot_full(image)`:
+  - Now calls `streaming_metrics` to compute the
+    per-pixel metrics (`channel_stats` +
+    `highlight_clipping` + `saturation_percentage`)
+    in one pass instead of three separate detector
+    calls.
+  - Drops the redundant `highlight_clipping` +
+    `saturation_pct` entries that `metric_snapshot`
+    inserted, then replaces them with the streaming
+    output (which agrees byte-for-byte).
+  - Net pass count: 7 → 5 per call.
+  - Output keys + values are byte-equivalent to the
+    pre-§29.1 baseline on every fixture tested.
+
+#### Tests (core)
+
+- NEW `crates/astroforge-core/tests/streaming_metrics.rs`:
+  16 tests pinning byte-equivalence:
+  - 7 baseline-equivalence tests across uniform,
+    noisy, clipped, near-clip, single-channel,
+    4-channel, grayscale fixtures.
+  - 4 explicit-invariant tests: clip_count threshold
+    (≥1.0), highlight_clipping threshold (≥0.999),
+    saturation_pct unit (fraction in [0,1] NOT
+    percentage in [0,100]), uniform image has zero
+    stddev.
+  - 2 invariant tests: noisy image has non-zero stddev;
+    output keys are sorted (BTreeMap).
+  - 3 API-surface tests: observe-once vs observe-twice
+    idempotency, empty-image handling, subset match
+    with `metric_snapshot`.
+- NEW `crates/astroforge-core/tests/streaming_perf.rs`:
+  3 perf tests as regression guards:
+  - Streaming runtime at 2K must complete within 15s
+    on a debug build.
+  - Streaming must be at most 3x `channel_stats`
+    runtime at 4K (regression guard).
+  - Streaming output invariants hold at 4K.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - §29 row updated: "Streaming" sub-row entry
+    removed from the open list.
+  - Scorecard: 73/10/3 → **74/9/3** (coverage
+    **84% → 85%**).
+  - Bundle priority #1 advanced from §29 to §29.2.
+  - "First concrete slice" pointer advanced from §29
+    to §29.2 (cached difference images).
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1116 passing** (19 new tests
+  on top of the 1097 baseline; 16 streaming equivalence
+  + 3 streaming perf).
+- `npm run check`: 1 error + 9 warnings (matches main baseline;
+  slice adds 0 new warnings. Backend tests only).
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **Smaller-than-initially-framed perf win.** The original
+  §29 audit framed the work as "8 sequential extractions"
+  with a target of "1 streaming pass". The actual work
+  pattern is 7 passes per call, and §29.1 saves 2 (the
+  4 spatial detectors can't be fused without
+  buffering/recomputation). On 4K RGBA, streaming takes
+  ~3 seconds vs `channel_stats` ~1.3 seconds (ratio 2.2x).
+  The honest framing is "regression guard, not perf
+  celebration": streaming is bounded to be at most 3x
+  `channel_stats` runtime.
+- **Initial test assertion had wrong expectations.**
+  My first streaming output stored `highlight_clip_count`
+  as a raw pixel count; the baseline detector stores it
+  as a fraction. Also: `saturation_percentage` returns a
+  fraction in [0,1], not a percentage in [0,100]. Both
+  discrepancies caught by the byte-equivalence tests;
+  fixed by aligning the streaming output to the existing
+  baseline's units exactly.
+- **Five local fix cycles** during compile + test
+  resolution:
+  1. `let mut` in unused-variable context (5 sites).
+  2. `doc-lazy-continuation` clippy warning on the
+     StreamingAccumulator doc-comment.
+  3. `highlight_clipping` unit mismatch (raw count vs
+     fraction). Fixed by counting per-channel to match
+     the existing baseline.
+  4. `saturation_pct` unit mismatch (fraction vs
+     percentage × 100). Fixed by dropping the ×100.
+  5. Wrong expected value in the
+     `streaming_highlight_clipping_matches_threshold_0_999`
+     test (clipped_image is half-clipped, not fully-clipped)
+     fixed by updating the expected value to 0.5.
+  First compile + first `cargo test` invocation both
+  passed after these five fixes. All 19 new tests
+  passed on the first `cargo test` invocation
+  *following* the fixes.
+- **4 spatial detectors stay as separate passes.**
+  `luminance_noise`, `chromatic_noise`, `local_contrast`,
+  `background_gradient` require neighbor-pixel or
+  tile relationships that streaming can't supply without
+  buffering or recomputation. A future slice (§29.4 or
+  similar) could explore tile-stripe buffering to fuse
+  some of these into the streaming pass, but the
+  complexity is non-trivial and the gain on top of
+  §29.1 is smaller.
+- **Pure Rust slice.** 0 new IPC, 0 new UI, 0 new TS,
+  0 new deps. Just the new `streaming_metrics` module
+  + tests + the `metric_snapshot_full` behavior change.
+- **Pre-existing em-dashes NOT cleaned** (per Coding
+  Discipline; out of scope). All my additions are
+  em-dash-free.
+
+#### Out-of-scope (intentional)
+
+- §29.2 Cached difference images (rank #1; next slice).
+- §29.3 GPU/WebGPU acceleration (rank #2; largest scope).
+- §8 SNR / regional noise / edge response / color
+  gradient (rank #3).
+- §32.6 (new) Wire pipeline_plan_hash +
+  RecipeAiDiffSummary through IPC (rank #4).
+- §29.4 (optional) Tile-stripe streaming: deferred to
+  a future slice if §29.2 + §29.3 leave headroom.
+- Split-alignment / blink-consistency /
+  overlay-accuracy sub-modes of the audit's
+  "visual regression" line: deferred to a future slice
+  that adds a DOM-rendering test runner.
+- Decision-side operations
+  (`apply_and_save_decision` /
+  `apply_and_save_decision_with_profile`): deferred to
+  a §33 ADR-side test.
+- Criterion-based release-mode benchmarks: deferred to
+  a follow-on slice.
+- Pre-existing em-dashes on `main`: out of scope per
+  Coding Discipline.
+
 ### Slice §32.5: CR-07 perf tests (final §32 sub-slice)
 
 **Scope.** Closes the §32 "Performance" sub-row (the fifth

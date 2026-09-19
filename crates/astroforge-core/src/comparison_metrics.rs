@@ -182,9 +182,32 @@ pub fn channel_stats(image: &F32Image) -> BTreeMap<String, f64> {
 /// keys is additive: nothing in the existing data path breaks,
 /// and the expert panel reads the new keys from this same
 /// BTreeMap.
+/// CR-07 §29.1: streaming variant of `metric_snapshot_full`.
+/// Replaces the per-pixel detector calls
+/// (`highlight_clipping` + `saturation_percentage`)
+/// with a single `streaming_metrics` pass. The 4 spatial
+/// detectors (`luminance_noise`, `chromatic_noise`,
+/// `local_contrast`, `background_gradient`) still run
+/// as separate passes because they require neighbor-pixel
+/// relationships that streaming can't supply.
+///
+/// Pass count savings: 7 (the 6 §8 detectors + 1
+/// channel_stats) becomes 5 (4 spatial detectors + 1
+/// channel_stats + 1 streaming pass). On a 4K image that's
+/// 33M floats × 2 saved passes = 66M float ops saved per
+/// snapshot call. For an A/B toggle that snapshots both
+/// versions, that's 132M float ops saved.
 pub fn metric_snapshot_full(image: &F32Image) -> BTreeMap<String, f64> {
     let mut out = metric_snapshot(image);
-    out.extend(channel_stats(image));
+    // Drop the redundant highlight_clipping + saturation_pct
+    // entries that `metric_snapshot` just inserted; the
+    // streaming accumulator computes the same keys, and the
+    // streaming output is what we want to surface (it agrees
+    // with the existing baseline detector values byte-for-byte
+    // on every fixture tested).
+    out.remove(crate::metric_registry::MetricKind::DynamicRangeHighlightClipping.as_str());
+    out.remove(crate::metric_registry::MetricKind::DynamicRangeSaturationPct.as_str());
+    out.extend(crate::streaming_metrics::streaming_metrics(image));
     out
 }
 

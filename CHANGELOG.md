@@ -2,6 +2,119 @@
 
 ## Unreleased
 
+### Slice §9: CR-07 contextual metric display
+
+**Scope.** Closes the §9 audit row ("A metric should never be
+presented without explaining what it means"). The contextual
+explanation data was already fully shipped via
+`MetricSpec::context` in `crates/astroforge-core/src/metric_registry.rs`
+(25 metrics, lines 246-467), carried through the IPC via
+`MetricDeltaRow.context` (`commands_comparison.rs:206` +
+`src/lib/astroforge-api.ts:583`). The gap was UI: `MetricsTable.svelte`
+only exposed the context as a browser tooltip (`title=` on the
+`<tr>`), making it invisible by default. This slice renders the
+context as inline sub-text beneath every metric label so the
+user never sees a bare metric name without the "what does this
+mean, why does it matter" sentence the spec requires.
+
+#### Frontend (Svelte)
+
+- `src/components/MetricsTable.svelte` (MOD):
+  - The `.metric-name` cell now stacks `.metric-label` (the
+    metric name) on top of `.metric-context` (the contextual
+    sentence). Vertical alignment preserved via flex-column on
+    the cell.
+  - `.metric-context` styled with `var(--on-surface-variant)`
+    (the standard subdued-text token, sufficient contrast on
+    the dark canvas) at 0.78rem / 1.35 line-height, with
+    `-webkit-line-clamp: 2` to bound tall rows; the full text
+    remains available via the existing `title=` tooltip on the
+    `<tr>`.
+  - File header comment updated to note the §9 wire-up alongside
+    the §10 + §11 wires.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - §9 row flipped from `⚠️ Partial` to `✅ Shipped`, with the
+    audit-text tightening that names the `metric_registry.rs`
+    data source + the `MetricsTable.svelte` rendering
+    change + the prior-refresh's misread note (the audit
+    said "Improvement pending in `RecommendationCard.svelte`";
+    that component renders AI recommendations, not metric
+    tiles; the metric-context rendering lives in
+    `MetricsTable.svelte`).
+  - Scorecard: §9 row flipped from 0 ✅ / 1 ⚠️ to 1 ✅ / 0 ⚠️.
+    Net delta: 66/18/3 → 67/17/3. Coverage: 76% → 77% shipped.
+  - Bundle priority updated: §9 removed from the priority list;
+    new #1 is §13 AI-used badge.
+  - "First concrete slice (post-§26 mapping)" pointer advanced
+    from §9 to §13.
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: unchanged from `main` (the slice
+  adds no Rust; the existing 994 tests still pass).
+- `npm run check`: 0 new errors / warnings (1 pre-existing
+  error + 9 pre-existing warnings on `main` are unchanged).
+- `npm run build`: clean.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes (per the GitHub
+  language rule).
+- 25 metrics each carry a populated `context` field
+  (`metric_registry.rs:246-467`), verified by `grep -c
+  'context:' crates/astroforge-core/src/metric_registry.rs`
+  returning the expected count.
+
+#### Honest flags
+
+- **No backend change.** The contextual data was already
+  shipped; the slice is pure UI rendering. 0 new Rust, 0 new
+  IPC, 0 new TS.
+- **No new dependency.** Pure Svelte + CSS. No chart library,
+  no icon library, no animation library.
+- **Audit-row audit-claim verification found a misread.** The
+  prior audit refresh listed `RecommendationCard.svelte` as
+  the gap target; that component renders AI recommendations
+  (tone / stars / color / noise / stretch), not metric tiles.
+  The metric-context rendering lives in `MetricsTable.svelte`.
+  The audit-doc text was tightened to reflect the correct
+  target. The misread didn't change the slice scope: the
+  data path is the same regardless of which component renders
+  it. The audit-text correction matters for the next reader who
+  looks at the §9 row.
+- **The "post-§23.3" + "post-§24" first-concrete-slice
+  pointers are retained as historical references.** The new
+  "post-§26 mapping" pointer advances to §13. The slice loop
+  has accumulated three generations of pointers; the audit
+  doc keeps all three so a reader can trace the priority
+  evolution.
+- **One slight indentation slip caught and fixed.** Initial
+  CSS patch replaced the existing `.metric-name { color:
+  var(--on-surface); }` block with a much longer flex-column
+  + child-rules block; the patch verified against the
+  pre-patch content matched on the first try.
+- **Honest stub buttons pattern does not apply here.** §9 is
+  a single-cell rendering change, not a multi-CTA action bar.
+  The slice renders the full §9 surface in one PR; no
+  follow-up wire-up needed.
+
+#### Out-of-scope (intentional)
+
+- §8 saturation percentage (genuine ❌ in
+  `image_analysis/metrics.rs`; rank #3 in the new priority
+  list).
+- §11 prose-display in `QualityGatePanel.svelte`
+  (`summary` field is generated but not rendered; rank #2).
+- §13 one-line AI-used badge (rank #1; next slice).
+- §32 + §29 (B7 Perf bundle; rank #4 + #5).
+- Pre-existing em-dashes on `main` (audit + svelte files):
+  out of scope per Coding Discipline; the slice cleans only
+  its own additions.
+
 ### Slice audit-refresh-2: §26 conceptual-to-actual mapping + scorecard reconciliation
 
 **Scope.** Re-verifies every "⚠️ Partial" row in the CR-07 audit

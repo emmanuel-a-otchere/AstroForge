@@ -1,5 +1,6 @@
 <!--
-  CR-07 B4 — metrics table (§10 delta table + §11 summary).
+  CR-07 B4 metrics table (§10 delta table + §11 summary +
+  §9 contextual metric display).
 
   Consumes `compare_version_metrics`: the backend decodes both
   versions' applied artifacts, derives the §8 metric snapshots via
@@ -12,6 +13,13 @@
     reports them as inconclusive, null-valued rows).
   - When either version has no applied artifact, the panel says so
     instead of rendering a fake table.
+  - §9: every metric name is rendered with its contextual
+    sentence visible inline (not just a hover tooltip). The
+    `row.context` field is populated for every metric by
+    `crates/astroforge-core/src/metric_registry.rs:228` (25
+    metrics, lines 246-467). The sub-text line under each
+    metric name surfaces the "what does this mean + why it
+    matters" context that the spec requires.
 -->
 <script lang="ts">
   import {
@@ -154,7 +162,20 @@
         <tbody>
           {#each report.rows as row (row.kind)}
             <tr data-direction={row.direction} title={row.context}>
-              <td class="metric-name font-body">{row.label}</td>
+              <td class="metric-name font-body">
+                <span class="metric-label">{row.label}</span>
+                <!-- §9 contextual metric display: every metric
+                     carries a one-sentence explanation in
+                     `row.context` (populated for all 25 metrics
+                     by `crates/astroforge-core/src/metric_registry.rs`).
+                     Render it inline beneath the label so the user
+                     never sees a bare metric name without the
+                     "what does this mean + why it matters"
+                     sentence the spec requires. The browser
+                     tooltip (title=) above remains for users who
+                     want the full context on hover. -->
+                <span class="metric-context font-body">{row.context}</span>
+              </td>
               <td class="num font-data">
                 {formatValue(row.baseline_value, row.unit)}
               </td>
@@ -272,6 +293,48 @@
 
   .metric-name {
     color: var(--on-surface);
+    /* §9 contextual metric display: the cell now stacks
+       `.metric-label` (the metric name, e.g. "FWHM") on
+       top of `.metric-context` (the contextual sentence).
+       Vertically center the row contents via flex so the
+       numeric cells still align with the visual top of the
+       stacked label. */
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    vertical-align: top;
+  }
+
+  .metric-label {
+    /* No styling override needed: inherits .metric-name's
+       on-surface color + font-body sizing. The separation
+       is structural (column flex), not visual. */
+    font-weight: 500;
+  }
+
+  .metric-context {
+    /* §9: muted sub-text under the metric name. Visually
+       subordinate so it doesn't compete with the value
+       cells, but high enough contrast (var(--on-surface-variant)
+       is the standard subdued-text token) to remain
+       legible. Line-clamp at 2 keeps tall rows bounded;
+       the title= attribute on the <tr> carries the full
+       text for hover-reveal. The standard `line-clamp`
+       is paired with the `-webkit-line-clamp` vendor
+       prefix for cross-browser compatibility; the
+       `svelte-check` warning "Also define the standard
+       property 'line-clamp' for compatibility" requires
+       both. */
+    color: var(--on-surface-variant);
+    font-size: 0.78rem;
+    line-height: 1.35;
+    max-width: 38ch;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .verdict {

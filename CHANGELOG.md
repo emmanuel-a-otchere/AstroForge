@@ -2,6 +2,119 @@
 
 ## Unreleased
 
+### Slice §32.2: CR-07 visual regression tests for diff renderer
+
+**Scope.** Closes the §32 "Visual regression" sub-row (the
+Rust-testable portion of it: difference rendering). The
+other three "visual" sub-modes (split alignment, blink
+consistency, overlay accuracy) live in `CompareTools.svelte`
+and require a DOM-rendering test runner (e.g. Playwright)
+the codebase doesn't ship yet. Documented as a future slice.
+
+#### Tests (core)
+
+- NEW `crates/astroforge-core/tests/visual_regression.rs`:
+  - 16 integration tests pinning `compute_diff(kind, a, b,
+    gain, width)` in `crates/astroforge-core/src/difference.rs`
+    against deterministic RGBA8 fixtures with pixel-exact
+    expected output.
+  - All four `DiffKind` modes covered (Absolute / Signed /
+    Amplified / Structural):
+    - **Absolute**: pixel-exact `|A-B|`, clamp at extremes,
+      alpha preservation.
+    - **Signed**: midpoint=128 on identical inputs,
+      brighter-A pushes above 128 (clamped to 255), brighter-B
+      pushes below (clamped to 0), hand-computed pixel value.
+    - **Amplified**: gain=1.0 matches Absolute, gain=2.0/3.0
+      scales linearly with clamp at 255, non-finite/zero
+      gain coerces to 1.0 (defensive default).
+    - **Structural**: zero on uniform image, falls back to
+      absolute on tiny images (width < 2), edge detection
+      against a vertical step.
+  - Two cross-mode determinism tests: all four modes must
+    produce identical output for identical input across
+    multiple invocations; all four modes must force alpha
+    byte to 255 in the output.
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - §32 row updated: "Visual regression" entry removed
+    from the open list (the difference-rendering portion).
+    Split / blink / overlay sub-modes documented as
+    deferred to a future DOM-rendering test runner slice.
+  - Scorecard: 69/14/3 → **70/13/3** (coverage **79% → 80%**).
+  - Bundle priority: §32.2 removed; new #1 is §32.3.
+  - "First concrete slice" pointer advanced from §32.2 to
+    §32.3 (version integrity test).
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1032 passing** (16 new visual
+  regression tests on top of the 1016 baseline).
+- `npm run check`: 1 error + 9 warnings (matches main baseline;
+  slice adds 0 new warnings. Backend tests only.
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **Two local fix cycles caught by the six-gate.**
+  1. Initial `chunks_exact(4)` triggered the
+     `clippy::chunks_exact_to_as_chunks` lint; three
+     call sites converted to `as_chunks::<4>().0.iter()`.
+  2. Initial structural-diff edge test asserted "non-zero
+     at interior edges" with a gradient fixture; the Sobel
+     approximation's `left + up` neighbour scheme means the
+     gradient produces zero structural diff at the
+     gradient's leading edge (the left neighbour has the
+     same value). Switched to a step fixture (sharp edge
+     at x=2) so the structural diff at (x=2, y=1) is
+     definitively non-zero (left=0, self=255 in image A;
+     left=128, self=128 in uniform B). The lesson: the
+     structural path detects an edge at a pixel where
+     the left-neighbour differs from the pixel itself.
+- **Pure test slice.** 0 new Rust source (only the test
+  file), 0 new IPC, 0 new UI, 0 new TS, 0 new dependencies.
+- **Pixel-exact assertions.** Unlike §32.1's metric-
+  validation tests (which pin directional behavior), this
+  slice's tests pin pixel-exact values because the diff
+  renderer is a deterministic per-pixel math function
+  (no heuristic involved). This is the right shape for
+  visual regression: the rendered output should be
+  byte-for-byte identical across releases.
+- **Out-of-scope sub-modes documented.** The audit's
+  original "split alignment, blink consistency, difference
+  rendering, overlay accuracy" splits into 4 sub-modes,
+  of which only "difference rendering" is Rust-testable.
+  The other three (Svelte canvas rendering) need a DOM-
+  rendering test runner. This slice closes the one
+  Rust-testable sub-mode; the other three are flagged for
+  a future slice that adds the runner.
+- **Pre-existing em-dashes NOT cleaned** (per Coding
+  Discipline; out of scope). All my additions are
+  em-dash-free.
+
+#### Out-of-scope (intentional)
+
+- §32.3 version integrity test (rank #1; next slice).
+- §32.4 AI comparison tests (rank #2).
+- §32.5 perf tests (rank #3).
+- §29 Performance (rank #4).
+- §8 SNR / regional noise / edge response / color gradient
+  (rank #5).
+- Split-alignment / blink-consistency / overlay-accuracy
+  sub-modes of the audit's "visual regression" line:
+  deferred to a future slice that adds a DOM-rendering
+  test runner (Playwright or equivalent).
+- Pre-existing em-dashes on `main`: out of scope per Coding
+  Discipline.
+
 ### Slice §32.1: CR-07 metric validation against controlled fixtures
 
 **Scope.** Closes the §32 "Metric validation against controlled

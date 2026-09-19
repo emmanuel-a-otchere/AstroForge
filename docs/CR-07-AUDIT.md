@@ -681,22 +681,22 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §29 (performance) | 2 | 3 | 2 | 7 |
 | §30 (export) | 1 | 0 | 0 | 1 |
 | §31 (acceptance) | 23 | 5 | 0 | 28 |
-| §32 (test strategy) | 0 | 1 | 0 | 1 |
+| §32 (test strategy) | 1 | 0 | 0 | 1 |
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **81** | **2** | **3** | **87** |
+| **Total** | **82** | **1** | **3** | **87** |
 
-**Coverage:** 93% shipped, 2% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 94% shipped, 1% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
 + §32.3 version integrity + §32.4 AI comparison + §32.5 perf tests
++ §32.6 wire pipeline_plan_hash + RecipeAiDiffSummary through IPC
 + §29.1 streaming metrics + §29.2 cached difference images
 + §29.3a WebGPU compute prototype for compute_diff
 + §29.3b.1 WGSL shaders for 4 of 4 spatial detectors
 + §29.3b.2 Vitest infra + behavioural tests for WebGPU wrappers
-+ §32.6 wire pipeline_plan_hash + RecipeAiDiffSummary through IPC
 + §29.2a wire DiffCache through IPC
 + §29.3b.1a WGSL for background_gradient). The scorecard
 now agrees with the section bodies.

@@ -2,6 +2,162 @@
 
 ## Unreleased
 
+### Slice §32.4: CR-07 AI comparison tests + pipeline plan hash
+
+**Scope.** Closes the §32 "AI comparison" sub-row. Pins the
+audit's "model / version / hash / classification / parameters /
+provenance surfacing" surface as a pure-Rust data model +
+function pair, with comprehensive test coverage at both
+the unit and integration levels.
+
+The audit's "hash" line was a real gap: no `pipeline_plan_hash`
+function existed in the codebase before this slice. Adding
+it is feature work, so the slice ships both the function +
+its tests under one PR.
+
+#### New public API (core)
+
+- `Recipe::pipeline_plan_hash() -> String`:
+  - 64-char lowercase hex SHA-256 of pipeline-shape fields:
+    `schema_version`, `name`, `target_type`, stages (with
+    `enabled` flag + per-stage params, deterministic
+    BTreeMap ordering), `required_models`, integrity badge
+    (booleans + sorted model list with model_type), `version`,
+    `branch`, `quality_profile`.
+  - Deliberately EXCLUDES `description`, `created_at`,
+    `parent_version`, and `flags` (presentational / lineage /
+    annotation fields).
+  - Deterministic: same Recipe always hashes to the same
+    value.
+- `pub struct RecipeAiDiffSummary` (Serialize + Deserialize):
+  - `hash_a` / `hash_b` / `hash_differs` (hash).
+  - `ai_used_a` / `ai_used_b` / `ai_classification_differs`
+    (model + classification).
+  - `version_a` / `version_b` + `schema_version_a` /
+    `schema_version_b` (version).
+  - `quality_profile_a` / `quality_profile_b`
+    (classification detail).
+  - `required_models_differ` + `perceptual_models_a` /
+    `perceptual_models_b` (parameters + model detail).
+  - `provenance` (human-readable summary line of the form
+    `"Recipe A v{N} (ai|natural, {profile}) vs Recipe B v{M} ..."`).
+- `recipe_ai_diff_summary(a: &Recipe, b: &Recipe) -> RecipeAiDiffSummary`:
+  - Pure function. The comparison UI renders this struct
+    directly without re-deriving any of the fields.
+
+#### Tests (core)
+
+- 18 new unit tests inline in `crates/astroforge-core/src/recipe.rs`:
+  - 9 `pipeline_plan_hash_*` tests: 64-char lowercase hex
+    shape, determinism, schema_version / stages /
+    stage_params / integrity_models / ai_model each change
+    the hash, description+created_at+parent_version+flags
+    do NOT change the hash.
+  - 9 `ai_diff_summary_*` tests: natural-vs-AI classification
+    differs, both-natural and both-AI no classification diff,
+    identical Recipes no hash diff, different stages hash
+    differs, provenance line format, required_models_differ
+    surfacing, quality_profile surfacing, schema_version
+    surfacing.
+- NEW `crates/astroforge-core/tests/recipe_ai_comparison.rs`:
+  - 18 integration tests covering the public API surface
+    end-to-end:
+    - 6 `pipeline_plan_hash_*` tests (hash shape,
+      determinism, AI-vs-natural distinction, param-value
+      distinction, presentational-field invariance,
+      serialisation round-trip agreement).
+    - 11 `ai_diff_summary_*` tests (classification differs /
+      both-natural / both-AI, version / schema_version /
+      quality_profile / required_models surfacing,
+      provenance line format, purity, hash-differs on
+      param change).
+    - 2 `recipe_ai_diff_summary_serde_*` tests
+      (round-trip + audit-field-presence).
+
+#### Docs
+
+- `docs/CR-07-AUDIT.md` (MOD):
+  - §32 row updated: "AI comparison" entry removed from
+    the open list.
+  - Scorecard: 71/12/3 → **72/11/3** (coverage **82% → 83%**).
+  - Bundle priority #1 advanced from §32.4 to §32.5.
+  - "First concrete slice" pointer advanced from §32.4 to
+    §32.5 (perf tests).
+- `CHANGELOG.md`: this entry.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1076 passing** (36 new tests
+  on top of the 1040 baseline; 18 unit + 18 integration).
+- `npm run check`: 1 error + 9 warnings (matches main baseline;
+  slice adds 0 new warnings. Backend + UI source, but no UI
+  surface changes).
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **Two local fix cycles** during compile + clippy cleanup.
+  First: `RecipeAiDiffSummary` struct literal tried to
+  borrow `hash_a` and `hash_b` after moving them into the
+  struct; fixed by binding `hash_differs` to a local first.
+  Second: missed `QualityProfile::Publication` variant in
+  the match arms (4 variants, not 3). Third: clippy flagged
+  5 `let mut` bindings in tests where only one side needed
+  mutation; removed the unnecessary `mut`s. None affected
+  test semantics.
+- **First compile of the new tests ran cleanly** after the
+  above three fixes. All 36 new tests passed on first
+  `cargo test` invocation.
+- **Feature addition, not pure tests.** Unlike §32.1
+  / §32.2 / §32.3 (pure test files), §32.4 adds new public
+  API to `astroforge_core::recipe`: `pipeline_plan_hash()`
+  on `Recipe` + `RecipeAiDiffSummary` struct +
+  `recipe_ai_diff_summary()` function. The audit's "hash"
+  line could not be closed by tests alone. The function
+  had to exist. The slice ships both the function + its
+  tests under one PR.
+- **IPC surface not changed.** The new types are Rust-only
+  public API. Wiring them into the comparison IPC layer
+  is a UI-side change deferred to a follow-on slice
+  (probably §23.5 or a new §32.6).
+- **`sha2` was already in deps** (workspace dependency);
+  no new crates added.
+- **QualityProfile match arms cover all 4 variants**
+  (Natural / Detail / Clean / Publication). Pin that
+  this slice will keep working if a new variant is added
+  (clippy catches non-exhaustive matches).
+- **Pure function**: no I/O, no DB, no Tauri State. The
+  integration test surface uses no `DomainStore` (the
+  Recipe data model alone is the test surface).
+- **Pre-existing em-dashes NOT cleaned** (per Coding
+  Discipline; out of scope). All my additions are
+  em-dash-free.
+
+#### Out-of-scope (intentional)
+
+- §32.5 Perf tests (rank #1; final §32 sub-slice).
+- §29 Performance (rank #2).
+- §8 SNR / regional noise / edge response / color gradient
+  (rank #3).
+- Split-alignment / blink-consistency / overlay-accuracy
+  sub-modes of the audit's "visual regression" line:
+  deferred to a future slice that adds a DOM-rendering
+  test runner.
+- Decision-side operations
+  (`apply_and_save_decision` /
+  `apply_and_save_decision_with_profile`): deferred to a
+  §33 ADR-side test (decision state transitions).
+- IPC surface for the new Recipe hash / AI comparison
+  types: deferred to a follow-on slice (probably §23.5
+  or new §32.6).
+- Pre-existing em-dashes on `main`: out of scope per Coding
+  Discipline.
+
 ### Slice §32.3: CR-07 version integrity test
 
 **Scope.** Closes the §32 "Version integrity" sub-row.

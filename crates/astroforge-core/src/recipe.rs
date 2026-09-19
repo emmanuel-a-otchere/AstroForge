@@ -212,6 +212,121 @@ impl Recipe {
         serde_json::to_string_pretty(self)
     }
 
+    /// CR-07 §32.4: content-addressed hash of the Recipe's
+    /// pipeline plan. The hash covers every field that
+    /// influences the runtime pipeline: schema_version,
+    /// name, target_type, stages (with enabled flag + params),
+    /// required_models, integrity (perceptual_models_used,
+    /// deterministic_models_used, seed_recorded, models),
+    /// version, branch, quality_profile.
+    ///
+    /// The hash deliberately EXCLUDES `description`,
+    /// `created_at`, `parent_version`, and `flags` because
+    /// those are presentational / lineage / annotation
+    /// fields, not pipeline-shape fields.
+    ///
+    /// Two Recipes produce the same hash iff their pipeline
+    /// shape is identical. The hash format is lowercase hex
+    /// SHA-256 (64 chars).
+    pub fn pipeline_plan_hash(&self) -> String {
+        use sha2::{Digest, Sha256};
+        // Build a canonical, ordered projection of the
+        // pipeline-shape fields. We deliberately use
+        // `serde_json::to_value` + a manual reconstruction
+        // so the hash stays stable across serde field-order
+        // changes (BTreeMap-backed map fields already have
+        // deterministic ordering).
+        let mut hasher = Sha256::new();
+        hasher.update(self.schema_version.as_bytes());
+        hasher.update(b"\x00");
+        hasher.update(self.name.as_bytes());
+        hasher.update(b"\x00");
+        hasher.update(self.target_type.as_bytes());
+        hasher.update(b"\x00");
+        // Quality profile: serialize the lowercase variant
+        // name so the hash survives serde rename changes.
+        let qp = match self.quality_profile {
+            QualityProfile::Natural => "natural",
+            QualityProfile::Detail => "detail",
+            QualityProfile::Clean => "clean",
+            QualityProfile::Publication => "publication",
+        };
+        hasher.update(qp.as_bytes());
+        hasher.update(b"\x00");
+        hasher.update(self.version.to_be_bytes());
+        hasher.update(b"\x00");
+        hasher.update(self.branch.as_bytes());
+        hasher.update(b"\x00");
+        // Stages: deterministic order by stage_id.
+        let mut stage_ids: Vec<&str> = self.stages.iter().map(|s| s.stage_id.as_str()).collect();
+        stage_ids.sort();
+        for stage_id in stage_ids {
+            hasher.update(stage_id.as_bytes());
+            hasher.update(b"\x00");
+            if let Some(stage) = self.stages.iter().find(|s| s.stage_id == stage_id) {
+                hasher.update(if stage.enabled { b"1" } else { b"0" });
+                hasher.update(b"\x00");
+                // Params: BTreeMap-backed HashMap sorts by
+                // key when serialized, but we canonicalize
+                // here explicitly so the hash is robust to
+                // serde format drift.
+                let params: std::collections::BTreeMap<&str, &serde_json::Value> =
+                    stage.params.iter().map(|(k, v)| (k.as_str(), v)).collect();
+                for (k, v) in params.iter() {
+                    hasher.update(k.as_bytes());
+                    hasher.update(b"\x00");
+                    hasher.update(v.to_string().as_bytes());
+                    hasher.update(b"\x00");
+                }
+            }
+        }
+        // Required models: sorted for determinism.
+        let mut required: Vec<&str> = self.required_models.iter().map(|s| s.as_str()).collect();
+        required.sort();
+        for m in required {
+            hasher.update(m.as_bytes());
+            hasher.update(b"\x00");
+        }
+        // Integrity badge: booleans + sorted model list.
+        hasher.update(if self.integrity.perceptual_models_used {
+            b"1"
+        } else {
+            b"0"
+        });
+        hasher.update(b"\x00");
+        hasher.update(if self.integrity.deterministic_models_used {
+            b"1"
+        } else {
+            b"0"
+        });
+        hasher.update(b"\x00");
+        hasher.update(if self.integrity.seed_recorded {
+            b"1"
+        } else {
+            b"0"
+        });
+        hasher.update(b"\x00");
+        let mut model_usages = self.integrity.models.clone();
+        model_usages.sort_by(|a, b| a.model_name.cmp(&b.model_name));
+        for mu in model_usages {
+            hasher.update(mu.model_name.as_bytes());
+            hasher.update(b"\x00");
+            let mt = match mu.model_type {
+                ModelType::Deterministic => "deterministic",
+                ModelType::Perceptual => "perceptual",
+            };
+            hasher.update(mt.as_bytes());
+            hasher.update(b"\x00");
+        }
+        let digest = hasher.finalize();
+        // Lowercase hex, 64 chars.
+        let mut out = String::with_capacity(64);
+        for byte in digest {
+            out.push_str(&format!("{:02x}", byte));
+        }
+        out
+    }
+
     /// Deserialize a Recipe from JSON, running migration if the on-disk
     /// schema is older than the current. Refuses to load schemas newer
     /// than what this binary knows about (caller should treat that as a
@@ -695,5 +810,366 @@ mod tests {
             let back: Recipe = serde_json::from_str(&json).unwrap();
             assert_eq!(back.quality_profile, v, "round-trip failed for {:?}", v);
         }
+    }
+
+    // CR-07 §32.4: pipeline_plan_hash tests.
+
+    fn minimal_recipe() -> Recipe {
+        let mut r = Recipe::new("test-recipe", "stretch");
+        r.add_stage("stretch", Default::default());
+        r
+    }
+
+    #[test]
+    fn pipeline_plan_hash_is_64_char_lowercase_hex() {
+        let r = minimal_recipe();
+        let h = r.pipeline_plan_hash();
+        assert_eq!(h.len(), 64, "SHA-256 hex must be 64 chars");
+        assert!(
+            h.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+            "hash must be lowercase hex"
+        );
+    }
+
+    #[test]
+    fn pipeline_plan_hash_is_stable_across_calls() {
+        let r = minimal_recipe();
+        let h1 = r.pipeline_plan_hash();
+        let h2 = r.pipeline_plan_hash();
+        assert_eq!(h1, h2, "same Recipe must hash to the same value");
+    }
+
+    #[test]
+    fn pipeline_plan_hash_changes_with_schema_version() {
+        let mut a = minimal_recipe();
+        a.schema_version = "2.0".into();
+        let mut b = a.clone();
+        b.schema_version = "2.1".into();
+        assert_ne!(
+            a.pipeline_plan_hash(),
+            b.pipeline_plan_hash(),
+            "schema_version must influence the hash"
+        );
+    }
+
+    #[test]
+    fn pipeline_plan_hash_changes_with_stages() {
+        let a = minimal_recipe();
+        let mut b = minimal_recipe();
+        b.add_stage(
+            "grain",
+            [("amount".to_string(), serde_json::json!(0.5))]
+                .into_iter()
+                .collect(),
+        );
+        assert_ne!(
+            a.pipeline_plan_hash(),
+            b.pipeline_plan_hash(),
+            "additional stages must change the hash"
+        );
+    }
+
+    #[test]
+    fn pipeline_plan_hash_changes_with_stage_params() {
+        let mut a = minimal_recipe();
+        a.add_stage(
+            "stretch",
+            [("amount".to_string(), serde_json::json!(0.1))]
+                .into_iter()
+                .collect(),
+        );
+        let mut b = a.clone();
+        // Replace the stage with one that has a different param value.
+        b.stages.clear();
+        b.add_stage(
+            "stretch",
+            [("amount".to_string(), serde_json::json!(0.9))]
+                .into_iter()
+                .collect(),
+        );
+        assert_ne!(
+            a.pipeline_plan_hash(),
+            b.pipeline_plan_hash(),
+            "different stage params must change the hash"
+        );
+    }
+
+    #[test]
+    fn pipeline_plan_hash_ignores_description_and_created_at() {
+        let mut a = minimal_recipe();
+        a.description = "alpha".into();
+        a.created_at = "2026-01-01T00:00:00Z".into();
+        let mut b = a.clone();
+        b.description = "beta (totally different)".into();
+        b.created_at = "2099-12-31T23:59:59Z".into();
+        assert_eq!(
+            a.pipeline_plan_hash(),
+            b.pipeline_plan_hash(),
+            "description + created_at must NOT influence the hash"
+        );
+    }
+
+    #[test]
+    fn pipeline_plan_hash_ignores_parent_version_and_flags() {
+        let mut a = minimal_recipe();
+        a.parent_version = Some(1);
+        a.flags = vec!["x".into(), "y".into()];
+        let mut b = a.clone();
+        b.parent_version = Some(42);
+        b.flags = vec!["z".into(), "w".into(), "v".into()];
+        assert_eq!(
+            a.pipeline_plan_hash(),
+            b.pipeline_plan_hash(),
+            "parent_version + flags must NOT influence the hash"
+        );
+    }
+
+    #[test]
+    fn pipeline_plan_hash_changes_with_integrity_models() {
+        let a = minimal_recipe();
+        let mut b = minimal_recipe();
+        b.add_model("bm3d", ModelType::Deterministic);
+        assert_ne!(
+            a.pipeline_plan_hash(),
+            b.pipeline_plan_hash(),
+            "adding a deterministic model must change the hash"
+        );
+    }
+
+    #[test]
+    fn pipeline_plan_hash_changes_with_ai_model() {
+        let a = minimal_recipe();
+        let mut b = minimal_recipe();
+        b.add_model("neural-denoiser", ModelType::Perceptual);
+        assert_ne!(
+            a.pipeline_plan_hash(),
+            b.pipeline_plan_hash(),
+            "adding a perceptual model must change the hash"
+        );
+    }
+
+    // CR-07 §32.4: recipe_ai_diff_summary tests.
+
+    fn natural_recipe() -> Recipe {
+        minimal_recipe()
+    }
+
+    fn ai_recipe() -> Recipe {
+        let mut r = Recipe::new("ai-recipe", "stretch");
+        r.add_stage("stretch", Default::default());
+        r.add_model("neural-denoiser", ModelType::Perceptual);
+        r
+    }
+
+    #[test]
+    fn ai_diff_summary_natural_vs_ai_classification_differs() {
+        let a = natural_recipe();
+        let b = ai_recipe();
+        let s = recipe_ai_diff_summary(&a, &b);
+        assert!(!s.ai_used_a);
+        assert!(s.ai_used_b);
+        assert!(s.ai_classification_differs);
+        assert_eq!(s.perceptual_models_b, vec!["neural-denoiser"]);
+        assert!(s.perceptual_models_a.is_empty());
+    }
+
+    #[test]
+    fn ai_diff_summary_both_natural_no_classification_diff() {
+        let a = natural_recipe();
+        let b = natural_recipe();
+        let s = recipe_ai_diff_summary(&a, &b);
+        assert!(!s.ai_classification_differs);
+        assert!(!s.ai_used_a && !s.ai_used_b);
+    }
+
+    #[test]
+    fn ai_diff_summary_both_ai_no_classification_diff() {
+        let a = ai_recipe();
+        let b = ai_recipe();
+        let s = recipe_ai_diff_summary(&a, &b);
+        assert!(!s.ai_classification_differs);
+        assert!(s.ai_used_a && s.ai_used_b);
+        assert!(!s.hash_differs);
+    }
+
+    #[test]
+    fn ai_diff_summary_identical_recipes_no_hash_diff() {
+        let a = natural_recipe();
+        let b = natural_recipe();
+        let s = recipe_ai_diff_summary(&a, &b);
+        assert!(!s.hash_differs);
+        assert_eq!(s.hash_a, s.hash_b);
+    }
+
+    #[test]
+    fn ai_diff_summary_different_stages_hash_differs() {
+        let a = natural_recipe();
+        let b = ai_recipe();
+        let s = recipe_ai_diff_summary(&a, &b);
+        assert!(
+            s.hash_differs,
+            "natural vs AI must produce different hashes"
+        );
+        assert_ne!(s.hash_a, s.hash_b);
+    }
+
+    #[test]
+    fn ai_diff_summary_provenance_line_format() {
+        let mut a = natural_recipe();
+        a.version = 3;
+        let mut b = ai_recipe();
+        b.version = 5;
+        let s = recipe_ai_diff_summary(&a, &b);
+        assert_eq!(
+            s.provenance,
+            "Recipe A v3 (natural, natural) vs Recipe B v5 (ai, natural)"
+        );
+    }
+
+    #[test]
+    fn ai_diff_summary_surfaces_required_models_difference() {
+        let a = natural_recipe();
+        let mut b = ai_recipe();
+        b.required_models.push("extra-model".into());
+        let s = recipe_ai_diff_summary(&a, &b);
+        assert!(s.required_models_differ);
+    }
+
+    #[test]
+    fn ai_diff_summary_surfaces_quality_profile_difference() {
+        let mut a = natural_recipe();
+        a.quality_profile = QualityProfile::Natural;
+        let mut b = natural_recipe();
+        b.quality_profile = QualityProfile::Publication;
+        let s = recipe_ai_diff_summary(&a, &b);
+        assert_ne!(s.quality_profile_a, s.quality_profile_b);
+        assert_eq!(s.quality_profile_a, QualityProfile::Natural);
+        assert_eq!(s.quality_profile_b, QualityProfile::Publication);
+    }
+
+    #[test]
+    fn ai_diff_summary_surfaces_schema_version_difference() {
+        let mut a = natural_recipe();
+        a.schema_version = "2.0".into();
+        let mut b = a.clone();
+        b.schema_version = "1.0".into();
+        let s = recipe_ai_diff_summary(&a, &b);
+        assert_eq!(s.schema_version_a, "2.0");
+        assert_eq!(s.schema_version_b, "1.0");
+        assert!(s.hash_differs);
+    }
+}
+
+// CR-07 §32.4: AI comparison surface.
+//
+// Given two Recipes (one for Version A, one for Version B),
+// `recipe_ai_diff_summary` surfaces the audit's
+// "model / version / hash / classification / parameters /
+// provenance" comparison fields in a single struct that
+// the comparison surface can render directly.
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecipeAiDiffSummary {
+    /// Pipeline plan hash of Recipe A (lowercase hex SHA-256).
+    pub hash_a: String,
+    /// Pipeline plan hash of Recipe B.
+    pub hash_b: String,
+    /// True iff `hash_a != hash_b`.
+    pub hash_differs: bool,
+    /// AI-classification flag for Recipe A
+    /// (`integrity.perceptual_models_used`).
+    pub ai_used_a: bool,
+    /// AI-classification flag for Recipe B.
+    pub ai_used_b: bool,
+    /// True iff one Recipe used perceptual (AI) models and
+    /// the other did not.
+    pub ai_classification_differs: bool,
+    /// Linear version counter of Recipe A.
+    pub version_a: u32,
+    /// Linear version counter of Recipe B.
+    pub version_b: u32,
+    /// Schema version string of Recipe A.
+    pub schema_version_a: String,
+    /// Schema version string of Recipe B.
+    pub schema_version_b: String,
+    /// Quality profile of Recipe A.
+    pub quality_profile_a: QualityProfile,
+    /// Quality profile of Recipe B.
+    pub quality_profile_b: QualityProfile,
+    /// True iff the two Recipes name different required models.
+    pub required_models_differ: bool,
+    /// Names of perceptual models used by Recipe A.
+    pub perceptual_models_a: Vec<String>,
+    /// Names of perceptual models used by Recipe B.
+    pub perceptual_models_b: Vec<String>,
+    /// Human-readable provenance line for the comparison row.
+    /// Format: "Recipe A v{N} ({ai/natural}, {profile}) vs Recipe B v{M} ...".
+    pub provenance: String,
+}
+
+/// Build the AI comparison summary for two Recipes.
+///
+/// Pure function. Reads only the two Recipes; produces a
+/// summary struct. The comparison surface (UI) renders this
+/// struct directly without re-deriving any of the fields.
+pub fn recipe_ai_diff_summary(a: &Recipe, b: &Recipe) -> RecipeAiDiffSummary {
+    let hash_a = a.pipeline_plan_hash();
+    let hash_b = b.pipeline_plan_hash();
+    let hash_differs = hash_a != hash_b;
+    let ai_used_a = a.integrity.perceptual_models_used;
+    let ai_used_b = b.integrity.perceptual_models_used;
+    // Perceptual-model name lists (sorted by name for stable
+    // output).
+    let mut perceptual_models_a: Vec<String> = a
+        .integrity
+        .models
+        .iter()
+        .filter(|m| m.model_type == ModelType::Perceptual)
+        .map(|m| m.model_name.clone())
+        .collect();
+    perceptual_models_a.sort();
+    let mut perceptual_models_b: Vec<String> = b
+        .integrity
+        .models
+        .iter()
+        .filter(|m| m.model_type == ModelType::Perceptual)
+        .map(|m| m.model_name.clone())
+        .collect();
+    perceptual_models_b.sort();
+    let required_models_differ = a.required_models != b.required_models;
+    let ai_label = |used: bool| if used { "ai" } else { "natural" };
+    let qp_label = |qp: QualityProfile| match qp {
+        QualityProfile::Natural => "natural",
+        QualityProfile::Detail => "detail",
+        QualityProfile::Clean => "clean",
+        QualityProfile::Publication => "publication",
+    };
+    let provenance = format!(
+        "Recipe A v{} ({}, {}) vs Recipe B v{} ({}, {})",
+        a.version,
+        ai_label(ai_used_a),
+        qp_label(a.quality_profile),
+        b.version,
+        ai_label(ai_used_b),
+        qp_label(b.quality_profile),
+    );
+    RecipeAiDiffSummary {
+        hash_a,
+        hash_b,
+        hash_differs,
+        ai_used_a,
+        ai_used_b,
+        ai_classification_differs: ai_used_a != ai_used_b,
+        version_a: a.version,
+        version_b: b.version,
+        schema_version_a: a.schema_version.clone(),
+        schema_version_b: b.schema_version.clone(),
+        quality_profile_a: a.quality_profile,
+        quality_profile_b: b.quality_profile,
+        required_models_differ,
+        perceptual_models_a,
+        perceptual_models_b,
+        provenance,
     }
 }

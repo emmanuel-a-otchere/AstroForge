@@ -486,34 +486,55 @@ export + "Export comparison" composite PNG works.
 `cargo test --workspace` is exhaustive (766+ tests in `astroforge-core`
 + 30+ in integration tests). Slice §32.1 (PR #355) closed the "Metric validation" sub-row,
 slice §32.2 (PR #356) closes the "Visual regression" sub-row,
-and slice §32.3 (PR #357) closes the "Version integrity"
-sub-row by shipping 8 integration tests in
-`crates/astroforge-core/tests/version_integrity.rs` against
-the CR-07 ADR-07.4 ("Comparison Is Non-Destructive") contract.
+slice §32.3 (PR #357) closes the "Version integrity" sub-row,
+and slice §32.4 (PR #358) closes the "AI comparison" sub-row
+by shipping the audit's "model/version/hash/classification/
+parameters/provenance surfacing" surface as a pure-Rust
+`RecipeAiDiffSummary` struct + `recipe_ai_diff_summary()`
+function (in `crates/astroforge-core/src/recipe.rs`) backed
+by a content-addressed `Recipe::pipeline_plan_hash()` (SHA-256
+of pipeline-shape fields).
 
-The tests pin:
+The §32.4 slice pins:
 
-- **`compare_version_images`** (pure Rust delta-table function)
-  is deterministic + read-only by construction.
-- **`save_comparison_set`** doesn't touch `image_versions`,
-  `image_decisions`, or `decision_history` rows.
-- **`load_comparison_set`** doesn't touch any of those rows.
-- **`list_comparison_sets_for_project`** doesn't touch any of
-  those rows.
-- **`delete_comparison_set`** doesn't touch any of those rows.
-- **Full end-to-end**: stub 2 versions + decisions + history,
-  run save → load → list → delete, verify the version-side
-  tables are byte-equal across the entire lifecycle.
-- **Positive control**: pin that the `comparison_sets` table
-  DOES change across the lifecycle (guards against a test
-  suite that accidentally no-ops).
-- **Sibling-row isolation**: pin that comparison ops on a
-  (v-a, v-b) pair don't touch other versions in the same
-  project.
+- **`Recipe::pipeline_plan_hash()`** produces a 64-char
+  lowercase hex SHA-256 hash covering schema_version, name,
+  target_type, stages (with enabled flag + params),
+  required_models, integrity badge, version, branch, and
+  quality_profile. Deliberately EXCLUDES description,
+  created_at, parent_version, and flags (presentational /
+  lineage / annotation fields).
+- **`RecipeAiDiffSummary`** struct fields surface all six
+  audit sub-fields: `hash_a` / `hash_b` / `hash_differs`
+  (hash), `ai_used_a` / `ai_used_b` /
+  `ai_classification_differs` (model + classification),
+  `version_a` / `version_b` + `schema_version_a` /
+  `schema_version_b` (version), `quality_profile_a` /
+  `quality_profile_b` (classification detail),
+  `required_models_differ` + `perceptual_models_a` /
+  `perceptual_models_b` (parameters + model detail),
+  `provenance` (human-readable summary line).
+- **`recipe_ai_diff_summary(a, b)`** is a pure function
+  producing a `RecipeAiDiffSummary` for two Recipes. The
+  comparison surface (UI) renders this struct directly
+  without re-deriving any of the fields.
+
+The audit's "hash" line was a real gap. No
+`pipeline_plan_hash` function existed in the codebase before
+this slice. Adding it is feature work; the test surface
+alone could not close the "hash" sub-row. The slice ships
+both the function + its tests under one PR. Future slices
+may want to surface `pipeline_plan_hash` on the IPC wire so
+the comparison UI can display it; that's a UI-side change
+deferred to a follow-on.
+
+The audit's "parameters" line is satisfied transitively:
+different per-stage param values produce different
+`pipeline_plan_hash` values, and the comparison surface
+reports `hash_differs = true`. Per-stage params serialize
+into the hash via deterministic BTreeMap ordering.
 
 **Still open:**
-- AI comparison tests (model/version/hash/classification/parameters/
-  provenance surfacing).
 - Performance tests (4K/8K/16-bit/32-bit/multi-version/large-project/
   limited-RAM).
 
@@ -532,9 +553,8 @@ mutate `image_decisions` + `decision_history` (that's their
 job). They will be covered by a §33 ADR-side test (decision
 state transitions).
 
-These two remaining sub-rows will land as §32.4 (AI
-comparison) and §32.5 (perf tests) per the established
-sub-slice cadence.
+This remaining sub-row will land as §32.5 (perf tests) per
+the established sub-slice cadence.
 
 ## §33 ADRs — ✅ Shipped
 
@@ -591,13 +611,13 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **71** | **12** | **3** | **87** |
+| **Total** | **72** | **11** | **3** | **87** |
 
-**Coverage:** 82% shipped, 14% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 83% shipped, 13% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
-+ §32.3 version integrity).
++ §32.3 version integrity + §32.4 AI comparison).
 The scorecard now agrees with the section bodies.
 
 ## Bundle status (post-§26 audit refresh)
@@ -650,35 +670,30 @@ the B7 Perf work are the remaining scope:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§32.4 AI comparison tests** | Model / version / hash / classification / parameters / provenance surfacing. ~200-400 LOC. |
-| **2** | **§32.5 Perf tests** | 4K / 8K / 16-bit / multi-version / large-project / limited-RAM. ~200-400 LOC + new CI job. |
-| **3** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
-| **4** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
+| **1** | **§32.5 Perf tests** | 4K / 8K / 16-bit / multi-version / large-project / limited-RAM. ~200-400 LOC + new CI job. |
+| **2** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
+| **3** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
 
 §32.2..§32.5 are the four sub-slices of §32 that close B7 Perf;
 §29 is the larger B7 Perf foundation work; §8 SNR / regional
 noise / etc. are the last small row-closing slices.
 
-## First concrete slice (post-§32.3)
+## First concrete slice (post-§32.4)
 
-**§32.4 AI comparison tests** is the next §32 sub-slice:
-~200-400 LOC integration tests that pin the audit's
-"model/version/hash/classification/parameters/provenance
-surfacing" line by:
+**§32.5 Perf tests** is the next §32 sub-slice (and the
+final §32 sub-slice): ~200-400 LOC integration tests
+covering 4K / 8K / 16-bit / 32-bit / multi-version /
+large-project / limited-RAM scenarios, plus a new CI job
+that runs them on the standard GitHub Actions runners
+(ubuntu-latest + macos-latest + windows-latest). The test
+surface is pure Rust; the perf metrics (time, allocations)
+are recorded via the `criterion` micro-benchmark harness
+or a simple `std::time::Instant`-based wall-clock wrapper.
 
-- Building two synthetic recipes with distinct
-  `perceptual_models_used` flags and `pipeline_plan_hash`
-  values.
-- Loading both versions' metrics snapshots + recipes via
-  the existing `get_version_metric_snapshot` and
-  `recipe_get_for_image_version` IPC paths.
-- Asserting the comparison surface (delta table rows +
-  AI-used chip state) reflects each version's AI recipe
-  correctly.
-
-The test surface mirrors §32.1's metric-validation
-pattern: pure Rust integration tests under
-`crates/astroforge-core/tests/`.
+The §32 series is the B7 Perf bundle's test foundation.
+After all five §32 sub-slices ship, the §29 Performance
+foundation work (streaming/cached diff/GPU acceleration)
+closes B7.
 
 ## First concrete slice (post-§24)
 

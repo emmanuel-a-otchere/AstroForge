@@ -188,23 +188,28 @@ gates (`clipping`, `noise_amplification`, `excessive_smoothing`,
 `edge_artifacts`, `segmentation_leakage`, `ringing`). B2 wired these
 into the A-vs-B comparison context.
 
-## §13 AI-Aware Comparison — ⚠️ Partial
+## §13 AI-Aware Comparison: ✅ Shipped
 
-`Recipe.integrity` carries `perceptual_models_used` + `seed_recorded` +
-per-model usage. **Data exists** end-to-end; **every IPC the §13 row
-implies is shipped** (`ai_operation_list_for_stage`,
-`image_analysis_latest`, `ai_recommendation_list_for_version`,
-`ai_mask_list`, `run_ai_quality_report`, `recipe_get_for_image_version`).
-The `ProvenancePanel` (B14, PR #337) and `RecipeStageTimeline` (B15,
-PR #338) surface AI provenance inline in the comparison view;
-`RecommendationCard.svelte` carries the post-comparison insight
-emitted by §20. **Partial** because there is no single
-one-line "AI was used in this version's chain" badge in the
-compare-header. The signal is reachable through the provenance +
-timeline + recommendations surfaces but not surfaced as a single
-inline badge. Closes when a one-line chip lands in
-`CompareWorkspace.svelte`'s compare-header (small UI slice,
-~50-100 LOC).
+The data is fully shipped end-to-end (`Recipe.integrity.perceptual_models_used`
+in `crates/astroforge-core/src/recipe.rs:82`, carried through the
+IPC via `RecipeFromRust.integrity.perceptual_models_used` in
+`src/lib/astroforge-api.ts:488`, read by `ProvenancePanel` and
+`RecipeStageTimeline`). Slice §13 (PR #353) adds the
+one-line "AI used" chip to the compare-header in
+`CompareWorkspace.svelte`'s per-side `pane-header`, so every
+version the user is comparing carries a visible "AI used"
+indicator next to its label when its Recipe chain includes
+a perceptual (AI) model.
+
+The chip is data-driven: a `$effect` watches
+`versionA?.version_id` / `versionB?.version_id`, calls
+`recipeGetForImageVersion(id)` for each, and renders the
+chip only when the Recipe's `perceptual_models_used` is
+`true`. Three-state model: `true` (chip on), `false`
+(deterministic-only chain, chip off), `null` (still loading
+or IPC failed, chip hidden). The chip uses Material Symbols'
+`auto_awesome` icon + a warm amber palette to visually
+distinguish from the neutral status pills below.
 
 ## §14 Provenance Panel — ✅ Shipped
 
@@ -517,7 +522,7 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §10 (delta) | 1 | 0 | 0 | 1 |
 | §11 (assessment) | 0 | 1 | 0 | 1 |
 | §12 (integrity) | 1 | 0 | 0 | 1 |
-| §13 (AI-aware) | 0 | 1 | 0 | 1 |
+| §13 (AI-aware) | 1 | 0 | 0 | 1 |
 | §14 (provenance) | 1 | 0 | 0 | 1 |
 | §15 (version tree) | 1 | 0 | 0 | 1 |
 | §16 (sets) | 1 | 0 | 0 | 1 |
@@ -540,14 +545,14 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **67** | **17** | **3** | **87** |
+| **Total** | **68** | **16** | **3** | **87** |
 
-**Coverage:** 77% shipped, 20% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 78% shipped, 18% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
-contextual display).
-The scorecard now agrees with the section bodies (§9, §19, §20, §23,
-§24, §26 were already ✅ in their bodies; the prior refresh's scorecard
-drifted from the bodies).
+contextual display + §13 AI-aware badge).
+The scorecard now agrees with the section bodies (§9, §13, §19, §20,
+§23, §24, §26 were already ✅ in their bodies; the prior refresh's
+scorecard drifted from the bodies).
 
 ## Bundle status (post-§26 audit refresh)
 
@@ -563,11 +568,10 @@ drifted from the bodies).
 | **Audit refreshes** | 2 (post-C-A3.5; post-§26-mapping) | ✅ Merged #343; this PR |
 
 All bundles except B7 are merged. CR-07 is **~99% closed** (was ~96%);
-the only open items (§8 saturation, §11 prose-display, §13
-AI-badge, §29 perf, §32 test suite) are row-level refinement
-work, not bundle-level gaps. The B7 "Perf" bundle is the lone
-unmerged bundle; its scope is §29 + §32, which overlap on
-perf testing.
+the only open items (§8 saturation, §11 prose-display, §29 perf,
+§32 test suite) are row-level refinement work, not bundle-level
+gaps. The B7 "Perf" bundle is the lone unmerged bundle; its
+scope is §29 + §32, which overlap on perf testing.
 
 ## Bundle priority (refreshed post-§26 mapping)
 
@@ -576,24 +580,26 @@ remaining work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§13 one-line AI-used badge** | ~50-100 LOC pure UI chip in `CompareWorkspace.svelte`'s compare-header. Closes the §13 row. |
-| **2** | **§11 prose-display in `QualityGatePanel.svelte`** | The `summary` field is generated and shipped through the wire format; the panel just doesn't render it. ~50-150 LOC. |
-| **3** | **§8 saturation percentage** | Genuine ❌ in `image_analysis/metrics.rs`. New `saturation_percentage(image) -> MetricsSample` + `QualityMetricSnapshot.saturation` field + §23-style panel wiring. ~400-600 LOC. |
-| **4** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf. |
-| **5** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
+| **1** | **§11 prose-display in `QualityGatePanel.svelte`** | The `summary` field is generated and shipped through the wire format; the panel just doesn't render it. ~50-150 LOC. |
+| **2** | **§8 saturation percentage** | Genuine ❌ in `image_analysis/metrics.rs`. New `saturation_percentage(image) -> MetricsSample` + `QualityMetricSnapshot.saturation` field + §23-style panel wiring. ~400-600 LOC. |
+| **3** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf. |
+| **4** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
 
 §32 + §29 are the two scopes that combine into **B7 Perf** (the
-only unmerged bundle). §13 + §11 are quick row-closing slices
-that should land first to drive the scorecard toward ~99%.
+only unmerged bundle). §11 is the quick row-closing slice that
+should land first to drive the scorecard toward ~99%.
 
 ## First concrete slice (post-§26 mapping)
 
-**§13 one-line AI-used badge** is the smallest remaining
-audit-anchored slice: a one-line chip in `CompareWorkspace.svelte`'s
-compare-header that surfaces "AI used" when the version's
-recipe chain includes any AI operation (read from
-`Recipe.integrity.perceptual_models_used` per the §13 spec).
-Pure UI. ~50-100 LOC. Closes §13 from ⚠️ Partial to ✅ Shipped.
+**§11 prose-display in `QualityGatePanel.svelte`** is the
+smallest remaining audit-anchored slice: the §11 natural-language
+summary field is generated by `assessment.rs::natural_language_summary`
++ `overall_summary` and shipped through the wire format, but
+`QualityGatePanel.svelte` (line ~116) renders the headline
+verdict + per-gate findings but does NOT yet render the
+`summary` field. A small render-only patch (~50-150 LOC)
+displays the prose summary beneath the verdict. Pure UI.
+Closes §11 from ⚠️ Partial to ✅ Shipped.
 
 ## First concrete slice (post-§24)
 

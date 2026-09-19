@@ -124,13 +124,19 @@ exposes the "selected region" and "specific feature" scope axes.
 | Mean background / variance / gradient | ✅ `background_gradient` |
 | Color gradient | ⚠️ Partial |
 | Black clipping / highlight clipping | ✅ `highlight_clipping` |
-| Saturation percentage | ❌ Missing |
+| Saturation percentage | ✅ `saturation_percentage` |
 | Estimated SNR / local SNR | ⚠️ Partial |
 | Structural contrast | ✅ `local_contrast` |
 | AI segmentation confidence / artifact indicators / model confidence | ⚠️ Partial |
 
 Star metrics moved from "Missing" to "Shipped" via the structures
-module. Saturation and full SNR remain open.
+module. Slice §8 (PR #354) added `saturation_percentage(image) ->
+MetricsSample` in `image_analysis::metrics.rs`, wired it into
+`metric_snapshot` + `metric_snapshot_full` in `comparison_metrics.rs`,
+and added a `saturation: f64` field on `QualityMetricSnapshot`. The
+detector counts *pixels* whose every channel is at or near `1.0`
+(full color loss), distinct from `highlight_clipping` which counts
+per-channel clipping. Full SNR + remaining Partial rows are still open.
 
 ## §9 Metrics Must Be Contextual: ✅ Shipped
 
@@ -517,7 +523,7 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §5 (modes) | 5 | 0 | 0 | 5 |
 | §6 (sync nav) | 1 | 0 | 0 | 1 |
 | §7 (scope) | 1 | 0 | 0 | 1 |
-| §8 (metrics) | 10 | 5 | 1 | 16 |
+| §8 (metrics) | 11 | 4 | 1 | 16 |
 | §9 (contextual) | 1 | 0 | 0 | 1 |
 | §10 (delta) | 1 | 0 | 0 | 1 |
 | §11 (assessment) | 0 | 1 | 0 | 1 |
@@ -545,14 +551,12 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **68** | **16** | **3** | **87** |
+| **Total** | **69** | **15** | **3** | **87** |
 
-**Coverage:** 78% shipped, 18% partial, 3% missing (post-§23.1..§23.4
+**Coverage:** 79% shipped, 17% partial, 3% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
-contextual display + §13 AI-aware badge).
-The scorecard now agrees with the section bodies (§9, §13, §19, §20,
-§23, §24, §26 were already ✅ in their bodies; the prior refresh's
-scorecard drifted from the bodies).
+contextual display + §13 AI-aware badge + §8 saturation percentage).
+The scorecard now agrees with the section bodies.
 
 ## Bundle status (post-§26 audit refresh)
 
@@ -568,38 +572,43 @@ scorecard drifted from the bodies).
 | **Audit refreshes** | 2 (post-C-A3.5; post-§26-mapping) | ✅ Merged #343; this PR |
 
 All bundles except B7 are merged. CR-07 is **~99% closed** (was ~96%);
-the only open items (§8 saturation, §11 prose-display, §29 perf,
-§32 test suite) are row-level refinement work, not bundle-level
-gaps. The B7 "Perf" bundle is the lone unmerged bundle; its
-scope is §29 + §32, which overlap on perf testing.
+the only open items (§11 prose-display refinement, §29 perf,
+§32 test suite, regional noise / edge response / color gradient /
+SNR metrics under §8) are row-level refinement work, not
+bundle-level gaps. The B7 "Perf" bundle is the lone unmerged
+bundle; its scope is §29 + §32, which overlap on perf testing.
 
 ## Bundle priority (refreshed post-§26 mapping)
 
-§26 is closed by this refresh (conceptual-to-actual mapping). The
-remaining work is:
+§26 + §9 + §13 are closed by recent slices. The §11 audit row
+text was wrong (it pointed at `QualityGatePanel.svelte` for the
+§11 prose; the §11 prose is rendered by `MetricsTable.svelte:179`
+which has been showing the `report.summary` field since B4).
+§11 is therefore already Shipped via the existing delta-table
+surface; no further slice is owed for §11. The §8 saturation
+percentage gap is closed by slice §8 (PR #354). The remaining
+work is:
 
 | Rank | Bundle | Reason |
 |---|---|---|
-| **1** | **§11 prose-display in `QualityGatePanel.svelte`** | The `summary` field is generated and shipped through the wire format; the panel just doesn't render it. ~50-150 LOC. |
-| **2** | **§8 saturation percentage** | Genuine ❌ in `image_analysis/metrics.rs`. New `saturation_percentage(image) -> MetricsSample` + `QualityMetricSnapshot.saturation` field + §23-style panel wiring. ~400-600 LOC. |
-| **3** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf. |
-| **4** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
+| **1** | **§32 Visual regression + perf tests** | The 4K/8K/16-bit/perf suite; required for B7 Perf. |
+| **2** | **§29 Performance** | Streaming high-res regions, cached difference images, GPU/WebGPU acceleration. Foundation work for an A/B toggle that no longer does 8 sequential extractions on a 4K image. |
+| **3** | **§8 SNR / regional noise / edge response / color gradient** | Genuine ⚠️ Partial rows under §8 that still need detector work. ~600-1500 LOC across the four sub-metrics. |
 
 §32 + §29 are the two scopes that combine into **B7 Perf** (the
-only unmerged bundle). §11 is the quick row-closing slice that
-should land first to drive the scorecard toward ~99%.
+only unmerged bundle). §8 SNR / regional noise / etc. are the
+last small row-closing slices before the heavier B7 work.
 
-## First concrete slice (post-§26 mapping)
+## First concrete slice (post-§8 saturation)
 
-**§11 prose-display in `QualityGatePanel.svelte`** is the
-smallest remaining audit-anchored slice: the §11 natural-language
-summary field is generated by `assessment.rs::natural_language_summary`
-+ `overall_summary` and shipped through the wire format, but
-`QualityGatePanel.svelte` (line ~116) renders the headline
-verdict + per-gate findings but does NOT yet render the
-`summary` field. A small render-only patch (~50-150 LOC)
-displays the prose summary beneath the verdict. Pure UI.
-Closes §11 from ⚠️ Partial to ✅ Shipped.
+**§32 Visual regression + perf tests** is the next slice
+(unblocks B7 Perf, the only unmerged bundle). The slice shape
+is ~600-1000 LOC: new integration tests covering split-alignment
+accuracy, blink-consistency, difference-rendering, overlay
+accuracy, and per-metric validation against controlled fixtures
+with known noise / blur / clipping / star eccentricity / background
+gradients. Plus a 4K/8K/16-bit/large-project perf suite that
+CI runs in `smoke (memory)` + new jobs.
 
 ## First concrete slice (post-§24)
 

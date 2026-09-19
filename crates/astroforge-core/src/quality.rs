@@ -157,6 +157,16 @@ pub struct QualityMetricSnapshot {
     pub fwhm: f64,
     pub star_count: u32,
     pub background_gradient: f64,
+    /// CR-07 §8: fraction of pixels where every channel is
+    /// at or near `1.0` (full color loss). Distinct from
+    /// `highlight_clipping` per-channel clipping; this counts
+    /// pixels whose R, G, and B are all saturated. `0.0`
+    /// when no pixel is fully saturated; `1.0` when every
+    /// pixel is fully saturated. Stored as a fraction in
+    /// `[0, 1]` (not a percentage); the UI converts to `%`
+    /// for display.
+    #[serde(default)]
+    pub saturation: f64,
 }
 
 impl QualityMetricSnapshot {
@@ -190,6 +200,13 @@ pub fn compute_metrics(image: &F32Image) -> QualityMetricSnapshot {
     let fwhm = estimate_fwhm(image, mean, stddev);
     let star_count = count_stars(image, mean, stddev);
     let background_gradient = estimate_background_gradient(image);
+    // CR-07 §8: channel saturation percentage. Distinct from
+    // per-channel highlight clipping: this counts pixels
+    // whose every channel is at or near 1.0 (full color
+    // loss). Lives on the snapshot so consumers reading
+    // `metric_snapshot_full` via `get_version_metric_snapshot`
+    // see it alongside the other detector-backed keys.
+    let saturation = crate::image_analysis::metrics::saturation_percentage(image).value;
 
     QualityMetricSnapshot {
         width,
@@ -201,6 +218,7 @@ pub fn compute_metrics(image: &F32Image) -> QualityMetricSnapshot {
         fwhm,
         star_count,
         background_gradient,
+        saturation,
     }
 }
 

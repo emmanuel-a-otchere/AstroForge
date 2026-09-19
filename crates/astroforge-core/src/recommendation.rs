@@ -392,6 +392,10 @@ mod tests {
             fwhm: 0.0,
             star_count,
             background_gradient: bg_grad,
+            // CR-07 §8: test fixture doesn't go through the
+            // detector path; saturation defaults to 0 for
+            // a uniform-noise 16×16 fixture.
+            saturation: 0.0,
         }
     }
 

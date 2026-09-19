@@ -264,6 +264,77 @@ pub fn highlight_clipping(image: &F32Image) -> MetricsSample {
     }
 }
 
+/// CR-07 §8: Channel saturation percentage. Distinct from
+/// `highlight_clipping`: that detector counts *channels* whose
+/// value is at or near `1.0` (per-channel highlight clip).
+/// This detector counts *pixels* whose R, G, AND B channels are
+/// all at or near `1.0` (a fully-saturated pixel where color
+/// information is lost across all three channels).
+///
+/// Astrophoto context: when bright stars or nebula cores saturate
+/// the detector, all three channels read `1.0` and the
+/// resulting pixel carries no color information: it just reads
+/// as white. This is a different signal from "some channel is
+/// clipped" (which can still preserve color via the unclipped
+/// channels). A high fraction of fully-saturated pixels means
+/// the highlights are losing color regardless of how the
+/// per-channel highlights read.
+///
+/// Returns the fraction in `[0, 1]`. For monochrome / single-channel
+/// images the value collapses to the same numerator/denominator
+/// relationship as highlight_clipping (since "all channels"
+/// is just "the one channel"); the detector gracefully degrades
+/// to the per-pixel highlight-clipping fraction. Multi-channel
+/// non-RGB images (e.g. narrowband Ha+OIII+SII+L) report the
+/// fraction of *all* channels simultaneously saturated, which
+/// for those workflows is a meaningful signal (all four bands
+/// at `1.0`).
+pub fn saturation_percentage(image: &F32Image) -> MetricsSample {
+    let (w, h, c) = (image.width(), image.height(), image.channels());
+    let total_pixels = (w * h) as f64;
+    if total_pixels == 0.0 || c == 0 {
+        return MetricsSample {
+            value: 0.0,
+            label: Some("saturation percentage".into()),
+            evidence_region: None,
+            confidence: Confidence::Low,
+        };
+    }
+    // The F32Image layout is (channels, height, width) in
+    // ndarray's C-order. Iteration order is `indexed_iter()`
+    // over `Array3<f32>`, which visits ch=0's full block first
+    // (all h*w pixels in row-major x-fastest order), then ch=1,
+    // etc. Per-channel, every (y, x) is visited once.
+    //
+    // To detect "all C channels saturated at the same (y, x)",
+    // we walk per-channel and record whether that channel's
+    // sample at each pixel is saturated; the per-pixel AND
+    // over all channels is the answer. The first channel
+    // initialises the accumulator; subsequent channels keep
+    // a pixel `true` only if every prior channel also had it
+    // saturated.
+    let mut saturated_count = vec![true; w * h];
+    for ch_idx in 0..c {
+        for y in 0..h {
+            for x in 0..w {
+                let v = image[(ch_idx, y, x)] as f64;
+                let pixel_idx = y * w + x;
+                if v < 0.999 {
+                    saturated_count[pixel_idx] = false;
+                }
+            }
+        }
+    }
+    let saturated = saturated_count.iter().filter(|&&s| s).count();
+    let value = saturated as f64 / total_pixels;
+    MetricsSample {
+        value,
+        label: Some("saturation percentage".into()),
+        evidence_region: Some([0, 0, w as u32, h as u32]),
+        confidence: Confidence::Medium,
+    }
+}
+
 /// CR-06 §5.1 — Chromatic noise: difference between channels.
 /// Returns the per-channel standard deviation of the
 /// channel-mean ratios. A grayscale image returns 0.0; a
@@ -442,6 +513,130 @@ mod tests {
         }
         let sample = highlight_clipping(&img);
         assert!(sample.value.abs() < 1e-6);
+    }
+
+    // CR-07 §8: saturation_percentage detector. Distinct
+    // from highlight_clipping: counts pixels where ALL
+    // channels are saturated, not just any single channel.
+
+    /// 32x32 RGB image with every pixel fully saturated on
+    /// all three channels: 100% saturation.
+    fn fully_saturated_rgb(w: usize, h: usize) -> F32Image {
+        let mut img = F32Image::new(w, h, 3);
+        for v in img.iter_mut() {
+            *v = 1.0;
+        }
+        img
+    }
+
+    /// 32x32 RGB image with no channel near saturation:
+    /// 0% saturation.
+    fn safe_rgb_image(w: usize, h: usize) -> F32Image {
+        let mut img = F32Image::new(w, h, 3);
+        for v in img.iter_mut() {
+            *v = 0.5;
+        }
+        img
+    }
+
+    /// 32x32 RGB image where only the R channel is
+    /// saturated (G and B at 0.5). Should report 0%
+    /// saturation because not all channels are saturated
+    /// on the same pixel.
+    fn red_only_saturated_rgb(w: usize, h: usize) -> F32Image {
+        let mut img = F32Image::new(w, h, 3);
+        // The F32Image iterates (channels, height, width) in
+        // C-order. For 3 channels at w*h pixels, the first
+        // w*h values are R, the next are G, the next are B.
+        let total = w * h;
+        for (i, v) in img.iter_mut().enumerate() {
+            if i < total {
+                *v = 1.0; // R saturated
+            } else {
+                *v = 0.5; // G, B safe
+            }
+        }
+        img
+    }
+
+    #[test]
+    fn saturation_percentage_is_full_for_fully_saturated_rgb() {
+        let img = fully_saturated_rgb(32, 32);
+        let sample = saturation_percentage(&img);
+        assert!(
+            (sample.value - 1.0).abs() < 1e-6,
+            "expected 100% saturation, got {}",
+            sample.value
+        );
+    }
+
+    #[test]
+    fn saturation_percentage_is_zero_for_safe_rgb() {
+        let img = safe_rgb_image(32, 32);
+        let sample = saturation_percentage(&img);
+        assert!(
+            sample.value.abs() < 1e-6,
+            "expected 0% saturation, got {}",
+            sample.value
+        );
+    }
+
+    #[test]
+    fn saturation_percentage_is_zero_when_only_one_channel_is_saturated() {
+        // R is fully saturated, G and B are at 0.5.
+        // Per-channel highlight_clipping would report
+        // (1/3) of channels clipped; saturation_percentage
+        // should report 0% because no pixel has all
+        // three channels at 1.0.
+        let img = red_only_saturated_rgb(32, 32);
+        let sample = saturation_percentage(&img);
+        assert!(
+            sample.value.abs() < 1e-6,
+            "expected 0% saturation (red-only clip is not full saturation), got {}",
+            sample.value
+        );
+    }
+
+    #[test]
+    fn saturation_percentage_distinguishes_from_highlight_clipping() {
+        // Build a 32x32 RGB image with only R clipped.
+        // highlight_clipping sees 1/3 of channels clipped
+        // (value ≈ 0.333). saturation_percentage sees 0
+        // pixels with all channels saturated (value = 0).
+        let img = red_only_saturated_rgb(32, 32);
+        let clip = highlight_clipping(&img);
+        let sat = saturation_percentage(&img);
+        assert!(
+            clip.value > 0.3 && clip.value < 0.4,
+            "highlight_clipping should report ~1/3, got {}",
+            clip.value
+        );
+        assert!(
+            sat.value.abs() < 1e-6,
+            "saturation_percentage should be 0 (red-only clip), got {}",
+            sat.value
+        );
+    }
+
+    #[test]
+    fn saturation_percentage_handles_mixed_pixels() {
+        // 16x16 RGB image: top half (8 rows × 16 px) fully
+        // saturated on all channels, bottom half safe.
+        // Expected: 50% of pixels saturated.
+        let mut img = F32Image::new(16, 16, 3);
+        for ((_ch, y, _x), v) in img.indexed_iter_mut() {
+            if y < 8 {
+                *v = 1.0;
+            } else {
+                *v = 0.5;
+            }
+        }
+        let sample = saturation_percentage(&img);
+        assert!(
+            (sample.value - 0.5).abs() < 1e-6,
+            "expected 50% saturation, got {}",
+            sample.value
+        );
     }
 
     #[test]

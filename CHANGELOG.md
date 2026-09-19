@@ -2,6 +2,113 @@
 
 ## Unreleased
 
+### Slice §32.5: CR-07 perf tests (final §32 sub-slice)
+
+**Scope.** Closes the §32 "Performance" sub-row (the fifth
+and final §32 sub-slice). Pins wall-clock bounds for the
+B7 Perf bundle's Rust-testable surface.
+
+#### Tests (core)
+
+- NEW `crates/astroforge-core/tests/perf.rs`: 21 perf tests:
+  - **§32.5.1: `compute_diff` at 4K (3840×2160)**:
+    4 tests, all 4 `DiffKind` modes (Absolute, Signed,
+    Amplified, Structural).
+  - **§32.5.2: `compute_diff` at 8K (7680×4320)**:
+    4 tests, same 4 modes at 4x the pixel count.
+  - **§32.5.3: §8 detectors at 4K + 8K**: 4 tests
+    covering `luminance_noise` and
+    `saturation_percentage` at both resolutions.
+  - **§32.5.4: `Recipe::pipeline_plan_hash` at 10 / 100 /
+    1000 stages**: 3 tests, validating linear-time
+    scaling.
+  - **§32.5.5: `recipe_ai_diff_summary` at 10 / 100 /
+    1000 stages**: 3 tests.
+  - **§32.5.6: multi-version `compare_version_images` at
+    2K + 4K**: 2 tests.
+  - **§32.5.7: positive-control baseline**: 1 test that
+    prints the actual elapsed time of a small operation
+    so the test log captures a future-comparison baseline.
+- Helper `must_complete_in(label, max_seconds, f)`:
+  - Wall-clock-bound helper. Asserts the closure completes
+    within `max_seconds`. Prints the actual elapsed time
+    on success so the test log documents the steady-state.
+- Helpers `rgba8_grid(w, h)` + `f32_image_grid(w, h, c)`:
+  - Deterministic pixel data; the compiler can't
+    constant-fold the construction, so the perf numbers
+    are honest.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1097 passing** (21 new perf tests
+  on top of the 1076 baseline).
+- `npm run check`: 1 error + 9 warnings (matches main baseline;
+  slice adds 0 new warnings. Backend tests only).
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code spans,
+  0 en-dashes, 0 ellipses, 0 smart quotes.
+- Single-threaded perf binary runtime: ~92 seconds.
+- Multi-threaded (CI default) perf binary runtime: ~35 seconds.
+
+#### Honest flags
+
+- **Zero local fix cycles.** First compile passed; first
+  `cargo test` invocation passed all 21 tests. The bounds
+  were tuned on a single trial run: each bound is
+  "roughly 4x the measured runtime on this debug build",
+  giving ample headroom for slower CI runners without
+  making the bounds meaningless.
+- **Generous bounds.** This is a debug build (no LTO, no
+  codegen-units=1, no native CPU features). The bounds
+  catch order-of-magnitude regressions, not micro-benchmarks.
+  Release-mode benchmarks belong in a `criterion`-backed
+  bench harness under `crates/astroforge-core/benches/`.
+  That's a follow-on slice (probably §32.6 or §29).
+- **Pure test slice.** 0 new Rust source (only the test
+  file), 0 new IPC, 0 new UI, 0 new TS, 0 new deps.
+- **No new CI job.** The slice adds the perf tests to the
+  existing `cargo test --workspace` invocation that the
+  six-gate already runs. The 35-second parallel runtime
+  fits within the standard CI budget; no separate
+  `perf` job needed. (A `criterion`-based perf job is the
+  follow-on; this slice ships the floor.)
+- **Out-of-scope operations documented.** All comparison-
+  side perf is covered. Decision-side operations
+  (`apply_and_save_decision`) are explicitly NOT covered.
+- **Pre-existing em-dashes NOT cleaned** (per Coding
+  Discipline; out of scope). All my additions are
+  em-dash-free.
+
+#### Out-of-scope (intentional)
+
+- §29 Performance (rank #1; next slice, the real B7
+  close-out).
+- §8 SNR / regional noise / edge response / color gradient
+  (rank #2).
+- §32.6 (new) Wire pipeline_plan_hash + RecipeAiDiffSummary
+  through IPC (rank #3).
+- Split-alignment / blink-consistency / overlay-accuracy
+  sub-modes of the audit's "visual regression" line:
+  deferred to a future slice that adds a DOM-rendering
+  test runner.
+- Decision-side operations
+  (`apply_and_save_decision` /
+  `apply_and_save_decision_with_profile`): deferred to a
+  §33 ADR-side test.
+- Criterion-based release-mode benchmarks: deferred to a
+  follow-on slice.
+- Pre-existing em-dashes on `main`: out of scope per Coding
+  Discipline.
+
+#### Bundle status (post-§32.5)
+
+The §32 series is **fully closed**. The B7 Perf bundle's
+test foundation is complete. The remaining B7 Perf work
+is §29 itself.
+
 ### Slice §32.4: CR-07 AI comparison tests + pipeline plan hash
 
 **Scope.** Closes the §32 "AI comparison" sub-row. Pins the

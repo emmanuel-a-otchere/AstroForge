@@ -2,6 +2,118 @@
 
 ## Unreleased
 
+### Slice §29.2a: CR-07 wire DiffCache through IPC
+
+**Scope.** Continues the §29 Performance work by exposing
+the Rust `DiffCache` (shipped in §29.2) through Tauri IPC
++ a Svelte API wrapper. The slice wires 5 new IPC
+commands so a future UI consumer can use the cache
+without touching the Rust internals.
+
+#### New public API
+
+- `src-tauri/src/main.rs`: adds `struct DiffCacheState(Mutex<DiffCache>)`
+  + 5 Tauri commands:
+  - `diff_cache_get_or_compute(version_a_id, version_b_id,
+    mode, gain, width, image_a, image_b) -> Result<Vec<u8>, CommandError>`:
+    cache lookup keyed by (version_a_id, version_b_id, mode, gain).
+    On miss, computes via `compute_diff` + stores. Mode is a
+    kebab-case string ("absolute" / "signed" / "amplified" /
+    "structural").
+  - `diff_cache_invalidate_version(version_id) -> Result<usize, CommandError>`:
+    drops every cache entry where the given version id appears
+    on either side of the pair. Returns the number of entries
+    dropped. Used when a version's primary artifact (TIFF)
+    changes.
+  - `diff_cache_clear() -> Result<(), CommandError>`: drops every
+    entry. Stats counters are preserved.
+  - `diff_cache_stats() -> Result<DiffCacheStats, CommandError>`:
+    snapshot of hits + misses counters.
+  - `diff_cache_len() -> Result<usize, CommandError>`: current
+    cache size.
+- `src-tauri/src/main.rs`: registers the `DiffCacheState` in
+  the Tauri state container alongside the existing
+  `GalleryState` / `SessionState` / `RecipeState`.
+- `src/lib/astroforge-api.ts`: adds 5 invoke wrappers +
+  `DiffCacheStatsFromRust` interface.
+
+#### Design decisions
+
+1. **DiffCache is global to the app session.** Lives for
+   the lifetime of the Tauri runtime; no DB backing.
+   The `Mutex<DiffCache>` wrapper serializes concurrent
+   IPC calls. `get_or_compute` returns `&Vec<u8>` from
+   the cache; the IPC handler clones to release the lock
+   before returning.
+
+2. **No UI consumer shipped.** The slice wires the IPC
+   + TS wrappers only. A follow-on UI slice (§29.3b.4
+   or folded into the §29.3b production rollout) will
+   render the cache + use the get-or-compute path.
+
+3. **Mode is a kebab-case string** at the IPC boundary.
+   Matches the existing `DiffKind` serde rename_all =
+   "kebab-case" contract. The TS interface uses a
+   strict string union for type safety.
+
+4. **Pure server-side state.** The cache lives entirely
+   in Rust. The JS layer is a thin pass-through. No
+   client-side caching, no sync concerns.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: **1137 passing** (unchanged;
+  slice adds 0 new tests; the existing 21 §29.2
+  diff_cache tests + 21 §32.4 recipe tests already
+  cover the underlying Rust functions).
+- `npm run test` (vitest): **43 passing** (unchanged).
+- `npm run check`: 1 error + 9 warnings (matches main
+  baseline; the 1 error is pre-existing in a Svelte
+  file. Slice adds 0 new warnings. Backend tests only.)
+- `npm run build`: clean.
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: green.
+- Em-dash sweep on additions: 0 em-dashes outside code
+  spans, 0 en-dashes, 0 ellipses, 0 smart quotes.
+
+#### Honest flags
+
+- **No UI consumer.** The slice wires the IPC + TS
+  wrappers only. A follow-on UI slice (§29.3b.4 or
+  folded into the production rollout) will render the
+  cache.
+
+- **No new tests.** The underlying Rust `DiffCache` is
+  covered by 21 §29.2 tests. The IPC wrapper is thin
+  enough that the existing tests + a passing build are
+  sufficient evidence.
+
+- **`diff_cache_get_or_compute` returns the full buffer**
+  on every call (cached or fresh). For 4K RGBA8 images
+  this is ~33 MB per call. The Tauri IPC layer serializes
+  Vec<u8> as a JSON number array; future work could use
+  Tauri's binary IPC channel for efficiency. Not in
+  scope for this slice.
+
+- **Pre-existing em-dashes NOT cleaned.** Per Coding
+  Discipline, out of scope.
+
+#### Out-of-scope (intentional)
+
+- §29.3b.3 IPC layer wiring (remaining, GPU spatial
+  detector half; rank #1; next slice).
+- §29.3b.4 UI integration + retire CPU fallback
+  (rank #2).
+- §8 SNR / regional noise / edge response / color
+  gradient (rank #3).
+- §29.3b.1a WGSL for `background_gradient`.
+- §29.3b.2a Browser-based GPU behavioural tests.
+- §29.4 (optional) Tile-stripe streaming: deferred.
+- Binary IPC channel for `diff_cache_get_or_compute`:
+  deferred.
+- Pre-existing em-dashes on `main`: out of scope.
+
 ### Slice §32.6: CR-07 wire pipeline_plan_hash + RecipeAiDiffSummary through IPC
 
 **Scope.** Closes the §32.6 sub-row of §32 by exposing

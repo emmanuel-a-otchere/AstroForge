@@ -512,6 +512,68 @@ export const recipeAiDiffSummary = (
     versionB,
   }) as Promise<RecipeAiDiffSummaryFromRust>;
 
+// CR-07 §29.2a: server-side diff cache IPC surface.
+// `DiffCache` is a Rust-only in-memory cache. The
+// following 5 commands expose the cache to the JS layer.
+// All commands take + return JSON-encodable values; the
+// RGBA8 buffers are sent over the IPC wire as number
+// arrays (Tauri serializes Vec<u8> as a number array).
+
+/**
+ * Get-or-compute a diff image.
+ * Cache lookup keyed by (version_a_id, version_b_id, mode, gain).
+ * On miss, computes via `compute_diff` + stores. Returns
+ * the RGBA8 buffer.
+ */
+export const diffCacheGetOrCompute = (
+  versionAId: string,
+  versionBId: string,
+  mode: "absolute" | "signed" | "amplified" | "structural",
+  gain: number,
+  width: number,
+  imageA: number[],
+  imageB: number[],
+): Promise<number[]> =>
+  invoke("diff_cache_get_or_compute", {
+    versionAId,
+    versionBId,
+    mode,
+    gain,
+    width,
+    imageA,
+    imageB,
+  }) as Promise<number[]>;
+
+/**
+ * Invalidate every cache entry referencing the given
+ * version id. Used when a version's primary artifact
+ * (TIFF) changes. Returns the number of entries
+ * dropped.
+ */
+export const diffCacheInvalidateVersion = (
+  versionId: string,
+): Promise<number> =>
+  invoke("diff_cache_invalidate_version", { versionId }) as Promise<number>;
+
+/**
+ * Drop every cache entry. Stats counters are preserved.
+ */
+export const diffCacheClear = (): Promise<void> =>
+  invoke("diff_cache_clear") as Promise<void>;
+
+/** Snapshot of the cache stats (hits + misses). */
+export interface DiffCacheStatsFromRust {
+  hits: number;
+  misses: number;
+}
+
+export const diffCacheStats = (): Promise<DiffCacheStatsFromRust> =>
+  invoke("diff_cache_stats") as Promise<DiffCacheStatsFromRust>;
+
+/** Current cache size (number of entries). */
+export const diffCacheLen = (): Promise<number> =>
+  invoke("diff_cache_len") as Promise<number>;
+
 // CR-07 B13c: local mirror of the Rust `Recipe` shape on
 // the IPC wire. The Svelte `Recipe` type in profile-store.ts
 // mirrors the same fields with camelCase. The IPC command

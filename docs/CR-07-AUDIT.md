@@ -3,8 +3,8 @@
 **Source:** [`CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md`](CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md)
 **Implementation plan:** [`CR-07-IMPLEMENTATION-PLAN.md`](CR-07-IMPLEMENTATION-PLAN.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-20 (refresh 4: §29 scorecard reconciliation to body — 5 ✅ / 1 ⚠️ / 0 ❌; coverage 99% shipped / 1% partial / 0% missing; bundle status reflects §32 fully closed + B7 Perf foundation merged with §29.3b.4 as the only remaining sub-slice; priority + first-concrete-slice pointers refreshed)
-**Branch:** `docs/cr-07-audit-refresh-4` (from `origin/main` at `f8e30e2`)
+**Last refresh:** 2026-09-20 (refresh 5: §29.3b.4 UI integration lands: §29 row flips to 6 ✅ / 0 ⚠️ / 0 ❌; Total corrects to 74 ✅ / 11 ⚠️ / 1 ❌ across 86 rows (refresh 4's "99% shipped / 0% missing" was an over-count: the scorecard tracks per-row status, not per-section, and §8 / §11 / §31 / §34 still carry genuine ⚠️ and ❌ rows); bundle status updated; priority + first-concrete-slice pointers refreshed)
+**Branch:** `feat/cr-07-29-3b-4-ui-integration` (from `origin/main` at `6cb7ed4`)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 This audit reconciles every CR-07 §1–§35 acceptance criterion against the
@@ -442,17 +442,20 @@ correctly abandoned; `db.rs` + `domain_store.rs` +
 - ✅ Cached difference images: `DiffCache` (PR #361) +
   IPC wiring (PR #366) lets re-renders of previously-computed
   diffs return in O(1) without recomputing.
-- ⚠️ GPU/WebGPU acceleration for comparison: WGSL compute
+- ✅ GPU/WebGPU acceleration for comparison: WGSL compute
   shaders shipped for all 4 `compute_diff` modes
   (§29.3a / PR #362) + all 4 spatial detectors
   (§29.3b.1 / PR #363 + §29.3b.1a / PR #367). Vitest
   behavioural tests for the wrappers (§29.3b.2 /
-  PR #364). IPC wiring for the spatial-detector half is
-  not needed (compute is client-side); the remaining
-  §29.3b.4 work is UI integration in `CompareWorkspace.svelte`
-  (replace the Canvas2D fallback with the GPU path) + IPC
-  wiring for the diff cache (§29.2a / PR #366 already
-  shipped).
+  PR #364). IPC wiring for the diff cache (§29.2a /
+  PR #366) shipped. **§29.3b.4 (this slice)** wires
+  the GPU path into `CompareTools.svelte`'s
+  `recomputeDifference()` so the difference render
+  path picks the GPU automatically when WebGPU is
+  available, with the existing Canvas2D loop as the
+  fallback. `recomputeOverlay()` stays Canvas2D (no
+  WGSL blend kernel shipped); stretch helpers stay
+  JS-side in both paths.
 - ✅ Canvas2D/CPU fallback: in place.
 
 ## §30 Export From Comparison — ✅ Shipped
@@ -690,16 +693,16 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §26 (semantic API) | 1 | 0 | 0 | 1 |
 | §27 (architecture) | 1 | 0 | 0 | 1 |
 | §28 (impl map) | 1 | 0 | 0 | 1 |
-| §29 (performance) | 5 | 1 | 0 | 6 (the 6 body bullets; see §29 body for per-row mapping) |
+| §29 (performance) | 6 | 0 | 0 | 6 (all 6 body bullets shipped; §29.3b.4 UI integration closes the last ⚠️ row) |
 | §30 (export) | 1 | 0 | 0 | 1 |
 | §31 (acceptance) | 23 | 5 | 0 | 28 |
 | §32 (test strategy) | 1 | 0 | 0 | 1 |
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **85** | **1** | **0** | **86** |
+| **Total** | **74** | **11** | **1** | **86** |
 
-**Coverage:** 99% shipped, 1% partial, 0% missing (post-§23.1..§23.4
+**Coverage:** 86% shipped, 13% partial, 1% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression

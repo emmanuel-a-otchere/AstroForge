@@ -96,6 +96,14 @@ pub fn metric_snapshot(image: &F32Image) -> BTreeMap<String, f64> {
         MetricKind::SharpnessEdgeResponse.as_str().to_string(),
         metrics::edge_response(image).value,
     );
+    // CR-07 §8.3: max per-channel background gradient
+    // magnitude. Captures color-dependent gradients
+    // (e.g. red light pollution dominating, blue
+    // channel near-uniform).
+    values.insert(
+        MetricKind::BackgroundColorGradient.as_str().to_string(),
+        metrics::color_gradient(image).value,
+    );
     values
 }
 
@@ -774,7 +782,7 @@ mod tests {
     fn snapshot_covers_exactly_the_shipped_detectors() {
         let img = flat_image(64);
         let snap = metric_snapshot(&img);
-        assert_eq!(snap.len(), 8);
+        assert_eq!(snap.len(), 9);
         for kind in [
             MetricKind::NoiseLuminance,
             MetricKind::NoiseChrominance,
@@ -793,6 +801,13 @@ mod tests {
             // into the snapshot so the delta table surfaces
             // the sharpness / focus proxy metric.
             MetricKind::SharpnessEdgeResponse,
+            // CR-07 §8.3: max per-channel background
+            // gradient magnitude. On the 1-channel
+            // `flat_image` fixture it returns 0.0 with
+            // Low confidence (single-channel images have
+            // no color gradient by definition); the key is
+            // still present.
+            MetricKind::BackgroundColorGradient,
         ] {
             assert!(snap.contains_key(kind.as_str()), "missing {}", kind);
         }
@@ -1107,13 +1122,16 @@ mod tests {
         // CR-07 §8.2: edge response is in the snapshot
         // alongside the other detector-backed keys.
         assert!(full.contains_key(MetricKind::SharpnessEdgeResponse.as_str()));
+        // CR-07 §8.3: color gradient is in the snapshot
+        // alongside the other detector-backed keys.
+        assert!(full.contains_key(MetricKind::BackgroundColorGradient.as_str()));
         // The new channel keys are present.
         assert!(full.contains_key("channel.r.mean"));
         assert!(full.contains_key("channel.g.stddev"));
         assert!(full.contains_key("channel.b.max"));
         assert!(full.contains_key("channel.b.clip_count"));
-        // 8 detector keys + 15 channel keys = 23 total.
-        assert_eq!(full.len(), 23);
+        // 9 detector keys + 15 channel keys = 24 total.
+        assert_eq!(full.len(), 24);
     }
 
     // ─── §23.2: FWHM distribution + histogram ────────────────

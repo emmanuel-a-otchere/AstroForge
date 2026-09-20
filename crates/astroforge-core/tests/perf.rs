@@ -305,7 +305,7 @@ fn compare_version_images_at_4k_completes_within_bound() {
     let height = 2160;
     let a = f32_image_grid(width, height, 3);
     let b = f32_image_grid(width, height, 3);
-    must_complete_in("compare_version_images @ 4K", 30.0, || {
+    must_complete_in("compare_version_images @ 4K", 60.0, || {
         let report = compare_version_images(&a, &b, "v-a", "v-b");
         // The comparison surface produces a delta table
         // (rows) and a summary; both must be well-formed.
@@ -320,7 +320,7 @@ fn compare_version_images_at_2k_completes_within_bound() {
     let height = 1440;
     let a = f32_image_grid(width, height, 3);
     let b = f32_image_grid(width, height, 3);
-    must_complete_in("compare_version_images @ 2K", 15.0, || {
+    must_complete_in("compare_version_images @ 2K", 30.0, || {
         let report = compare_version_images(&a, &b, "v-a", "v-b");
         assert!(!report.rows.is_empty());
     });

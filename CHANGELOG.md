@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+### Slice §8.3: CR-07 color gradient metric
+
+**Scope.** Closes the §8 "Color gradient" ⚠️ Partial row by
+shipping the `color_gradient` metric: the maximum per-channel
+background gradient magnitude across the image's color
+channels. Captures color-dependent gradients (e.g. red light
+pollution dominating, blue channel near-uniform).
+
+A flat-field or uniform gradient (vignetting, light pollution)
+produces a similar gradient magnitude across channels; a
+strongly color-dependent gradient produces a higher maximum
+because one channel's gradient exceeds the others.
+
+The scalar metric is wired into `metric_snapshot` so the
+delta table surfaces the `background.color_gradient` key.
+
+#### New public API
+
+- `crates/astroforge-core/src/image_analysis/metrics.rs`:
+  - `color_gradient(image: &F32Image) -> MetricsSample`:
+    max per-channel background gradient magnitude. Returns
+    `0.0` with `Confidence::Low` when the image is too small
+    or has fewer than 2 channels (single-channel images have
+    no color gradient by definition).
+
+#### Wiring
+
+- `crates/astroforge-core/src/comparison_metrics.rs`:
+  `metric_snapshot` now inserts `MetricKind::BackgroundColorGradient`
+  with the `color_gradient` scalar. Two existing snapshot
+  tests updated to expect 9 keys (was 8) and 24 total keys
+  in `metric_snapshot_full` (was 23).
+
+#### Tests
+
+- `crates/astroforge-core/tests/color_gradient.rs`: 7 tests
+  covering uniform RGB, uniform RGB gradient, color-dependent
+  gradient, single-channel, too-small image, determinism,
+  and non-negative / finite.
+
+#### Out of scope (intentional)
+
+- No UI wiring. The metric flows through the existing
+  `compare_version_metrics` IPC path.
+- No IPC changes.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: pass
+- `cargo clippy --workspace --all-targets -- -D warnings`: pass
+- `cargo test --workspace`: pass (7 new tests)
+- `npm run check`: 0 errors (pre-existing warnings)
+- `npm run build`: pass
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: pass
+
 ### Slice §8.2: CR-07 edge response metric
 
 **Scope.** Closes the §8 "Edge response" ⚠️ Partial row by

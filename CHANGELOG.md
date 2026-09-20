@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Slice §8.4: CR-07 SNR metrics (estimated + local)
+
+**Scope.** Closes the §8 "Estimated SNR / local SNR" ⚠️ Partial
+row by shipping both `estimated_snr` and `local_snr` metrics.
+
+**What.**
+
+- `estimated_snr(image) -> MetricsSample`: global SNR in dB.
+  Signal = mean pixel value across all channels; noise =
+  `luminance_noise` sigma. SNR = 20 × log10(signal / noise).
+  Higher = stronger signal relative to noise floor.
+
+- `local_snr(image) -> MetricsSample`: mean per-tile SNR in dB.
+  Uses the same 4×4 tile grid as `regional_noise`; per-tile
+  sigma from `regional_noise_map`, per-tile mean computed
+  directly. SNR = 20 × log10(tile_mean / tile_sigma).
+  Higher = faint structures well-preserved across the frame.
+
+Both are wired into `metric_snapshot` so the delta table
+surfaces `signal.estimated_snr` and `signal.local_snr`.
+
+**Verification.** 8 new tests in `tests/snr.rs`. All 6 gates
+pass (fmt, clippy, test, svelte-check, build, smoke).
+
 ### Slice §8.3: CR-07 color gradient metric
 
 **Scope.** Closes the §8 "Color gradient" ⚠️ Partial row by

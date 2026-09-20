@@ -125,7 +125,7 @@ exposes the "selected region" and "specific feature" scope axes.
 | Color gradient | ✅ `color_gradient` (§8.3) |
 | Black clipping / highlight clipping | ✅ `highlight_clipping` |
 | Saturation percentage | ✅ `saturation_percentage` |
-| Estimated SNR / local SNR | ⚠️ Partial |
+| Estimated SNR / local SNR | ✅ `estimated_snr` + `local_snr` (§8.4) |
 | Structural contrast | ✅ `local_contrast` |
 | AI segmentation confidence / artifact indicators / model confidence | ⚠️ Partial |
 
@@ -672,7 +672,7 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §5 (modes) | 5 | 0 | 0 | 5 |
 | §6 (sync nav) | 1 | 0 | 0 | 1 |
 | §7 (scope) | 1 | 0 | 0 | 1 |
-| §8 (metrics) | 14 | 1 | 1 | 16 |
+| §8 (metrics) | 15 | 0 | 1 | 16 |
 | §9 (contextual) | 1 | 0 | 0 | 1 |
 | §10 (delta) | 1 | 0 | 0 | 1 |
 | §11 (assessment) | 0 | 1 | 0 | 1 |
@@ -700,7 +700,7 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **77** | **8** | **1** | **86** |
+| **Total** | **78** | **7** | **1** | **86** |
 
 **Coverage:** 86% shipped, 13% partial, 1% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9

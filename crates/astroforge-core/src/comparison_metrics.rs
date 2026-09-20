@@ -104,6 +104,20 @@ pub fn metric_snapshot(image: &F32Image) -> BTreeMap<String, f64> {
         MetricKind::BackgroundColorGradient.as_str().to_string(),
         metrics::color_gradient(image).value,
     );
+    // CR-07 §8.4: estimated SNR (dB). Signal is the mean
+    // pixel value; noise is the luminance noise sigma.
+    // Higher = stronger signal relative to noise.
+    values.insert(
+        MetricKind::SignalEstimatedSnr.as_str().to_string(),
+        metrics::estimated_snr(image).value,
+    );
+    // CR-07 §8.4: local SNR (dB). Mean per-tile SNR across
+    // the 4×4 regional grid. Higher = faint structures
+    // well-preserved across the frame.
+    values.insert(
+        MetricKind::SignalLocalSnr.as_str().to_string(),
+        metrics::local_snr(image).value,
+    );
     values
 }
 
@@ -782,7 +796,7 @@ mod tests {
     fn snapshot_covers_exactly_the_shipped_detectors() {
         let img = flat_image(64);
         let snap = metric_snapshot(&img);
-        assert_eq!(snap.len(), 9);
+        assert_eq!(snap.len(), 11);
         for kind in [
             MetricKind::NoiseLuminance,
             MetricKind::NoiseChrominance,
@@ -808,6 +822,11 @@ mod tests {
             // no color gradient by definition); the key is
             // still present.
             MetricKind::BackgroundColorGradient,
+            // CR-07 §8.4: estimated SNR + local SNR wired
+            // into the snapshot so the delta table surfaces
+            // the signal-to-noise metrics.
+            MetricKind::SignalEstimatedSnr,
+            MetricKind::SignalLocalSnr,
         ] {
             assert!(snap.contains_key(kind.as_str()), "missing {}", kind);
         }
@@ -1125,13 +1144,17 @@ mod tests {
         // CR-07 §8.3: color gradient is in the snapshot
         // alongside the other detector-backed keys.
         assert!(full.contains_key(MetricKind::BackgroundColorGradient.as_str()));
+        // CR-07 §8.4: estimated SNR + local SNR are in the
+        // snapshot alongside the other detector-backed keys.
+        assert!(full.contains_key(MetricKind::SignalEstimatedSnr.as_str()));
+        assert!(full.contains_key(MetricKind::SignalLocalSnr.as_str()));
         // The new channel keys are present.
         assert!(full.contains_key("channel.r.mean"));
         assert!(full.contains_key("channel.g.stddev"));
         assert!(full.contains_key("channel.b.max"));
         assert!(full.contains_key("channel.b.clip_count"));
-        // 9 detector keys + 15 channel keys = 24 total.
-        assert_eq!(full.len(), 24);
+        // 11 detector keys + 15 channel keys = 26 total.
+        assert_eq!(full.len(), 26);
     }
 
     // ─── §23.2: FWHM distribution + histogram ────────────────

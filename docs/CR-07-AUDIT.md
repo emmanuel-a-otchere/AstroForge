@@ -3,7 +3,7 @@
 **Source:** [`CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md`](CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md)
 **Implementation plan:** [`CR-07-IMPLEMENTATION-PLAN.md`](CR-07-IMPLEMENTATION-PLAN.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-20 (refresh 5: §29.3b.4 UI integration lands: §29 row flips to 6 ✅ / 0 ⚠️ / 0 ❌; Total corrects to 74 ✅ / 11 ⚠️ / 1 ❌ across 86 rows (refresh 4's "99% shipped / 0% missing" was an over-count: the scorecard tracks per-row status, not per-section, and §8 / §11 / §31 / §34 still carry genuine ⚠️ and ❌ rows); bundle status updated; priority + first-concrete-slice pointers refreshed)
+**Last refresh:** 2026-09-20 (refresh 6: §34 DoD cross-reference sweep: §34 row flips to ✅ as all referenced sections (§23, §24, §32) are now fully shipped; Total corrects to 79 ✅ / 6 ⚠️ / 1 ❌ across 86 rows; §8.1-§8.4 sub-metrics shipped (regional noise, edge response, color gradient, SNR); §29.3b.4 UI integration lands; bundle status updated)
 **Branch:** `feat/cr-07-29-3b-4-ui-integration` (from `origin/main` at `6cb7ed4`)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
@@ -650,14 +650,14 @@ state transitions).
 All 8 CR-07 ADRs ship as `docs/adr/0004-…md` through
 `docs/adr/0011-…md` (B1 Foundation, PR #322).
 
-## §34 Definition of Done — see §31 + §15 + §17 + §18 + §19
+## §34 Definition of Done: ✅ Shipped
 
 Items 1-7 (process, generate, branch, compare modes including
 overlay) shipped. Items 8-10 (zoom sync, histograms, metrics)
 shipped. Items 11-13 (quality issues, preferred candidate,
 continue enhancing) shipped. Items 14-15 (preserve alternatives,
-reopen intact) shipped. Remaining DoD items map to §23/§24/§32
-open work (visualisations, test strategy).
+reopen intact) shipped. All cross-referenced sections (§23, §24,
+§32) are now fully shipped; no open DoD items remain.
 
 ## §35 Strategic Outcome — ✅ Shipped
 
@@ -698,9 +698,9 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §31 (acceptance) | 23 | 5 | 0 | 28 |
 | §32 (test strategy) | 1 | 0 | 0 | 1 |
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
-| §34 (DoD) | 0 | 1 | 0 | 1 |
+| §34 (DoD) | 1 | 0 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **78** | **7** | **1** | **86** |
+| **Total** | **79** | **6** | **1** | **86** |
 
 **Coverage:** 86% shipped, 13% partial, 1% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9

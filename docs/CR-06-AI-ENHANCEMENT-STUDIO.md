@@ -1,6 +1,7 @@
 CR-06 — AI Enhancement Studio & Intelligent Image Revamp
 
 Status: P1–P7 + P5.1 landed (PRs #292–#299 + P5.1 PR pending); spec bump 1.2.0 → 1.3.0
+**Housekeeping flag (2026-09-20):** CR-06 has a pending extension: AI segmentation confidence / artifact indicators / model confidence metrics (deferred from CR-07 §8). These are AI model metadata metrics that belong to the Studio's provenance + confidence surface. See `docs/CR-07-AUDIT.md` refresh 7 for the deferral note.
 Target: AstroForge v1.3.0
 Priority: Critical
 Depends on: CR-01, CR-02, CR-03, CR-04, CR-05

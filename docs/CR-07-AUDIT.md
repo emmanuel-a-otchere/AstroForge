@@ -117,7 +117,7 @@ exposes the "selected region" and "specific feature" scope axes.
 | Regional noise | ✅ `regional_noise` (§8.1) |
 | Sharpness (FWHM) | ✅ structures.rs |
 | Local sharpness | ✅ `local_contrast` |
-| Edge response | ⚠️ Partial |
+| Edge response | ✅ `edge_response` (§8.2) |
 | Star count / size / eccentricity | ✅ structures.rs |
 | FWHM distribution / saturation | ✅ structures.rs |
 | Star-to-background contrast | ✅ structures.rs |
@@ -672,7 +672,7 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §5 (modes) | 5 | 0 | 0 | 5 |
 | §6 (sync nav) | 1 | 0 | 0 | 1 |
 | §7 (scope) | 1 | 0 | 0 | 1 |
-| §8 (metrics) | 12 | 3 | 1 | 16 |
+| §8 (metrics) | 13 | 2 | 1 | 16 |
 | §9 (contextual) | 1 | 0 | 0 | 1 |
 | §10 (delta) | 1 | 0 | 0 | 1 |
 | §11 (assessment) | 0 | 1 | 0 | 1 |
@@ -700,7 +700,7 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 0 | 1 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **75** | **10** | **1** | **86** |
+| **Total** | **76** | **9** | **1** | **86** |
 
 **Coverage:** 86% shipped, 13% partial, 1% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9

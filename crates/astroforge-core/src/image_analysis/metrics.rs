@@ -59,6 +59,77 @@ pub struct MetricsSample {
     pub confidence: Confidence,
 }
 
+/// CR-07 §8.2: Edge response: Sobel edge magnitude.
+///
+/// For each pixel in the preview, computes the Sobel
+/// gradient magnitude `sqrt(Gx² + Gy²)` where `Gx` is the
+/// horizontal Sobel kernel and `Gy` is the vertical Sobel
+/// kernel applied to the 3×3 neighbourhood. Returns the
+/// mean magnitude across the preview as a `MetricsSample`.
+///
+/// Edge response is a proxy for image sharpness / focus
+/// quality: a sharp image has many high-magnitude edges
+/// (star outlines, nebular structure); a soft image has
+/// low-magnitude edges everywhere. The metric is bounded
+/// by `O(W·H)` and runs on the downsampled preview
+/// (max 64×64 pixels) so it fits the per-metric budget.
+pub fn edge_response(image: &F32Image) -> MetricsSample {
+    let (w, h) = (image.width(), image.height());
+    if w < 3 || h < 3 {
+        return MetricsSample {
+            value: 0.0,
+            label: Some("edge response (Sobel magnitude mean)".into()),
+            evidence_region: None,
+            confidence: Confidence::Low,
+        };
+    }
+    let preview = image.downsample_box(0.25);
+    let (pw, ph) = (preview.width(), preview.height());
+    if pw < 3 || ph < 3 {
+        return MetricsSample {
+            value: 0.0,
+            label: Some("edge response (Sobel magnitude mean)".into()),
+            evidence_region: None,
+            confidence: Confidence::Low,
+        };
+    }
+    let mut sum = 0.0f64;
+    let mut n = 0usize;
+    for y in 1..ph - 1 {
+        for x in 1..pw - 1 {
+            let p00 = preview[(0, y - 1, x - 1)] as f64;
+            let p01 = preview[(0, y - 1, x)] as f64;
+            let p02 = preview[(0, y - 1, x + 1)] as f64;
+            let p10 = preview[(0, y, x - 1)] as f64;
+            let p12 = preview[(0, y, x + 1)] as f64;
+            let p20 = preview[(0, y + 1, x - 1)] as f64;
+            let p21 = preview[(0, y + 1, x)] as f64;
+            let p22 = preview[(0, y + 1, x + 1)] as f64;
+            // Sobel kernels:
+            //   Gx = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]
+            //   Gy = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]]
+            let gx = -p00 + p02 - 2.0 * p10 + 2.0 * p12 - p20 + p22;
+            let gy = -p00 - 2.0 * p01 - p02 + p20 + 2.0 * p21 + p22;
+            let mag = (gx * gx + gy * gy).sqrt();
+            sum += mag;
+            n += 1;
+        }
+    }
+    let mean = if n > 0 { sum / n as f64 } else { 0.0 };
+    MetricsSample {
+        value: mean,
+        label: Some("edge response (Sobel magnitude mean)".into()),
+        evidence_region: Some([0, 0, w as u32, h as u32]),
+        confidence: if n >= 4096 {
+            Confidence::High
+        } else if n >= 1024 {
+            Confidence::Medium
+        } else {
+            Confidence::Low
+        },
+    }
+}
+
 /// CR-07 §8.1: Regional noise: spatial noise variation metric.
 ///
 /// Splits the image into a `GRID × GRID` grid of tiles and

@@ -88,6 +88,14 @@ pub fn metric_snapshot(image: &F32Image) -> BTreeMap<String, f64> {
         MetricKind::NoiseRegional.as_str().to_string(),
         metrics::regional_noise(image).value,
     );
+    // CR-07 §8.2: Sobel edge magnitude mean. A proxy for
+    // sharpness / focus quality: high values mean many
+    // strong edges (stars, structure), low values mean
+    // a soft / blurry image.
+    values.insert(
+        MetricKind::SharpnessEdgeResponse.as_str().to_string(),
+        metrics::edge_response(image).value,
+    );
     values
 }
 
@@ -766,7 +774,7 @@ mod tests {
     fn snapshot_covers_exactly_the_shipped_detectors() {
         let img = flat_image(64);
         let snap = metric_snapshot(&img);
-        assert_eq!(snap.len(), 7);
+        assert_eq!(snap.len(), 8);
         for kind in [
             MetricKind::NoiseLuminance,
             MetricKind::NoiseChrominance,
@@ -781,6 +789,10 @@ mod tests {
             // snapshot so the delta table surfaces the
             // spatial noise variation metric.
             MetricKind::NoiseRegional,
+            // CR-07 §8.2: Sobel edge magnitude mean wired
+            // into the snapshot so the delta table surfaces
+            // the sharpness / focus proxy metric.
+            MetricKind::SharpnessEdgeResponse,
         ] {
             assert!(snap.contains_key(kind.as_str()), "missing {}", kind);
         }
@@ -1092,13 +1104,16 @@ mod tests {
         // CR-07 §8.1: regional noise is in the snapshot
         // alongside the other detector-backed keys.
         assert!(full.contains_key(MetricKind::NoiseRegional.as_str()));
+        // CR-07 §8.2: edge response is in the snapshot
+        // alongside the other detector-backed keys.
+        assert!(full.contains_key(MetricKind::SharpnessEdgeResponse.as_str()));
         // The new channel keys are present.
         assert!(full.contains_key("channel.r.mean"));
         assert!(full.contains_key("channel.g.stddev"));
         assert!(full.contains_key("channel.b.max"));
         assert!(full.contains_key("channel.b.clip_count"));
-        // 7 detector keys + 15 channel keys = 22 total.
-        assert_eq!(full.len(), 22);
+        // 8 detector keys + 15 channel keys = 23 total.
+        assert_eq!(full.len(), 23);
     }
 
     // ─── §23.2: FWHM distribution + histogram ────────────────

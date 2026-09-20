@@ -2,6 +2,70 @@
 
 ## Unreleased
 
+### Slice §8.1: CR-07 regional noise metric
+
+**Scope.** Closes the §8 "Regional noise" ⚠️ Partial row by
+shipping the `regional_noise` metric: the image is split into
+a 4×4 grid of tiles, the luminance-noise sigma (MAD-based, same
+algorithm as `luminance_noise`) is computed per tile, and the
+coefficient of variation (CV = stddev / mean) across tiles is
+returned as the scalar metric. A low CV means the noise is
+spatially uniform; a high CV means the image has spatially-
+varying noise (e.g. amp glow in corners, vignetting noise
+patterns).
+
+The scalar metric is wired into `metric_snapshot` so the
+delta table + the per-version expert panel surface the
+`noise.regional` key. The full per-tile map is available via
+`regional_noise_map()` for the UI's spatial noise display
+(not wired to UI in this slice).
+
+#### New public API
+
+- `crates/astroforge-core/src/image_analysis/metrics.rs`:
+  - `regional_noise(image: &F32Image) -> MetricsSample`:
+    scalar CV metric. Returns `0.0` with `Confidence::Low`
+    when the image is too small to tile (< 32×32).
+  - `regional_noise_map(image: &F32Image) -> Vec<RegionalNoiseSample>`:
+    per-tile sigma map for the UI.
+  - `RegionalNoiseSample { region: [u32; 4], sigma: f64,
+    confidence: Confidence }`: one tile of the map.
+
+#### Wiring
+
+- `crates/astroforge-core/src/comparison_metrics.rs`:
+  `metric_snapshot` now inserts `MetricKind::NoiseRegional`
+  with the `regional_noise` scalar. Two existing snapshot
+  tests updated to expect 7 keys (was 6) and 22 total keys
+  in `metric_snapshot_full` (was 21).
+
+#### Tests
+
+- `crates/astroforge-core/tests/regional_noise.rs`: 8 tests
+  covering uniform image (CV = 0), noisy image (CV > 0),
+  16-tile grid coverage, tile position coverage, too-small
+  image (empty), determinism, and spatially-varying image.
+
+#### Out of scope (intentional)
+
+- No UI wiring. The `regional_noise_map` function is
+  available for the UI but no Svelte component consumes it
+  yet. The delta table surfaces the scalar `noise.regional`
+  metric; the spatial map display is a future slice.
+- No IPC changes. The metric is computed in
+  `astroforge-core` and flows through the existing
+  `compare_version_metrics` IPC path.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: pass
+- `cargo clippy --workspace --all-targets -- -D warnings`: pass
+- `cargo test --workspace`: 992 tests pass (0 failed; 8 new)
+- `npm run check`: 0 errors (9 pre-existing warnings,
+  none from this slice)
+- `npm run build`: pass (296 kB JS bundle, 3.06 s)
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: pass
+
 ### Slice §29.3b.4: CR-07 WebGPU diff UI integration
 
 **Scope.** Closes the last remaining §29 sub-slice: wires

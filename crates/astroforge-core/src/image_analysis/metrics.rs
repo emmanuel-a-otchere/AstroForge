@@ -59,6 +59,102 @@ pub struct MetricsSample {
     pub confidence: Confidence,
 }
 
+/// CR-07 §8.3: Color gradient: per-channel background gradient.
+///
+/// Computes the background gradient magnitude (same algorithm
+/// as `background_gradient`) for each channel of the image and
+/// returns the maximum across channels as the scalar metric.
+///
+/// A flat-field or uniform gradient (vignetting, light pollution)
+/// produces a similar gradient magnitude across channels; a
+/// strongly color-dependent gradient (e.g. red light pollution
+/// dominating, blue channel near-uniform) produces a higher
+/// maximum because one channel's gradient will exceed the
+/// others.
+///
+/// Returns a zero-value `MetricsSample` with `Confidence::Low`
+/// when the image is too small to tile (< 64×64) or when the
+/// channel count is < 2 (single-channel images have no color
+/// gradient by definition).
+pub fn color_gradient(image: &F32Image) -> MetricsSample {
+    let (w, h) = (image.width(), image.height());
+    let channels = image.channels();
+    if w < 64 || h < 64 || channels < 2 {
+        return MetricsSample {
+            value: 0.0,
+            label: Some("color gradient (max per-channel magnitude per 100 px)".into()),
+            evidence_region: None,
+            confidence: Confidence::Low,
+        };
+    }
+    let tile = 64usize;
+    let mut max_mag = 0.0f64;
+    for ch in 0..channels {
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        let mut vs = Vec::new();
+        let mut y0 = 0;
+        while y0 < h {
+            let mut x0 = 0;
+            while x0 < w {
+                let x1 = (x0 + tile).min(w);
+                let y1 = (y0 + tile).min(h);
+                let mut samples = Vec::with_capacity(16);
+                for sy in (y0..y1).step_by((y1 - y0).max(1) / 4 + 1) {
+                    for sx in (x0..x1).step_by((x1 - x0).max(1) / 4 + 1) {
+                        if sx < x1 && sy < y1 {
+                            samples.push(image[(ch, sy, sx)] as f64);
+                        }
+                    }
+                }
+                if !samples.is_empty() {
+                    samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    let med = samples[samples.len() / 2];
+                    xs.push((x0 as f64 + x1 as f64) / 2.0);
+                    ys.push((y0 as f64 + y1 as f64) / 2.0);
+                    vs.push(med);
+                }
+                x0 += tile;
+            }
+            y0 += tile;
+        }
+        if vs.len() < 2 {
+            continue;
+        }
+        // Fit plane z = a*x + b*y + c via least-squares.
+        let n = vs.len() as f64;
+        let sx = xs.iter().sum::<f64>() / n;
+        let sy = ys.iter().sum::<f64>() / n;
+        let sz = vs.iter().sum::<f64>() / n;
+        let sxx = xs.iter().map(|x| x * x).sum::<f64>() / n;
+        let sxy = xs.iter().zip(ys.iter()).map(|(x, y)| x * y).sum::<f64>() / n;
+        let sxz = xs.iter().zip(vs.iter()).map(|(x, v)| x * v).sum::<f64>() / n;
+        let syy = ys.iter().map(|y| y * y).sum::<f64>() / n;
+        let syz = ys.iter().zip(vs.iter()).map(|(y, v)| y * v).sum::<f64>() / n;
+        let denom = (sxx - sx * sx) * (syy - sy * sy) - (sxy - sx * sy).powi(2);
+        if denom.abs() < 1e-12 {
+            continue;
+        }
+        let a = ((syy - sy * sy) * (sxz - sx * sz) - (sxy - sx * sy) * (syz - sy * sz)) / denom;
+        let b = ((sxx - sx * sx) * (syz - sy * sz) - (sxy - sx * sy) * (sxz - sx * sz)) / denom;
+        let mag_per_px = (a * a + b * b).sqrt();
+        let value = mag_per_px * 100.0;
+        if value > max_mag {
+            max_mag = value;
+        }
+    }
+    MetricsSample {
+        value: max_mag,
+        label: Some("color gradient (max per-channel magnitude per 100 px)".into()),
+        evidence_region: Some([0, 0, w as u32, h as u32]),
+        confidence: if channels >= 3 {
+            Confidence::High
+        } else {
+            Confidence::Medium
+        },
+    }
+}
+
 /// CR-07 §8.2: Edge response: Sobel edge magnitude.
 ///
 /// For each pixel in the preview, computes the Sobel

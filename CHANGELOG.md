@@ -2,6 +2,72 @@
 
 ## Unreleased
 
+### Slice §29.3b.4: CR-07 WebGPU diff UI integration
+
+**Scope.** Closes the last remaining §29 sub-slice: wires
+the §29.3a WGSL compute shaders into `CompareTools.svelte`'s
+`recomputeDifference()` so the difference render path picks
+the GPU when WebGPU is available, and falls back to the
+existing per-pixel Canvas2D loop when it is not.
+
+The change is in one file
+(`src/components/CompareTools.svelte`) and does not touch
+any Rust, IPC, or persistence surface. The GPU wrapper
+(`WebGpuDiffCompute` from `src/lib/webgpu-diff.ts`) was
+already shipped in §29.3a (PR #362) with Vitest
+behavioural tests in §29.3b.2 (PR #364). This slice is
+pure consumer wiring.
+
+#### New code
+
+- `ensureGpuDiff()`: lazily acquires the WebGPU device
+  via `acquireWebGpuDevice()` and instantiates
+  `WebGpuDiffCompute`. The component tracks the
+  acquisition state (`null` / `"loading"` /
+  `"unavailable"` / instance) so a failed acquisition
+  is sticky: the UI does not retry on every frame.
+- `recomputeDifference()` now kicks an async
+  fire-and-forget that tries the GPU path first. On
+  success, the `Uint8Array` result is wrapped in
+  `ImageData`, the existing stretch helpers
+  (`applyStretch` / `applyFixedStretch`) run JS-side,
+  and `ctx.putImageData` paints. On any failure (no
+  device, dispatch error, wrong byte length) the path
+  falls through to the Canvas2D loop.
+- `recomputeDifferenceCanvas2d()`: the original
+  per-pixel loop, preserved as the fallback. Extracted
+  as its own function so the GPU path and the Canvas2D
+  path share the same stretch application.
+
+#### Out of scope (intentional)
+
+- `recomputeOverlay()` stays Canvas2D. Overlay is a
+  per-pixel alpha blend; the WGSL shaders shipped in
+  §29.3a do not include a blend kernel. Adding one is
+  a future §29.3c slice if needed.
+- Stretch (`applyStretch` / `applyFixedStretch`) runs
+  JS-side in both paths. The stretch is a histogram
+  operation that builds a 256-bin histogram and walks
+  it for percentile cutoffs; the histogram is not worth
+  shipping to the GPU.
+- No Rust or IPC changes. The GPU path runs entirely
+  in the browser (WebGPU is client-side); no Tauri
+  command changes are needed.
+- No Vitest additions. The §29.3b.2 Vitest suite
+  covers the wrapper's behaviour; this slice is the
+  Svelte consumer and `npm run check` + the existing
+  test suite cover the integration.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: pass
+- `cargo clippy --workspace --all-targets -- -D warnings`: pass
+- `cargo test --workspace`: 984 tests pass (0 failed)
+- `npm run check`: 0 errors (9 pre-existing warnings,
+  none from this slice)
+- `npm run build`: pass (296 kB JS bundle, 3.03 s)
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: pass
+
 ### Slice §29.3b.1a: CR-07 WGSL shader for background_gradient
 
 **Scope.** Closes the §29.3b.1a sub-row of §29.3b by

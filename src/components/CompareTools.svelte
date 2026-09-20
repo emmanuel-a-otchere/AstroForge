@@ -25,6 +25,16 @@
 <script lang="ts">
   import ImageCanvas from "./ImageCanvas.svelte";
   import { onDestroy } from "svelte";
+  // CR-07 §29.3b.4: WebGPU diff compute path. When the
+  // browser supports WebGPU and the device acquisition
+  // succeeds, `recomputeDifference` runs the GPU path
+  // (§29.3a shaders) instead of the per-pixel Canvas2D
+  // loop. Falls back to the Canvas2D path on any failure.
+  import {
+    acquireWebGpuDevice,
+    WebGpuDiffCompute,
+    type DiffMode,
+  } from "../lib/webgpu-diff";
 
   export let versionIdA: string | null = null;
   export let versionIdB: string | null = null;
@@ -88,6 +98,32 @@
   // output (A + alpha-B); the two source canvases feed it.
   let overlayCanvasEl: HTMLCanvasElement | undefined;
 
+  // CR-07 §29.3b.4: WebGPU diff compute. `null` = not yet
+  // attempted; `"unavailable"` = browser lacks WebGPU or
+  // acquisition failed; `"loading"` = acquisition in flight;
+  // `WebGpuDiffCompute` = ready.
+  let gpuDiff: WebGpuDiffCompute | "unavailable" | "loading" | null = null;
+
+  async function ensureGpuDiff(): Promise<WebGpuDiffCompute | null> {
+    if (gpuDiff === "unavailable") return null;
+    if (gpuDiff === "loading") return null;
+    if (gpuDiff instanceof WebGpuDiffCompute) return gpuDiff;
+    gpuDiff = "loading";
+    try {
+      const device = await acquireWebGpuDevice();
+      if (!device) {
+        gpuDiff = "unavailable";
+        return null;
+      }
+      gpuDiff = new WebGpuDiffCompute(device);
+      return gpuDiff;
+    } catch (err) {
+      console.warn("[webgpu-diff] device acquisition failed; using Canvas2D path", err);
+      gpuDiff = "unavailable";
+      return null;
+    }
+  }
+
   function startBlink() {
     stopBlink();
     if (blinkPaused) return;
@@ -143,15 +179,76 @@
   // captured ImageData buffers; the others stay linear.
   // Implementation mirrors `compute_diff` in
   // `crates/astroforge-core/src/difference.rs`.
+  //
+  // CR-07 §29.3b.4: when WebGPU is available, the per-pixel
+  // loop below is replaced by the §29.3a WGSL compute
+  // shaders. The GPU path is preferred; the Canvas2D loop
+  // is the fallback for browsers without WebGPU or when the
+  // GPU dispatch fails.
   function recomputeDifference() {
     if (!diffCanvasEl || !canvasAImageData || !canvasBImageData) return;
     const ctx = diffCanvasEl.getContext("2d");
     if (!ctx) return;
     const w = canvasAImageData.width;
     const h = canvasAImageData.height;
-    const out = ctx.createImageData(w, h);
     const a = canvasAImageData.data;
     const b = canvasBImageData.data;
+
+    // Fire-and-forget the GPU path. The reactive graph
+    // doesn't await, so we kick the async work off and
+    // let it paint when it finishes.
+    void (async () => {
+      const gpu = await ensureGpuDiff();
+      if (gpu) {
+        // Convert ImageData.data (Uint8ClampedArray) to
+        // Uint8Array view for the GPU wrapper. The wrapper
+        // expects raw RGBA8 bytes.
+        const aBytes = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+        const bBytes = new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+        const result = await gpu.compute(
+          diffKind as DiffMode,
+          aBytes,
+          bBytes,
+          diffGain,
+          w,
+        );
+        if (result && result.length === w * h * 4) {
+          // Wrap the GPU output in ImageData, apply
+          // stretch JS-side, paint.
+          const out = new ImageData(w, h);
+          out.data.set(
+            new Uint8ClampedArray(result.buffer, result.byteOffset, result.byteLength),
+          );
+          if (stretchMode === "auto") {
+            applyStretch(out.data);
+          } else if (stretchMode === "manual") {
+            applyFixedStretch(out.data, vLowFixed, vHighFixed);
+          }
+          ctx.putImageData(out, 0, 0);
+          return;
+        }
+        // result === null → GPU dispatch failed; fall
+        // through to Canvas2D.
+      }
+      // Canvas2D fallback path (original B10 code).
+      recomputeDifferenceCanvas2d(ctx, w, h, a, b);
+    })();
+  }
+
+  // CR-07 §29.3b.4: the original Canvas2D per-pixel loop,
+  // preserved as the fallback when WebGPU is unavailable or
+  // the GPU dispatch fails. The `stretch` application
+  // after the diff is identical to the GPU path's stretch
+  // step: both paths converge on the same JS-side
+  // stretch logic before `putImageData`.
+  function recomputeDifferenceCanvas2d(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    a: Uint8ClampedArray,
+    b: Uint8ClampedArray,
+  ) {
+    const out = ctx.createImageData(w, h);
     const o = out.data;
     const stride = 4;
     if (diffKind === "structural") {

@@ -155,6 +155,124 @@ pub fn color_gradient(image: &F32Image) -> MetricsSample {
     }
 }
 
+/// CR-07 §8.4: Estimated SNR: global signal-to-noise ratio in dB.
+///
+/// Estimated SNR = 20 × log10(signal / noise) where signal is the
+/// mean pixel value across the preview and noise is the luminance
+/// noise sigma from `luminance_noise`.
+///
+/// A high SNR (≥ 30 dB) means the signal dominates the noise floor;
+/// a low SNR (< 10 dB) means the image is noise-dominated. The unit
+/// is dB (decibels), matching the metric registry spec.
+///
+/// The noise estimate reuses `luminance_noise`'s MAD-based sigma
+/// on the downsampled preview. The signal estimate is the mean
+/// pixel value across all channels. For a noise-free image (sigma
+/// ≈ 0), SNR is clamped to a large positive value; for a
+/// noise-dominated image (sigma >> signal), SNR approaches -inf.
+/// The sigma is clamped to a minimum epsilon to avoid division
+/// by zero.
+pub fn estimated_snr(image: &F32Image) -> MetricsSample {
+    let noise = luminance_noise(image);
+    let sigma = noise.value;
+
+    // Compute the mean pixel value across all channels.
+    let mut sum = 0.0f64;
+    let mut count = 0u64;
+    for &v in image.iter() {
+        sum += v as f64;
+        count += 1;
+    }
+    let mean = if count > 0 { sum / count as f64 } else { 0.0 };
+
+    // SNR in dB: 20 × log10(signal / noise). Clamp noise to
+    // epsilon to avoid division by zero. A noise-free image
+    // gets a large positive SNR (not infinite).
+    let sigma_clamped = sigma.max(1e-10);
+    let snr_db = 20.0 * (mean.max(1e-10) / sigma_clamped).log10();
+
+    MetricsSample {
+        value: snr_db,
+        label: Some("estimated SNR (dB)".into()),
+        evidence_region: Some([0, 0, image.width() as u32, image.height() as u32]),
+        confidence: noise.confidence,
+    }
+}
+
+/// CR-07 §8.4: Local SNR: mean per-tile SNR in dB.
+///
+/// Computes the SNR for each 4×4 tile (same grid as
+/// `regional_noise`) and returns the mean. Each tile's SNR is
+/// 20 × log10(tile_mean / tile_sigma). The tile sigma comes from
+/// `regional_noise_map`; the tile mean is computed directly
+/// from the image data.
+///
+/// A high local SNR means faint structures are well-preserved
+/// across the frame; a low local SNR means some regions are
+/// noise-dominated even if the global SNR is acceptable.
+pub fn local_snr(image: &F32Image) -> MetricsSample {
+    let tiles = regional_noise_map(image);
+    if tiles.is_empty() {
+        return MetricsSample {
+            value: 0.0,
+            label: Some("local SNR (dB)".into()),
+            evidence_region: None,
+            confidence: Confidence::Low,
+        };
+    }
+
+    let mut sum_snr = 0.0f64;
+    let mut count = 0u64;
+
+    for tile in &tiles {
+        let [x0, y0, tw, th] = tile.region;
+        let x1 = (x0 + tw) as usize;
+        let y1 = (y0 + th) as usize;
+        let x0u = x0 as usize;
+        let y0u = y0 as usize;
+
+        // Compute tile mean across all channels.
+        let mut tile_sum = 0.0f64;
+        let mut tile_count = 0u64;
+        for y in y0u..y1.min(image.height()) {
+            for x in x0u..x1.min(image.width()) {
+                for c in 0..image.channels() {
+                    tile_sum += image[(c, y, x)] as f64;
+                    tile_count += 1;
+                }
+            }
+        }
+        let tile_mean = if tile_count > 0 {
+            tile_sum / tile_count as f64
+        } else {
+            0.0
+        };
+        let tile_sigma = tile.sigma.max(1e-10);
+        let tile_snr = 20.0 * (tile_mean.max(1e-10) / tile_sigma).log10();
+        sum_snr += tile_snr;
+        count += 1;
+    }
+
+    let mean_snr = if count > 0 {
+        sum_snr / count as f64
+    } else {
+        0.0
+    };
+
+    MetricsSample {
+        value: mean_snr,
+        label: Some("local SNR (dB)".into()),
+        evidence_region: Some([0, 0, image.width() as u32, image.height() as u32]),
+        confidence: if count >= 12 {
+            Confidence::High
+        } else if count >= 4 {
+            Confidence::Medium
+        } else {
+            Confidence::Low
+        },
+    }
+}
+
 /// CR-07 §8.2: Edge response: Sobel edge magnitude.
 ///
 /// For each pixel in the preview, computes the Sobel

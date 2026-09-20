@@ -59,6 +59,191 @@ pub struct MetricsSample {
     pub confidence: Confidence,
 }
 
+/// CR-07 §8.1: Regional noise: spatial noise variation metric.
+///
+/// Splits the image into a `GRID × GRID` grid of tiles and
+/// computes the luminance-noise sigma (MAD-based, same algorithm
+/// as `luminance_noise`) within each tile. Returns a
+/// `MetricsSample` whose `value` is the coefficient of variation
+/// (CV = stddev / mean) of the per-tile sigmas: a low CV means
+/// the noise is spatially uniform; a high CV means the image has
+/// spatially-varying noise (e.g. amp glow in corners, vignetting
+/// noise patterns).
+///
+/// The scalar metric is what the `noise.regional` registry key
+/// expects (a single `f64` for the delta table). The full
+/// per-tile map is available via `regional_noise_map()` for the
+/// UI's spatial noise display.
+///
+/// Returns a zero-value `MetricsSample` with `Confidence::Low`
+/// when the image is too small to tile (smaller than `GRID`
+/// tiles of at least 8 pixels each).
+pub fn regional_noise(image: &F32Image) -> MetricsSample {
+    let tiles = regional_noise_map(image);
+    if tiles.is_empty() {
+        return MetricsSample {
+            value: 0.0,
+            label: Some("regional noise CV".into()),
+            evidence_region: None,
+            confidence: Confidence::Low,
+        };
+    }
+    let sigmas: Vec<f64> = tiles.iter().map(|t| t.sigma).collect();
+    let mean = sigmas.iter().sum::<f64>() / sigmas.len() as f64;
+    if mean <= 0.0 {
+        return MetricsSample {
+            value: 0.0,
+            label: Some("regional noise CV".into()),
+            evidence_region: None,
+            confidence: Confidence::Low,
+        };
+    }
+    let variance = sigmas.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / sigmas.len() as f64;
+    let stddev = variance.sqrt();
+    let cv = stddev / mean;
+    MetricsSample {
+        value: cv,
+        label: Some("regional noise CV (stddev/mean across tiles)".into()),
+        evidence_region: Some([0, 0, image.width() as u32, image.height() as u32]),
+        confidence: if tiles.len() >= 12 {
+            Confidence::High
+        } else if tiles.len() >= 6 {
+            Confidence::Medium
+        } else {
+            Confidence::Low
+        },
+    }
+}
+
+/// CR-07 §8.1: Regional noise map: per-tile noise sigma.
+///
+/// Splits the image into a `GRID × GRID` grid of tiles and
+/// computes the luminance-noise sigma (MAD-based, same algorithm
+/// as `luminance_noise`) within each tile. Returns a vector of
+/// `RegionalNoiseSample` so the UI can render a spatial noise
+/// map (e.g. center vs. corners).
+///
+/// The algorithm is identical to `luminance_noise` but applied
+/// per-tile rather than globally. Each tile is downsampled to
+/// at most 64×64 pixels before the 3×3 median filter, so the
+/// per-tile cost is bounded by `O(64²·9)` and the total cost
+/// is `O(W·H)` as with `luminance_noise`.
+///
+/// Returns an empty vector when the image is too small to tile
+/// (smaller than `GRID` tiles of at least 8 pixels each).
+pub fn regional_noise_map(image: &F32Image) -> Vec<RegionalNoiseSample> {
+    const GRID: usize = 4;
+    const MIN_TILE: usize = 8;
+
+    let (w, h) = (image.width(), image.height());
+    if w < GRID * MIN_TILE || h < GRID * MIN_TILE {
+        return Vec::new();
+    }
+
+    let tile_w = w / GRID;
+    let tile_h = h / GRID;
+    let mut samples = Vec::with_capacity(GRID * GRID);
+
+    for ty in 0..GRID {
+        for tx in 0..GRID {
+            let x0 = tx * tile_w;
+            let y0 = ty * tile_h;
+            let x1 = if tx == GRID - 1 { w } else { x0 + tile_w };
+            let y1 = if ty == GRID - 1 { h } else { y0 + tile_h };
+            let tw = x1 - x0;
+            let th = y1 - y0;
+            if tw < 3 || th < 3 {
+                continue;
+            }
+
+            // Downsample the tile to at most 64×64 so the
+            // 3×3 median filter stays cheap. The downsample
+            // factor is chosen to keep the tile under 64×64
+            // while preserving aspect ratio.
+            let max_dim = tw.max(th);
+            let factor = if max_dim > 64 {
+                64.0 / max_dim as f64
+            } else {
+                1.0
+            };
+            let pw = ((tw as f64) * factor).max(1.0) as usize;
+            let ph = ((th as f64) * factor).max(1.0) as usize;
+            if pw < 3 || ph < 3 {
+                continue;
+            }
+
+            // Build a downsampled tile buffer.
+            let mut tile_data = vec![0.0f32; pw * ph];
+            for y in 0..ph {
+                for x in 0..pw {
+                    let sx = x0 + ((x as f64) / factor) as usize;
+                    let sy = y0 + ((y as f64) / factor) as usize;
+                    let sx = sx.min(x1 - 1);
+                    let sy = sy.min(y1 - 1);
+                    tile_data[y * pw + x] = image[(0, sy, sx)];
+                }
+            }
+
+            // Compute residuals (pixel minus 3×3 median).
+            let mut residuals = Vec::with_capacity(pw * ph);
+            for y in 1..ph - 1 {
+                for x in 1..pw - 1 {
+                    let v = tile_data[y * pw + x] as f64;
+                    let mut window = [0.0f64; 9];
+                    let mut wi = 0;
+                    for dy in -1i32..=1 {
+                        for dx in -1i32..=1 {
+                            let yy = (y as i32 + dy) as usize;
+                            let xx = (x as i32 + dx) as usize;
+                            window[wi] = tile_data[yy * pw + xx] as f64;
+                            wi += 1;
+                        }
+                    }
+                    window.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    let median = window[4];
+                    residuals.push((v - median).abs());
+                }
+            }
+            if residuals.is_empty() {
+                continue;
+            }
+
+            // Robust sigma via MAD.
+            residuals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let mad = residuals[residuals.len() / 2];
+            let sigma = 1.4826 * mad;
+
+            let confidence = if residuals.len() >= 256 {
+                Confidence::High
+            } else if residuals.len() >= 64 {
+                Confidence::Medium
+            } else {
+                Confidence::Low
+            };
+
+            samples.push(RegionalNoiseSample {
+                region: [x0 as u32, y0 as u32, tw as u32, th as u32],
+                sigma,
+                confidence,
+            });
+        }
+    }
+
+    samples
+}
+
+/// CR-07 §8.1: one tile of the regional noise map.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegionalNoiseSample {
+    /// Tile bounds as `[x, y, width, height]` in pixels.
+    pub region: [u32; 4],
+    /// Noise sigma in pixel units (same scale as
+    /// `luminance_noise`).
+    pub sigma: f64,
+    /// Confidence in the tile's sigma estimate.
+    pub confidence: Confidence,
+}
+
 /// CR-06 §5.1 — Noise level on the luminance channel,
 /// binned as `Low / Moderate / High / Extreme` based on
 /// sigma-clipping over the image's residuals (pixel value

@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+### Slice §8.2: CR-07 edge response metric
+
+**Scope.** Closes the §8 "Edge response" ⚠️ Partial row by
+shipping the `edge_response` metric: the mean Sobel gradient
+magnitude (`sqrt(Gx² + Gy²)`) across the image preview. A
+high value means many strong edges (stars, structure); a
+low value means a soft / blurry image.
+
+The scalar metric is wired into `metric_snapshot` so the
+delta table surfaces the `sharpness.edge_response` key.
+
+#### New public API
+
+- `crates/astroforge-core/src/image_analysis/metrics.rs`:
+  - `edge_response(image: &F32Image) -> MetricsSample`:
+    mean Sobel magnitude across the preview. Returns `0.0`
+    with `Confidence::Low` when the image is too small.
+
+#### Wiring
+
+- `crates/astroforge-core/src/comparison_metrics.rs`:
+  `metric_snapshot` now inserts `MetricKind::SharpnessEdgeResponse`
+  with the `edge_response` scalar. Two existing snapshot
+  tests updated to expect 8 keys (was 7) and 23 total keys
+  in `metric_snapshot_full` (was 22).
+
+#### Tests
+
+- `crates/astroforge-core/tests/edge_response.rs`: 6 tests
+  covering uniform image (magnitude = 0), sharp vertical
+  edge (high magnitude), gradient (lower magnitude), too-
+  small image, determinism, and non-negative / finite.
+
+#### Out of scope (intentional)
+
+- No UI wiring. The metric flows through the existing
+  `compare_version_metrics` IPC path.
+- No IPC changes.
+
+#### Verification
+
+- `cargo fmt --all -- --check`: pass
+- `cargo clippy --workspace --all-targets -- -D warnings`: pass
+- `cargo test --workspace`: pass (6 new tests)
+- `npm run check`: 0 errors (pre-existing warnings)
+- `npm run build`: pass
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session`: pass
+
 ### Slice §8.1: CR-07 regional noise metric
 
 **Scope.** Closes the §8 "Regional noise" ⚠️ Partial row by

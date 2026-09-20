@@ -1060,6 +1060,8 @@ export interface GateFindingJson {
 export interface QualityGateReportJson {
   verdict: QualityVerdict;
   findings: GateFindingJson[];
+  /** CR-07 §11: natural-language summary of the gate findings. */
+  summary: string;
   source_image_version_id: string;
   result_image_version_id: string;
   operation_id: string;

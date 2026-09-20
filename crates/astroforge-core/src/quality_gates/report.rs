@@ -48,6 +48,10 @@ impl QualityVerdict {
 pub struct QualityGateReport {
     pub verdict: QualityVerdict,
     pub findings: Vec<GateFinding>,
+    /// CR-07 §11: natural-language summary of the gate
+    /// findings (e.g. "Overall: Strong improvement with
+    /// minor trade-offs.").
+    pub summary: String,
     /// Identifier of the source Image Version.
     pub source_image_version_id: String,
     /// Identifier of the result Image Version.
@@ -106,12 +110,89 @@ pub fn run(
         gates::excessive_smoothing(source, result, thresholds),
     ];
     let verdict = verdict(&findings);
+    let summary = summary_from_findings(&findings);
     QualityGateReport {
         verdict,
         findings,
+        summary,
         source_image_version_id,
         result_image_version_id,
         operation_id,
+    }
+}
+
+/// CR-07 §11: generate a natural-language summary from the
+/// gate findings. The summary follows the same format as
+/// `assessment::natural_language_summary` but without the
+/// comparison context (no A/B labels, no metric deltas).
+pub fn summary_from_findings(findings: &[GateFinding]) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for finding in findings {
+        let marker = match finding.severity {
+            Severity::Ok => continue,
+            Severity::Info => "[i]",
+            Severity::Warning => "[!]",
+            Severity::Failure => "[!]",
+        };
+        let label = gate_summary_label(&finding.gate);
+        let verb = finding_summary_verb(&finding.gate, finding.severity);
+        lines.push(format!("{} {} {}", marker, label, verb));
+    }
+    let (_ok, info, warn, fail) = count_by_severity(findings);
+    let overall = if fail > 0 {
+        format!("{} failure(s) require attention.", fail)
+    } else if warn > 0 {
+        format!("{} warning(s) detected; review recommended.", warn)
+    } else if info > 0 {
+        format!("{} informational finding(s).", info)
+    } else {
+        "All gates passed.".to_string()
+    };
+    if lines.is_empty() {
+        format!("Overall:\n{}", overall)
+    } else {
+        format!("{}\nOverall:\n{}", lines.join("\n"), overall)
+    }
+}
+
+fn gate_summary_label(gate: &GateId) -> &'static str {
+    match gate {
+        GateId::Clipping => "Clipping",
+        GateId::NoiseAmplification => "Noise amplification",
+        GateId::StarArtifacts => "Star artifacts",
+        GateId::Halos => "Halos",
+        GateId::Ringing => "Ringing",
+        GateId::FalseStructures => "False structures",
+        GateId::ColorShifts => "Color shifts",
+        GateId::EdgeArtifacts => "Edge artifacts",
+        GateId::SegmentationLeakage => "Segmentation leakage",
+        GateId::ExcessiveSmoothing => "Excessive smoothing",
+    }
+}
+
+fn finding_summary_verb(gate: &GateId, severity: Severity) -> &'static str {
+    match (gate, severity) {
+        (GateId::Clipping, Severity::Warning) => "detected",
+        (GateId::Clipping, Severity::Failure) => "increased",
+        (GateId::NoiseAmplification, Severity::Warning) => "detected",
+        (GateId::NoiseAmplification, Severity::Failure) => "amplified",
+        (GateId::StarArtifacts, Severity::Warning) => "detected",
+        (GateId::StarArtifacts, Severity::Failure) => "detected",
+        (GateId::Halos, Severity::Warning) => "detected",
+        (GateId::Halos, Severity::Failure) => "detected",
+        (GateId::Ringing, Severity::Warning) => "detected",
+        (GateId::Ringing, Severity::Failure) => "detected",
+        (GateId::FalseStructures, Severity::Warning) => "detected",
+        (GateId::FalseStructures, Severity::Failure) => "detected",
+        (GateId::ColorShifts, Severity::Warning) => "detected",
+        (GateId::ColorShifts, Severity::Failure) => "shifted",
+        (GateId::EdgeArtifacts, Severity::Warning) => "detected",
+        (GateId::EdgeArtifacts, Severity::Failure) => "detected",
+        (GateId::SegmentationLeakage, Severity::Warning) => "detected",
+        (GateId::SegmentationLeakage, Severity::Failure) => "leaked",
+        (GateId::ExcessiveSmoothing, Severity::Warning) => "detected",
+        (GateId::ExcessiveSmoothing, Severity::Failure) => "detected",
+        _ => "detected",
     }
 }
 

@@ -739,6 +739,44 @@ fn recipe_is_system(
     store.is_system_profile(&profile_id).map_err(Into::into)
 }
 
+/// CR-08 §22.4: archive a Recipe profile. Archived
+/// profiles remain on disk but are hidden from the
+/// default `recipe_list` results (the §28
+/// "delete/archive" row's archive half). Returns true
+/// when at least one row was updated, false when the
+/// profile does not exist yet.
+#[tauri::command]
+fn recipe_archive(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+) -> Result<bool, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    store.archive_profile(&profile_id).map_err(Into::into)
+}
+
+/// CR-08 §22.4: unarchive a Recipe profile. Returns
+/// true when at least one row was updated.
+#[tauri::command]
+fn recipe_unarchive(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+) -> Result<bool, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    store.unarchive_profile(&profile_id).map_err(Into::into)
+}
+
+/// CR-08 §22.4: read whether any version of a profile
+/// is currently archived. The UI uses this to render
+/// the "Archived" badge + toggle in RecipesScreen.
+#[tauri::command]
+fn recipe_is_archived(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+) -> Result<bool, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    store.is_archived_profile(&profile_id).map_err(Into::into)
+}
+
 /// CR-08 §22.2: delete a Recipe profile (every version,
 /// every branch). Returns the number of rows deleted.
 /// Deleting a profile that does not exist returns 0 (the
@@ -1126,6 +1164,9 @@ fn main() {
             recipe_save,
             recipe_duplicate,
             recipe_delete,
+            recipe_archive,
+            recipe_unarchive,
+            recipe_is_archived,
             recipe_mark_as_system,
             recipe_is_system,
             recipe_export,

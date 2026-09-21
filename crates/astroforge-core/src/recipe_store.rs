@@ -106,6 +106,22 @@ impl RecipeStore {
                 [],
             )?;
         }
+        // Same pattern for §22.4's `is_archived` column.
+        let has_is_archived: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('recipes') \
+                 WHERE name = 'is_archived'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_is_archived == 0 {
+            conn.execute(
+                "ALTER TABLE recipes \
+                 ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -354,6 +370,50 @@ impl RecipeStore {
         let v: Option<i64> = conn
             .query_row(
                 "SELECT MAX(is_system) FROM recipes WHERE profile_id = ?1",
+                params![profile_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(v.map(|x| x != 0).unwrap_or(false))
+    }
+
+    /// CR-08 §22.4: mark every version of a profile as
+    /// archived. Archived profiles are hidden from the
+    /// default `list()` results but remain on disk (the
+    /// §28 "delete/archive" row's archive half). Returns
+    /// true when at least one row was updated, false
+    /// when the profile does not exist yet.
+    pub fn archive_profile(&self, profile_id: &str) -> Result<bool, RecipeStoreError> {
+        let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE recipes SET is_archived = 1 WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    /// CR-08 §22.4: clear the archived flag on every
+    /// version of a profile. Returns true when at least
+    /// one row was updated.
+    pub fn unarchive_profile(&self, profile_id: &str) -> Result<bool, RecipeStoreError> {
+        let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE recipes SET is_archived = 0 WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    /// CR-08 §22.4: read whether any version of a profile
+    /// is currently archived. Used by `list()`'s default
+    /// filter + the UI's archived-toggle in
+    /// RecipesScreen.
+    pub fn is_archived_profile(&self, profile_id: &str) -> Result<bool, RecipeStoreError> {
+        let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let v: Option<i64> = conn
+            .query_row(
+                "SELECT MAX(is_archived) FROM recipes WHERE profile_id = ?1",
                 params![profile_id],
                 |row| row.get::<_, Option<i64>>(0),
             )

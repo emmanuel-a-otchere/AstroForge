@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+### Slice §22.4: CR-08 recipe_archive IPC
+
+**Scope.** Closes the §28 "User can delete/archive a user
+Recipe" row's archive half by adding an `is_archived`
+column to the `recipes` table and three Tauri commands
+(`recipe_archive`, `recipe_unarchive`,
+`recipe_is_archived`).
+
+**What.**
+
+- `crates/astroforge-core/src/db.rs`: `recipes` table
+  gets `is_archived INTEGER NOT NULL DEFAULT 0` plus an
+  index `idx_recipes_is_archived`.
+- `crates/astroforge-core/src/recipe_store.rs`:
+  idempotent column-add in `RecipeStore::new` (same
+  PRAGMA table_info check + conditional ALTER pattern as
+  §3.1's `is_system` migration), new
+  `archive_profile` + `unarchive_profile` +
+  `is_archived_profile` methods.
+- `src-tauri/src/main.rs`: three new Tauri commands.
+  `recipe_archive(profile_id)` flips the flag on every
+  version; `recipe_unarchive(profile_id)` clears it;
+  `recipe_is_archived(profile_id)` reads it. All
+  registered in `invoke_handler`.
+- `src/lib/profile-store.ts`: `archiveProfile` +
+  `unarchiveProfile` + `isArchivedProfile` wrappers.
+  Browser-mode placeholders for end-to-end UI testing.
+- `crates/astroforge-core/tests/recipe_archive.rs`: 7
+  tests pinning the contract: default is not-archived;
+  archive flips every version; unarchive clears the
+  flag; archived profiles are still writable (archive
+  is a visibility flag, not a protection); delete works
+  on archived profiles; archive + system flags are
+  independent (system guard runs against `is_system`
+  only); archive + unarchive on an unknown profile
+  returns false.
+
+**Verification.** All 6 gates pass: `cargo fmt --check`,
+`clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace` (35 suites, 0 failures),
+`npm run check` (1 pre-existing error + 9 pre-existing
+warnings, unchanged baseline), `npm run build`,
+`mvp_smoke.sh`.
+
+**Honest flags.**
+
+- The UI surface change (RecipesScreen "Archive" button
+  + the "Show archived" toggle) is a follow-on slice.
+  This PR lands the column + the IPCs; the UI wiring is
+  a RecipesScreen change.
+- Archive and delete are orthogonal. The §22.2 delete
+  IPC still works on an archived profile; the §22.4
+  archive IPC still works on a non-archived profile.
+- Same src-tauri lint caveat as prior slices: thin
+  pass-throughs over tested primitives; CI's rust job
+  is the authoritative lint pass.
+
 ### Slice §3.1: CR-08 system-recipe protection
 
 **Scope.** Closes the §3.1 System Recipes row + the §28

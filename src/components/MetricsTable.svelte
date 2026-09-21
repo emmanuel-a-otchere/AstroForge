@@ -25,6 +25,7 @@
   import {
     compareVersionMetrics,
     type DeltaDirection,
+    type MetricDeltaRow,
     type VersionMetricsComparison,
   } from "../lib/astroforge-api";
 
@@ -41,6 +42,10 @@
     scope?: "whole" | "selected" | "feature";
     feature?: string | null;
     hasRegion?: boolean;
+    /** CR-07 §31: Simple view (beginner mode) hides the
+     *  advanced diagnostic metric groups entirely instead of
+     *  collapsing them behind disclosure toggles. */
+    hideAdvanced?: boolean;
   }
   const {
     versionIdA,
@@ -50,6 +55,7 @@
     scope = "whole",
     feature = null,
     hasRegion = false,
+    hideAdvanced = false,
   }: Props = $props();
 
   const SCOPE_LABEL: Record<NonNullable<Props["scope"]>, string> = {
@@ -113,6 +119,89 @@
     const sign = row.percent_change > 0 ? "+" : "";
     return `${sign}${row.percent_change.toFixed(0)}%`;
   }
+
+  // CR-07 §31 acceptance polish: group the flat 25-metric table
+  // by metric category (the namespace prefix of `row.kind`). The
+  // core image-quality categories (sharpness / noise / signal /
+  // dynamic_range) render first and expanded; the advanced
+  // diagnostic categories (stars / background / ai) render behind
+  // a per-group disclosure toggle so the table stays readable
+  // (§31 "advanced metrics use progressive disclosure"). In the
+  // Compare workspace's Simple view (`hideAdvanced`) the advanced
+  // groups are not rendered at all.
+  const CATEGORY_LABEL: Record<string, string> = {
+    sharpness: "Sharpness",
+    noise: "Noise",
+    signal: "Signal & SNR",
+    dynamic_range: "Dynamic range",
+    stars: "Stars",
+    background: "Background",
+    ai: "AI",
+  };
+  const CORE_CATEGORIES = new Set([
+    "sharpness",
+    "noise",
+    "signal",
+    "dynamic_range",
+  ]);
+  const CATEGORY_ORDER = [
+    "sharpness",
+    "noise",
+    "signal",
+    "dynamic_range",
+    "stars",
+    "background",
+    "ai",
+  ];
+
+  interface MetricGroup {
+    category: string;
+    label: string;
+    advanced: boolean;
+    rows: MetricDeltaRow[];
+  }
+
+  const groups = $derived.by((): MetricGroup[] => {
+    if (!report) return [];
+    const byCategory = new Map<string, MetricDeltaRow[]>();
+    for (const row of report.rows) {
+      const category = row.kind.split(".")[0] || "other";
+      const bucket = byCategory.get(category) ?? [];
+      bucket.push(row);
+      byCategory.set(category, bucket);
+    }
+    const ordered = [
+      ...CATEGORY_ORDER,
+      ...[...byCategory.keys()].filter((k) => !CATEGORY_ORDER.includes(k)),
+    ];
+    return ordered
+      .filter((category) => byCategory.has(category))
+      .map((category) => ({
+        category,
+        label: CATEGORY_LABEL[category] ?? category,
+        advanced: !CORE_CATEGORIES.has(category),
+        rows: byCategory.get(category) ?? [],
+      }));
+  });
+
+  const advancedRowCount = $derived(
+    groups
+      .filter((g) => g.advanced)
+      .reduce((sum, g) => sum + g.rows.length, 0),
+  );
+
+  // Per-group disclosure state. Core groups are always open;
+  // advanced groups start collapsed and toggle independently.
+  let openGroups = $state<Record<string, boolean>>({});
+  function isGroupOpen(group: MetricGroup): boolean {
+    return openGroups[group.category] ?? !group.advanced;
+  }
+  function toggleGroup(group: MetricGroup): void {
+    openGroups = {
+      ...openGroups,
+      [group.category]: !isGroupOpen(group),
+    };
+  }
 </script>
 
 <section class="metrics-panel" aria-label="Metric comparison">
@@ -160,43 +249,75 @@
           </tr>
         </thead>
         <tbody>
-          {#each report.rows as row (row.kind)}
-            <tr data-direction={row.direction} title={row.context}>
-              <td class="metric-name font-body">
-                <span class="metric-label">{row.label}</span>
-                <!-- §9 contextual metric display: every metric
-                     carries a one-sentence explanation in
-                     `row.context` (populated for all 25 metrics
-                     by `crates/astroforge-core/src/metric_registry.rs`).
-                     Render it inline beneath the label so the user
-                     never sees a bare metric name without the
-                     "what does this mean + why it matters"
-                     sentence the spec requires. The browser
-                     tooltip (title=) above remains for users who
-                     want the full context on hover. -->
-                <span class="metric-context font-body">{row.context}</span>
-              </td>
-              <td class="num font-data">
-                {formatValue(row.baseline_value, row.unit)}
-              </td>
-              <td class="num font-data">
-                {formatValue(row.compared_value, row.unit)}
-              </td>
-              <td class="num font-data">{formatPercent(row)}</td>
-              <td class="verdict">
-                <span
-                  class="material-symbols-outlined verdict-icon"
-                  aria-hidden="true"
-                >
-                  {DIRECTION_ICON[row.direction]}
-                </span>
-                <span class="verdict-label font-body">{row.direction}</span>
-              </td>
-            </tr>
+          {#each groups as group (group.category)}
+            {#if !hideAdvanced || !group.advanced}
+              <tr class="group-row">
+                <td colspan="5">
+                  {#if group.advanced}
+                    <button
+                      type="button"
+                      class="group-toggle font-label"
+                      aria-expanded={isGroupOpen(group)}
+                      onclick={() => toggleGroup(group)}
+                    >
+                      <span class="material-symbols-outlined" aria-hidden="true">
+                        {isGroupOpen(group) ? "expand_less" : "expand_more"}
+                      </span>
+                      {group.label} · {group.rows.length} metrics
+                    </button>
+                  {:else}
+                    <span class="group-label font-label">{group.label}</span>
+                  {/if}
+                </td>
+              </tr>
+              {#if isGroupOpen(group)}
+                {#each group.rows as row (row.kind)}
+                  <tr data-direction={row.direction} title={row.context}>
+                    <td class="metric-name font-body">
+                      <span class="metric-label">{row.label}</span>
+                      <!-- §9 contextual metric display: every metric
+                           carries a one-sentence explanation in
+                           `row.context` (populated for all 25 metrics
+                           by `crates/astroforge-core/src/metric_registry.rs`).
+                           Render it inline beneath the label so the user
+                           never sees a bare metric name without the
+                           "what does this mean + why it matters"
+                           sentence the spec requires. The browser
+                           tooltip (title=) above remains for users who
+                           want the full context on hover. -->
+                      <span class="metric-context font-body">{row.context}</span>
+                    </td>
+                    <td class="num font-data">
+                      {formatValue(row.baseline_value, row.unit)}
+                    </td>
+                    <td class="num font-data">
+                      {formatValue(row.compared_value, row.unit)}
+                    </td>
+                    <td class="num font-data">{formatPercent(row)}</td>
+                    <td class="verdict">
+                      <span
+                        class="material-symbols-outlined verdict-icon"
+                        aria-hidden="true"
+                      >
+                        {DIRECTION_ICON[row.direction]}
+                      </span>
+                      <span class="verdict-label font-body">{row.direction}</span>
+                    </td>
+                  </tr>
+                {/each}
+              {/if}
+            {/if}
           {/each}
         </tbody>
       </table>
     </div>
+    {#if hideAdvanced && advancedRowCount > 0}
+      <p class="note font-body">
+        <span class="material-symbols-outlined" aria-hidden="true">info</span>
+        {advancedRowCount} advanced metrics hidden in Simple view. Switch to
+        Detailed to see them.
+      </p>
+    {/if}
     <pre class="summary font-body">{report.summary}</pre>
   {/if}
 </section>
@@ -263,6 +384,42 @@
 
   .table-wrap {
     overflow-x: auto;
+  }
+
+  /* CR-07 §31: category group header rows + per-group
+     disclosure toggle for the advanced diagnostic groups. */
+  .group-row td {
+    padding: var(--sp-xs) var(--sp-sm) 0 var(--sp-sm);
+    border-bottom: none;
+  }
+
+  .group-label {
+    font-size: 0.7rem;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .group-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 0.7rem;
+    color: var(--on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .group-toggle:hover {
+    color: var(--primary);
+  }
+
+  .group-toggle .material-symbols-outlined {
+    font-size: 14px;
   }
 
   table {

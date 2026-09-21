@@ -37,6 +37,7 @@
   import QualityProfilePicker from "./QualityProfilePicker.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
   import { studioViewport } from "../state/application";
+  import { generateRecommendationsFor } from "../state/ai-enhancement";
   import { applyImageDecision, recipeGetForImageVersion } from "../lib/astroforge-api";
   import {
     exportComparisonComposite,
@@ -93,6 +94,35 @@
   // beginner / intermediate experience clean.
   let showExpertDetails = $state(false);
 
+  // CR-07 §31 acceptance polish: Simple / Detailed view mode.
+  // Simple (beginner) mode hides the expert instrumentation
+  // (version DAG, region picker, expert panels, provenance and
+  // recipe timeline rows, quality profile picker, comparison
+  // sets) and the advanced metric groups, leaving the beginner
+  // prompt, the canvas, the grouped core metrics, the decision
+  // row, and the continue bar. Detailed mode renders everything
+  // (the pre-§31 surface). Default stays "detailed" so the
+  // existing review surface is unchanged; the choice persists
+  // in localStorage.
+  type CompareDetailMode = "simple" | "detailed";
+  const DETAIL_MODE_KEY = "astroforge.compare.detail-mode";
+  let detailMode = $state<CompareDetailMode>(
+    typeof localStorage !== "undefined" &&
+      localStorage.getItem(DETAIL_MODE_KEY) === "simple"
+      ? "simple"
+      : "detailed",
+  );
+  function setDetailMode(mode: CompareDetailMode): void {
+    detailMode = mode;
+    try {
+      localStorage.setItem(DETAIL_MODE_KEY, mode);
+    } catch {
+      // Private browsing / storage-denied contexts: the mode
+      // stays session-local, which is acceptable.
+    }
+  }
+  const isSimple = $derived(detailMode === "simple");
+
   // Overlay regions handed to ImageCanvas. Always empty for
   // "whole" scope (whole-image has no visual overlay); populated
   // for "selected" and "feature".
@@ -138,28 +168,43 @@
     $versionStore.versions.find((v) => v.version_id === bId) ?? null,
   );
 
-  // CR-07 §13 AI-aware comparison badge. The compare-header
-  // shows a one-line chip when the version's Recipe chain
-  // includes a perceptual (AI) model. Data path:
+  // CR-07 §13 AI-aware comparison badge + §31 acceptance polish.
+  // The compare-header shows a chip per version identifying how
+  // the version was produced. Data path:
   // `recipeGetForImageVersion(versionId)` returns the Recipe
-  // whose `integrity.perceptual_models_used` boolean is read
-  // here. Three-state model: `true` (chip on), `false` (chip
-  // off, deterministic-only chain), `null` (still loading or
-  // no Recipe recorded). The recipe store is per-version, so
-  // we load both A and B independently.
-  let aiUsedA = $state<boolean | null>(null);
-  let aiUsedB = $state<boolean | null>(null);
+  // whose `integrity.perceptual_models_used` boolean and
+  // `integrity.models[].model_name` list are read here.
+  // Three-state model: `used: true` ("AI used" chip with model
+  // names), `used: false` ("Deterministic" chip: the chain ran
+  // deterministic stages only), `null` (still loading or no
+  // Recipe recorded: chip stays hidden rather than guessing).
+  // The recipe store is per-version, so we load both A and B
+  // independently. §31: the model names ride on the chip tooltip
+  // and on the AI identity strip above the metrics panel so the
+  // user can tell WHICH AI touched the image, not just THAT one
+  // did.
+  interface AiIdentity {
+    used: boolean;
+    models: string[];
+  }
+  let aiInfoA = $state<AiIdentity | null>(null);
+  let aiInfoB = $state<AiIdentity | null>(null);
   $effect(() => {
     const id = versionA?.version_id ?? null;
     if (!id) {
-      aiUsedA = null;
+      aiInfoA = null;
       return;
     }
     let cancelled = false;
     recipeGetForImageVersion(id)
       .then((r) => {
         if (cancelled) return;
-        aiUsedA = r?.integrity.perceptual_models_used ?? false;
+        aiInfoA = r
+          ? {
+              used: r.integrity.perceptual_models_used,
+              models: r.integrity.models.map((m) => m.model_name),
+            }
+          : null;
       })
       .catch(() => {
         if (cancelled) return;
@@ -168,7 +213,7 @@
         // "AI used" badge for a version whose chain we
         // couldn't read. The provenance panel surfaces the
         // full error separately.
-        aiUsedA = null;
+        aiInfoA = null;
       });
     return () => {
       cancelled = true;
@@ -177,18 +222,23 @@
   $effect(() => {
     const id = versionB?.version_id ?? null;
     if (!id) {
-      aiUsedB = null;
+      aiInfoB = null;
       return;
     }
     let cancelled = false;
     recipeGetForImageVersion(id)
       .then((r) => {
         if (cancelled) return;
-        aiUsedB = r?.integrity.perceptual_models_used ?? false;
+        aiInfoB = r
+          ? {
+              used: r.integrity.perceptual_models_used,
+              models: r.integrity.models.map((m) => m.model_name),
+            }
+          : null;
       })
       .catch(() => {
         if (cancelled) return;
-        aiUsedB = null;
+        aiInfoB = null;
       });
     return () => {
       cancelled = true;
@@ -362,17 +412,36 @@
     }
   }
 
-  /** Navigate to the Enhance workspace. The
-   *  Enhance flow derives its source from the
-   *  project's latest version (not from a
-   *  CompareWorkspace-chosen one); the button
-   *  is the user's intent signal to "go
-   *  enhance next", not a strict
-   *  hand-off of B's id. A future slice
-   *  may add a per-version source override
-   *  to the Enhance flow. */
-  function continueEnhancing(): void {
-    studioViewport.setView("enhance");
+  // CR-07 §31 acceptance polish: continue editing from a
+  // SELECTED version (A or B), not an implied latest. The
+  // handler runs the recommendation engine against the chosen
+  // version (`generate_ai_recommendations` takes a per-version
+  // `image_version_id`; the run persists the recommendation
+  // rows for that version and populates the AI enhancement
+  // store the Enhance surface reads), then navigates. A
+  // recommendation-run failure is non-blocking: the user still
+  // lands on Enhance and the error surfaces inline here.
+  let continueBusy = $state<"A" | "B" | null>(null);
+  let continueError = $state<string | null>(null);
+  async function continueFromVersion(side: "A" | "B"): Promise<void> {
+    const versionId = side === "A" ? aId : bId;
+    const projectId = $versionStore.project_id;
+    if (!versionId || !projectId) return;
+    continueBusy = side;
+    continueError = null;
+    try {
+      await generateRecommendationsFor({
+        project_id: projectId,
+        image_version_id: versionId,
+      });
+    } catch (e) {
+      continueError = `Recommendations for version ${side} failed: ${
+        e instanceof Error ? e.message : String(e)
+      }`;
+    } finally {
+      continueBusy = null;
+      studioViewport.setView("enhance");
+    }
   }
 
   // CR-07 C-A2: side-by-side composite export (§30).
@@ -587,16 +656,27 @@
           <h2 class="pane-title font-display">
             {versionA?.label ?? "—"}
           </h2>
-          {#if aiUsedA === true}
+          {#if aiInfoA?.used === true}
             <span
               class="ai-used-chip font-label"
               data-side="A"
-              title="This version's Recipe chain includes a perceptual (AI) model."
+              title="This version's Recipe chain includes perceptual (AI) models: {aiInfoA.models.join(', ') || 'model names not recorded'}."
             >
               <span class="material-symbols-outlined" aria-hidden="true">
                 auto_awesome
               </span>
               AI used
+            </span>
+          {:else if aiInfoA?.used === false}
+            <span
+              class="ai-used-chip deterministic font-label"
+              data-side="A"
+              title="This version's Recipe chain ran deterministic stages only; no AI models involved."
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">
+                rule
+              </span>
+              Deterministic
             </span>
           {/if}
         </header>
@@ -662,16 +742,27 @@
           <h2 class="pane-title font-display">
             {versionB?.label ?? "—"}
           </h2>
-          {#if aiUsedB === true}
+          {#if aiInfoB?.used === true}
             <span
               class="ai-used-chip font-label"
               data-side="B"
-              title="This version's Recipe chain includes a perceptual (AI) model."
+              title="This version's Recipe chain includes perceptual (AI) models: {aiInfoB.models.join(', ') || 'model names not recorded'}."
             >
               <span class="material-symbols-outlined" aria-hidden="true">
                 auto_awesome
               </span>
               AI used
+            </span>
+          {:else if aiInfoB?.used === false}
+            <span
+              class="ai-used-chip deterministic font-label"
+              data-side="B"
+              title="This version's Recipe chain ran deterministic stages only; no AI models involved."
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">
+                rule
+              </span>
+              Deterministic
             </span>
           {/if}
         </header>
@@ -743,6 +834,64 @@
            two nodes here pushes the ids straight into the
            A/B pickers above. -->
       <div class="compare-extras">
+        <!-- CR-07 §31: Simple / Detailed view-mode toggle.
+             Simple hides the expert instrumentation so the
+             beginner flow stays a prompt + canvas + core
+             metrics + decision row. Detailed renders the full
+             surface. -->
+        <div class="detail-mode-row">
+          <div class="detail-mode-toggle" role="group" aria-label="Comparison detail level">
+            <button
+              type="button"
+              class="mode-button"
+              class:active={isSimple}
+              aria-pressed={isSimple}
+              onclick={() => setDetailMode("simple")}
+            >
+              Simple
+            </button>
+            <button
+              type="button"
+              class="mode-button"
+              class:active={!isSimple}
+              aria-pressed={!isSimple}
+              onclick={() => setDetailMode("detailed")}
+            >
+              Detailed
+            </button>
+          </div>
+          {#if isSimple}
+            <p class="expert-hint">
+              Simple view hides the expert panels and advanced
+              metric groups. Switch to Detailed for the full
+              instrumentation.
+            </p>
+          {/if}
+        </div>
+        <!-- CR-07 §31: AI processing identification strip.
+             The pane-header chips only render in the canvas
+             layout; this strip identifies each side's Recipe
+             chain in BOTH layouts (canvas + CompareTools). -->
+        {#if aiInfoA || aiInfoB}
+          <p class="ai-identity-strip font-body">
+            <span class="material-symbols-outlined" aria-hidden="true">
+              auto_awesome
+            </span>
+            <span>
+              A: {aiInfoA
+                ? aiInfoA.used
+                  ? `AI used (${aiInfoA.models.join(", ") || "model names not recorded"})`
+                  : "Deterministic"
+                : "no recipe recorded"}
+              · B: {aiInfoB
+                ? aiInfoB.used
+                  ? `AI used (${aiInfoB.models.join(", ") || "model names not recorded"})`
+                  : "Deterministic"
+                : "no recipe recorded"}
+            </span>
+          </p>
+        {/if}
+        {#if !isSimple}
         <VersionDag
           versions={dagVersions}
           presetA={aId}
@@ -762,6 +911,7 @@
           selectedFeature={selectedFeature}
           onFeatureChange={(f) => (selectedFeature = f)}
         />
+        {/if}
         <MetricsTable
           versionIdA={aId}
           versionIdB={bId}
@@ -770,8 +920,9 @@
           scope={regionScope}
           feature={selectedFeature}
           hasRegion={selectedRegion !== null}
+          hideAdvanced={isSimple}
         />
-        {#if aId && bId}
+        {#if aId && bId && !isSimple}
           <div class="expert-toggle-row">
             <button
               type="button"
@@ -852,7 +1003,9 @@
              the B13c provenanceStore; the store's
              in-flight stale-load guard means two
              panels pointing at different versions
-             don't fight each other. -->
+             don't fight each other. §31: hidden in
+             Simple view. -->
+        {#if !isSimple}
         <div class="provenance-row">
           <ProvenancePanel
             versionId={aId}
@@ -905,15 +1058,18 @@
           labelB={versionB?.label ?? "B"}
           onApply={applySet}
         />
+        {/if}
         <!-- CR-07 C-A1: continue-from-comparison
-             action bar. Four CTAs that close the
+             action bar. Five CTAs that close the
              comparison loop:
              1. Mark Preferred (B): wired to
                 applyImageDecision("preferred").
-             2. Continue enhancing: navigates
-                to Enhance workspace with B
-                pre-selected as source.
-             3. Create branch: wired in §19
+             2/3. Continue with A / Continue with B
+                (§31): runs the recommendation
+                engine against the SELECTED version
+                (per-version image_version_id), then
+                navigates to Enhance.
+             4. Create branch: wired in §19
                 close-out: persists branch
                 intent via applyImageDecision
                 (state="preferred", reason=
@@ -921,7 +1077,7 @@
                 to Enhance. P5a will read these
                 decisions to create child
                 versions.
-             4. Export: wired in C-A2 (side-
+             5. Export: wired in C-A2 (side-
                 by-side composite export).
              The bar only renders when both A
              and B are selected (same gate as
@@ -941,11 +1097,24 @@
             <button
               type="button"
               class="continue-cta"
-              onclick={continueEnhancing}
-              aria-label="Continue enhancing from version B"
+              disabled={continueBusy !== null || !aId}
+              onclick={() => continueFromVersion("A")}
+              title="Run AI recommendations for version A and open Enhance"
+              aria-label="Continue editing from version A"
             >
               <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
-              Continue enhancing
+              {continueBusy === "A" ? "Preparing A…" : "Continue with A"}
+            </button>
+            <button
+              type="button"
+              class="continue-cta"
+              disabled={continueBusy !== null || !bId}
+              onclick={() => continueFromVersion("B")}
+              title="Run AI recommendations for version B and open Enhance"
+              aria-label="Continue editing from version B"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
+              {continueBusy === "B" ? "Preparing B…" : "Continue with B"}
             </button>
             <button
               type="button"
@@ -973,6 +1142,12 @@
             <p class="continue-error font-body" role="alert">
               <span class="material-symbols-outlined" aria-hidden="true">error</span>
               {markPreferredError}
+            </p>
+          {/if}
+          {#if continueError}
+            <p class="continue-error font-body" role="alert">
+              <span class="material-symbols-outlined" aria-hidden="true">error</span>
+              {continueError}
             </p>
           {/if}
           {#if exportError}
@@ -1219,6 +1394,52 @@
 
   .ai-used-chip .material-symbols-outlined {
     font-size: 12px;
+  }
+
+  /* §31: deterministic-only chain chip. Neutral cool
+     palette so it reads as "no AI involved" rather than
+     as a warning; same shape as the AI-used chip. */
+  .ai-used-chip.deterministic {
+    background: rgba(74, 144, 255, 0.14);
+    color: #4a90ff;
+    border-color: rgba(74, 144, 255, 0.3);
+  }
+
+  /* §31: AI identity strip. Renders in compare-extras so
+     the per-side Recipe-chain identification is visible
+     in BOTH canvas and CompareTools layouts (the pane
+     header chips only exist in the canvas layout). */
+  .ai-identity-strip {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-xs);
+    margin: 0;
+    padding: var(--sp-xs) var(--sp-sm);
+    background: var(--surface-container-low);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    color: var(--on-surface-variant);
+    font-size: 0.8rem;
+  }
+
+  .ai-identity-strip .material-symbols-outlined {
+    font-size: 14px;
+    color: #ff904a;
+  }
+
+  /* §31: Simple / Detailed view-mode toggle row. Reuses
+     the .mode-button visual language from the mode
+     toggle above the canvas. */
+  .detail-mode-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-md);
+    flex-wrap: wrap;
+  }
+
+  .detail-mode-toggle {
+    display: inline-flex;
+    gap: var(--sp-xs);
   }
 
   /* CR-07 C-A1: continue-from-comparison

@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+### Slice §31: CR-07 acceptance polish batch (5 rows)
+
+**Scope.** Closes the final 5 ⚠️ rows of the §31 acceptance
+table in one batched UI polish PR (user directive: Option A).
+Zero Rust changes; the batch is pure Svelte + docs.
+
+**What.**
+
+- **Relevant image metrics are available**: `MetricsTable`
+  groups its 25 rows by metric category (the namespace prefix
+  of `row.kind`). Core image-quality groups (sharpness, noise,
+  signal, dynamic range) render first and expanded; advanced
+  diagnostic groups (stars, background, AI) follow.
+- **Advanced metrics use progressive disclosure**: each
+  advanced group renders collapsed behind a per-group toggle
+  (`aria-expanded`), independent per group.
+- **Beginner mode is simple**: new Simple / Detailed toggle in
+  CompareWorkspace. Simple hides the version DAG, region
+  picker, expert panels, provenance and recipe timeline rows,
+  quality profile picker, comparison sets, and the advanced
+  metric groups; what remains is the beginner prompt, the
+  canvas, the grouped core metrics, the decision row, and the
+  continue bar. The choice persists in localStorage; the
+  default stays Detailed so the existing review surface is
+  unchanged.
+- **AI processing is identified**: the per-version chip is now
+  three-state: "AI used" (tooltip lists the Recipe chain's
+  model names), "Deterministic" (chain ran deterministic
+  stages only), or hidden (no recipe recorded / IPC failed).
+  An AI identity strip above the metrics panel carries the
+  same per-side identification in both canvas and CompareTools
+  layouts.
+- **User can continue editing from a selected version**: the
+  single "Continue enhancing" button is replaced by "Continue
+  with A" and "Continue with B". Each runs
+  `generate_ai_recommendations` against the SELECTED version
+  (the IPC already accepted a per-version `image_version_id`;
+  the flow previously discarded it), then navigates to
+  Enhance. A recommendation-run failure is non-blocking: the
+  error surfaces inline and navigation still happens.
+
+**Verification.** All 6 gates pass: `cargo fmt --check`,
+`clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace` (all green, no test changes: pure
+frontend slice), `npm run check` (1 pre-existing error +
+9 pre-existing warnings, unchanged baseline), `npm run build`,
+`mvp_smoke.sh`.
+
+**Honest flags.** The §31 batch wires the continue flow to the
+recommendation engine, but the mounted Enhance surface
+(`EnhanceWorkspace`) still reads the legacy
+`versionStore.recommendations` list (always empty; the AI ops
+tranche is pending). The per-version run is durable (rows
+persist) and lands in `aiEnhancementStore` for the CR-06
+studio surface; the legacy list wiring is pre-existing debt,
+not introduced here.
+
 ### Slice §8.4: CR-07 SNR metrics (estimated + local)
 
 **Scope.** Closes the §8 "Estimated SNR / local SNR" ⚠️ Partial

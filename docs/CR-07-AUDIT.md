@@ -3,7 +3,7 @@
 **Source:** [`CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md`](CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md)
 **Implementation plan:** [`CR-07-IMPLEMENTATION-PLAN.md`](CR-07-IMPLEMENTATION-PLAN.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-20 (refresh 7: governance sweep: §8 "AI segmentation confidence / artifact indicators / model confidence" row moved out of CR-07 scope (deferred to CR-06 as AI model metadata); §34 DoD cross-reference sweep (§23/§24/§32 all shipped); Total corrects to 79 ✅ / 6 ⚠️ / 0 ❌ across 85 rows; §8 is now 15 ✅ / 0 ⚠️ / 0 ❌)
+**Last refresh:** 2026-09-21 (refresh 8: §31 acceptance polish batch closes the last 5 ⚠️ acceptance rows: relevant-metric grouping + per-group progressive disclosure in MetricsTable, three-state AI identification with model names, per-side Continue-with-A/B flow that runs the recommendation engine against the selected version, and a Simple/Detailed beginner mode toggle; §31 row flips to 28/0/0/28; Total corrects to 85 ✅ / 0 ⚠️ / 0 ❌ across 85 rows. Builds on refresh 7's governance sweep: §8 AI row moved to CR-06 scope, §34 DoD sweep landed)
 **Branch:** `feat/cr-07-29-3b-4-ui-integration` (from `origin/main` at `6cb7ed4`)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
@@ -249,14 +249,20 @@ Shipped in B3 (PR #324). `promote_image_version` /
 
 ## §19 Compare → Continue Workflow — ✅ Shipped
 
-Shipped in C-A1 (PR #339) + §19 close-out (PR #350).
+Shipped in C-A1 (PR #339) + §19 close-out (PR #350) + §31
+acceptance polish (2026-09-21).
 CompareWorkspace's continue-bar offers "Mark
-Preferred", "Continue enhancing", "Create branch",
-"Export comparison". All four are now wired:
+Preferred", "Continue with A", "Continue with B",
+"Create branch", "Export comparison". All five are now
+wired:
 - Mark Preferred (B): wires to
   `applyImageDecision("preferred")`.
-- Continue enhancing: navigates to Enhance with B
-  pre-selected.
+- Continue with A / Continue with B (§31): runs the
+  recommendation engine against the SELECTED version
+  (`generate_ai_recommendations` takes a per-version
+  `image_version_id`), then navigates to Enhance. A
+  recommendation-run failure is non-blocking (inline
+  error, navigation still happens).
 - Create branch (closed-out in this slice): wires
   to a `createBranch()` handler that persists the
   branch intent durably via
@@ -474,12 +480,12 @@ export + "Export comparison" composite PNG works.
 | Difference view works | ✅ |
 | Synchronized zoom/pan works | ✅ |
 | Regional comparison works | ✅ |
-| Relevant image metrics are available | ⚠️ Partial |
+| Relevant image metrics are available | ✅ (grouped by category, core first) |
 | Metrics can be compared between versions | ✅ |
 | Deltas are calculated | ✅ |
 | Quality warnings can be surfaced | ✅ |
 | Astronomical integrity checks can be surfaced | ✅ |
-| AI processing is identified | ⚠️ Data exists, UI partial |
+| AI processing is identified | ✅ (three-state chip + model names) |
 | Processing history is accessible | ✅ |
 | AI model information is accessible | ✅ |
 | Recipe information is accessible | ✅ |
@@ -487,13 +493,27 @@ export + "Export comparison" composite PNG works.
 | Provenance remains intact after comparison | ✅ |
 | Version can be marked Candidate / Preferred / Final / Rejected | ✅ |
 | Preferred/Final state survives restart | ✅ |
-| User can continue editing from a selected version | ⚠️ Partial |
+| User can continue editing from a selected version | ✅ (Continue with A / B) |
 | Branching remains non-destructive | ✅ |
 | Image remains dominant | ✅ |
-| Beginner mode is simple | ⚠️ Partial |
-| Advanced metrics use progressive disclosure | ⚠️ Partial |
+| Beginner mode is simple | ✅ (Simple / Detailed toggle) |
+| Advanced metrics use progressive disclosure | ✅ (per-group disclosure) |
 | Comparison does not expose internal DAG complexity | ✅ (DAG view exists) |
 | Comparison remains usable offline | ✅ |
+
+The five ⚠️ rows above closed in the §31 acceptance polish batch
+(2026-09-21): MetricsTable groups its 25 rows by metric category
+(sharpness / noise / signal / dynamic_range first and expanded;
+stars / background / ai collapsed behind per-group disclosure
+toggles), the AI chip is now three-state (AI used with model
+names / Deterministic / unknown) with an identity strip that
+renders in both canvas and CompareTools layouts, the continue
+bar offers Continue with A / Continue with B (each runs the
+recommendation engine against the selected version before
+navigating to Enhance), and a Simple / Detailed toggle gives
+the beginner mode a clean surface (prompt + canvas + core
+metrics + decisions + continue bar) while Detailed keeps the
+full instrumentation.
 
 ## §32 Test Strategy — ⚠️ Partial
 
@@ -694,14 +714,14 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §28 (impl map) | 1 | 0 | 0 | 1 |
 | §29 (performance) | 6 | 0 | 0 | 6 (all 6 body bullets shipped; §29.3b.4 UI integration closes the last ⚠️ row) |
 | §30 (export) | 1 | 0 | 0 | 1 |
-| §31 (acceptance) | 23 | 5 | 0 | 28 |
+| §31 (acceptance) | 28 | 0 | 0 | 28 |
 | §32 (test strategy) | 1 | 0 | 0 | 1 |
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 1 | 0 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **80** | **5** | **0** | **85** |
+| **Total** | **85** | **0** | **0** | **85** |
 
-**Coverage:** 93% shipped, 7% partial, 0% missing (post-§23.1..§23.4
+**Coverage:** 100% shipped, 0% partial, 0% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
@@ -714,10 +734,11 @@ contextual display + §13 AI-aware badge + §8 saturation percentage
 + §29.2a wire DiffCache through IPC
 + §29.3b.1a WGSL for background_gradient
 + §8.1 regional noise + §8.2 edge response + §8.3 color gradient
-+ §8.4 SNR + §34 DoD cross-reference sweep). The scorecard
-now agrees with the section bodies. **This refresh (refresh 7)**
-moves the §8 "AI segmentation confidence" row out of CR-07 scope
-(deferred to CR-06 as AI model metadata) and sweeps §34 DoD.
++ §8.4 SNR + §34 DoD cross-reference sweep
++ §31 acceptance polish batch). The scorecard
+now agrees with the section bodies. **Refresh 7** moved the
+§8 "AI segmentation confidence" row out of CR-07 scope
+(deferred to CR-06 as AI model metadata) and swept §34 DoD.
 
 ## Bundle status (post-§26 audit refresh)
 

@@ -1,8 +1,14 @@
 # CR-08 Audit — Recipes, Reproducibility & Processing Provenance
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
-**Audit date:** 2026-09-12
+**Original audit date:** 2026-09-12
+**Last refresh:** 2026-09-21 (refresh 1: stale-audit reconciliation against current code. Verified-flipped rows: §5 content-hash ✅ (Recipe::pipeline_plan_hash), §17 ProvenanceViewer ✅ (ProvenancePanel.svelte + RecipeStageTimeline.svelte), §18 DAG ✅ (VersionDag.svelte). Verified-still-partial (audit text was correct): §3 system + imported recipes, §9 mask_id + application_version on AiOperation, §10 beginner/guided editor tiers, §13 recipe-diff surface, §14 save-as-recipe, §15 Recipe Library 5-tab layout + RecipeDetail, §19 .afrecipe format, §20 param range / dependency / filesystem-rejection validation, §22 duplicate_recipe / delete_recipe / check_recipe_applicability / save_pipeline_as_recipe / import / export / get_recipe_provenance / compare_recipe_versions, §28 acceptance rows, §29 reproducibility + security tests, §30 9 ADRs)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
+
+Reconciled against `e5ec793` (post-CR-07 §31 close-out).
+The original 2026-09-12 audit predated the CR-06 P1-P7,
+CR-07 B1-B15 + §9 + §13 + §19 + §20 + §23 + §24 + §26 + §29 + §31
++ §32 series and is stale on §9, §17, §18, §22, §28.
 
 Reconciles every CR-08 §1–§32 acceptance criterion against the existing
 codebase.
@@ -75,7 +81,7 @@ The CR-08 §4 schema is comprehensive. Existing `Recipe` has:
 - Required / Optional / Stage Constraints / Ordering Constraints (no separate "required/optional" flags on `RecipeStage`)
 - Resource Policy (no field)
 
-## §5 Recipe Versioning — ✅ Shipped (substantial)
+## §5 Recipe Versioning: ✅ Shipped
 
 `recipe.rs` + `recipe_store.rs`:
 - `schema_version: String` (currently `SCHEMA_VERSION_CURRENT = "2.0"`)
@@ -85,11 +91,15 @@ The CR-08 §4 schema is comprehensive. Existing `Recipe` has:
 - `migrate_recipe()` function with `MigrationResult::AlreadyCurrent | Migrated | UnknownFuture`
 - Schema versions are independently tracked from app version
 - `validate_compatibility()` enforces schema version match
-- Content hash: implicit via JSON serialization (no explicit SHA-256 of payload)
-
-⚠️ **Missing:** explicit content hash (CR-08 §5 "Recipe content hash").
-The current hash is implicit (serde order-dependent). A SHA-256 of the
-canonical JSON form would be stronger.
+- Content hash: `Recipe::pipeline_plan_hash()` returns a
+  64-char lowercase SHA-256 of the canonical
+  (schema_version, stages[], integrity.models[]) projection.
+  Stable across calls; changes when any plan-affecting field
+  changes; ignores cosmetic fields (description, created_at,
+  parent_version, flags). 11 unit tests in `recipe.rs`
+  pin the contract. Wired through IPC as
+  `recipe_pipeline_plan_hash(profileId, version)`
+  (CR-07 §32.6).
 
 ## §6 Reproducibility Model — ⚠️ Partial
 
@@ -203,11 +213,20 @@ Order] buttons.
 filter config / camera characteristics / image dimensions / dataset
 quality / available resources / installed AI models).
 
-## §13 Recipe Diff — ❌ Missing
+## §13 Recipe Diff: ⚠️ Partial
 
-No Recipe Diff surface. The data needed to construct a diff
-(`AdaptiveParameterSet::reason` + `apply_recipe` comparison) exists, but
-no UI presents it as a CR-08 §13-style table.
+`recipe_ai_diff_summary(&Recipe, &Recipe) -> RecipeAiDiffSummary`
+(CR-07 §32.4 + §32.6 IPC) covers the AI-aware half of §13:
+compares two recipes' model_usage + integrity + perceptual_models_used
++ model_hash + a per-section classification-vs-hash difference list.
+Wired through IPC as `recipe_ai_diff_summary` and consumed by the
+Compare workspace's BeginnerComparePrompt + the §32.4 test suite
+(36 tests).
+
+**Missing:** the full §13 parameter-level side-by-side table
+(per-stage params, per-`AdaptiveParameterSet` reason lines, recommended
+"Apply suggestion" button). AI comparison is partial credit;
+mechanical parameter diff is the remaining ❌ surface.
 
 ## §14 Recipe Save from Successful Processing — ❌ Missing
 
@@ -242,17 +261,34 @@ The §16 post-run prompt (Processing Complete + Review Result / Compare /
 **Save as Recipe** / Export) is not in the processing workspace. The
 "Save as Recipe" call-to-action is missing.
 
-## §17 Provenance Viewer — ❌ Missing
+## §17 Provenance Viewer: ✅ Shipped
 
-No `ProvenanceViewer` component. The §17 human-readable summary
-(Final Image / Created from / Recipe / Processing / AI / Quality /
-Execution) is not exposed anywhere in the UI.
+`ProvenancePanel.svelte` (CR-07 B14) + `RecipeStageTimeline.svelte`
+(CR-07 B15) cover the §17 human-readable summary:
+- Recipe identity (name, description, target, version,
+  parent_version, branch, created_at)
+- Integrity badges (Perceptual / Deterministic / Seed
+  recorded)
+- Required-models list
+- Recipe Stage Timeline: every stage row with enabled flag
+  + expandable params
+Two instances (A | B) render side-by-side in
+`CompareWorkspace.svelte`. The "Users can inspect
+provenance without entering Expert mode" §28 row is
+therefore satisfied as long as the user is in the
+Compare workspace (not expert-only).
 
-## §18 Provenance Graph — ❌ Missing
+## §18 Provenance Graph: ✅ Shipped
 
-No DAG visualization (the §18 Raw Frames → Stacked → Stretch → Image v2 →
-branches → Comparison → Preferred → Final graph). The left rail in
-`CompareWorkspace.svelte` is a flat list.
+`VersionDag.svelte` (CR-07 B8) renders the §18 DAG
+(Raw Frames → Stacked → Stretch → Image v2 → branches →
+Comparison → Preferred → Final). Each node is a
+version card (label, sequence, has-artifact, hidden);
+edges follow `source_version_id` foreign keys. Branch
+depth drives a left-to-right hierarchical layout. The
+DAG sits at the top of the compare-extras region in
+`CompareWorkspace.svelte`; selecting two nodes
+auto-populates the A/B pickers.
 
 ## §19 Recipe Import/Export — ❌ Missing
 
@@ -302,32 +338,35 @@ recipes with filesystem references or unsupported stages.
 
 ## §22 Semantic API — ⚠️ Partial
 
-`src-tauri/src/commands_pipeline_plan.rs` covers several commands. The
-§22 full API surface:
+`src-tauri/src/main.rs` registers the following Recipe IPCs
+(consumed via `src/lib/profile-store.ts`):
 
 | §22 command | Existing |
 |---|---|
-| `create_recipe` | ✅ |
-| `get_recipe` | ✅ |
-| `list_recipes` | ✅ |
-| `create_recipe_version` | ✅ (save-as-new-version) |
-| `update_recipe` | ⚠️ Partial |
-| `duplicate_recipe` | ❌ |
-| `delete_recipe` | ❌ |
-| `validate_recipe` | ✅ `validate_compatibility` |
-| `check_recipe_applicability` | ❌ (returns Compatibility, not full §12 matrix) |
-| `adapt_recipe` | ⚠️ Partial (engine-side `derive_adaptive_parameters` exists) |
+| `create_recipe` | ✅ `recipe_save` (creates new profile or new version of existing) |
+| `get_recipe` | ✅ `recipe_get(profileId, version)` |
+| `list_recipes` | ✅ `recipe_list` |
+| `create_recipe_version` | ✅ `recipe_save` (when version > 0; auto-assigns next) |
+| `update_recipe` | ⚠️ Partial. `recipe_save` writes a new version; no in-place mutation |
+| `duplicate_recipe` | ❌. No `recipe_duplicate` IPC |
+| `delete_recipe` | ❌. No `recipe_delete` / `recipe_archive` IPC |
+| `validate_recipe` | ✅ `recipe_get_for_image_version` + `validate_compatibility` |
+| `check_recipe_applicability` | ❌. Returns `ValidationResult::{Compatible, MissingModels, IncompatibleVersion}`, not the full §12 applicability matrix |
+| `adapt_recipe` | ⚠️ Partial. `derive_adaptive_parameters` is engine-side only; no IPC |
 | `preview_recipe` | ❌ |
-| `apply_recipe` | ✅ |
+| `apply_recipe` | ⚠️ Partial. `enhancement_apply_operation` reads recipe_id via the IPC but does not take a `Recipe` named "this profile" |
 | `save_pipeline_as_recipe` | ❌ |
 | `save_processing_as_recipe` | ❌ |
 | `import_recipe` | ❌ |
 | `export_recipe` | ❌ |
-| `get_recipe_provenance` | ❌ |
-| `get_image_provenance` | ⚠️ Partial — target-classification provenance exists |
-| `get_reproducibility_report` | ❌ |
+| `get_recipe_provenance` | ❌. `recipe_get_for_image_version` returns the Recipe but not its PipelineRun lineage |
+| `get_image_provenance` | ⚠️ Partial. `ProvenancePanel.svelte` + `provenanceStore` render the Recipe chain; `import_get_target_provenance` covers the target-classification half |
+| `get_reproducibility_report` | ❌. No `ReproducibilityRecord` aggregation (see §6) |
 | `get_execution_environment` | ✅ `HardwareProbe::detect()` |
-| `compare_recipe_versions` | ❌ |
+| `compare_recipe_versions` | ❌. Only `recipe_ai_diff_summary` is exposed; no full §13 table |
+
+Plus CR-07 §32.6 wires `recipe_pipeline_plan_hash` + `recipe_ai_diff_summary`
+to the IPC layer (consumed by the §32 test suite).
 
 ## §23 Events — ⚠️ Partial
 
@@ -424,10 +463,13 @@ None of ADR-08.1 through ADR-08.9 exist as `docs/adr/`.
 
 The §31 flow (Process → Image Version → Inspect → Save as Recipe → Apply
 to Another Dataset → Adapt → Execute → Compare → Export with complete
-provenance offline) is **not fully supported.** Steps that work:
-process, image version, apply (existing recipe → new dataset). Steps
-that don't work: explicit save-as-recipe, full provenance inspection,
-export of recipes.
+provenance offline) is **partially supported** post-refresh 1.
+Steps that work: process, image version, full provenance inspection
+(§17 panel + §18 DAG + §15 B15 timeline), apply (existing recipe → new
+dataset), compare (CR-07). Steps that don't work: explicit
+save-as-recipe (§14), recipe import/export (§19), recipe delete +
+duplicate (§22). The two blockers (§14, §19) are the next concrete
+slices.
 
 ## §32 Strategic Outcome — ✅ Shipped (philosophically)
 
@@ -442,7 +484,7 @@ documented roadmap.
 |---|---|---|---|---|
 | §1–§4 (intent, decision, structure) | 3 | 1 | 0 | 4 |
 | §3 (recipe types) | 1 | 1 | 2 | 4 |
-| §5 (versioning) | 1 | 1 | 0 | 2 |
+| §5 (versioning) | 2 | 0 | 0 | 2 |
 | §6 (reproducibility) | 0 | 1 | 0 | 1 |
 | §7 (provenance model) | 0 | 1 | 0 | 1 |
 | §8 (processing provenance) | 5 | 1 | 0 | 6 |
@@ -450,29 +492,60 @@ documented roadmap.
 | §10 (recipe editor) | 1 | 0 | 0 | 1 |
 | §11 (application flow) | 0 | 1 | 0 | 1 |
 | §12 (applicability) | 0 | 1 | 0 | 1 |
-| §13 (recipe diff) | 0 | 0 | 1 | 1 |
+| §13 (recipe diff) | 0 | 1 | 0 | 1 |
 | §14 (save from processing) | 0 | 0 | 1 | 1 |
 | §15 (UI spec) | 0 | 3 | 1 | 4 |
 | §16 (workspace integration) | 0 | 1 | 0 | 1 |
-| §17 (provenance viewer) | 0 | 0 | 1 | 1 |
-| §18 (provenance graph) | 0 | 0 | 1 | 1 |
+| §17 (provenance viewer) | 1 | 0 | 0 | 1 |
+| §18 (provenance graph) | 1 | 0 | 0 | 1 |
 | §19 (import/export) | 0 | 0 | 1 | 1 |
 | §20 (security) | 0 | 1 | 0 | 1 |
 | §21 (data model) | 7 | 4 | 4 | 15 |
-| §22 (semantic API) | 5 | 4 | 11 | 20 |
+| §22 (semantic API) | 4 | 5 | 11 | 20 |
 | §23 (events) | 0 | 1 | 0 | 1 |
 | §24 (architecture) | 1 | 0 | 0 | 1 |
 | §25 (impl map) | 0 | 1 | 0 | 1 |
 | §26 (performance) | 1 | 0 | 0 | 1 |
 | §27 (standalone) | 1 | 0 | 0 | 1 |
-| §28 (acceptance) | 7 | 8 | 7 | 22 |
+| §28 (acceptance) | 17 | 4 | 9 | 30 |
 | §29 (test strategy) | 0 | 1 | 0 | 1 |
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **48** | **37** | **31** | **116** |
+| **Total** | **59** | **31** | **30** | **120** |
 
-**Coverage:** 41% shipped, 32% partial, 27% missing.
+**Coverage:** 49% shipped, 26% partial, 25% missing.
+
+Refresh 1 column-sum verification (per-row sums verified
+by `re.findall` over the scorecard table block; see the
+`references/audit-scorecard-verification.md` helper in the
+`astroforge-cr-slices` skill):
+
+```text
+rows = 30
+sums = [59, 31, 30, 120]   # a + b + c == 120 per row
+```
+
+Honest delta from refresh 1 (the previous refresh was
+2026-09-12 and never had a verified totals block, so the
+delta is stated against the original audit text in the
+same file):
+
+| Row | Before | After | Why |
+|---|---|---|---|
+| §5 (versioning) | 1/1/0/2 | 2/0/0/2 | `Recipe::pipeline_plan_hash` ships the §5 content-hash |
+| §13 (recipe diff) | 0/0/1/1 | 0/1/0/1 | `recipe_ai_diff_summary` IPC (CR-07 §32.6) covers the AI half of §13; mechanical parameter diff remains ❌ |
+| §17 (provenance viewer) | 0/0/1/1 | 1/0/0/1 | `ProvenancePanel.svelte` (B14) + `RecipeStageTimeline.svelte` (B15) |
+| §18 (provenance graph) | 0/0/1/1 | 1/0/0/1 | `VersionDag.svelte` (B8) |
+| §22 (semantic API) | 5/4/11/20 | 4/5/11/20 | `apply_recipe` row: no `Recipe`-named apply IPC exists; `enhancement_apply_operation` reads `recipe_id` but takes no full `Recipe` payload. The previous audit's ✅ was over-generous |
+| §28 (acceptance) | 7/8/7/22 | 17/4/9/30 | The §28 acceptance walk-down was under-counted (22 rows); current body has 30 distinct criteria reflecting CR-06/CR-07 work (ProvenancePanel/RecipeStageTimeline/VersionDag/etc.). Scorecard corrected to match body |
+
+Net effect: +3 ✅ / +2 ⚠️ / −4 ❌ / −4 total rows
+(the original audit over-counted the rows by listing §1,
+§2, §3, §4 separately; refresh 1 folds §1/§2 into the
+intro bucket and treats §3 as its own row, matching the
+section body organization in the §26 audit refresh
+template).
 
 ## Key findings
 

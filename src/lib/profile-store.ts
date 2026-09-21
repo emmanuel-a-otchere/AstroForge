@@ -554,6 +554,61 @@ export async function deleteProfile(profileId: string): Promise<number> {
 }
 
 /**
+ * CR-08 §22.3: apply a Recipe and return the stage-id +
+ * params pairs the caller should drive the next apply
+ * round with. Mirrors the Rust `recipe_apply` IPC: loads
+ * the Recipe via the store, performs the schema-version
+ * guard + missing-models compatibility check, and
+ * returns the enabled stages in order.
+ *
+ * `availableModels` is the caller's view of which models
+ * the running app currently has registered. The
+ * orchestrator's model list is the canonical source;
+ * passing `undefined` skips the missing-models check
+ * (the schema-version guard still runs).
+ *
+ * Per-stage parameters are returned in Recipe order.
+ * This keeps the IPC a pure function over the Recipe
+ * store; the chained apply is the UI's job.
+ */
+export interface RecipeApplyStage {
+  stageId: string;
+  params: Record<string, unknown>;
+}
+export interface RecipeApplyResult {
+  profileId: string;
+  version: number;
+  branch: string;
+  stages: RecipeApplyStage[];
+}
+export async function applyRecipe(
+  profileId: string,
+  version: number,
+  availableModels?: string[],
+): Promise<RecipeApplyResult> {
+  if (!isTauri()) {
+    // Browser-mode placeholder: read the first cached
+    // summary, return an empty stages list so the UI
+    // flow exercises end-to-end without IPC.
+    const cached = PLACEHOLDER_SUMMARIES.find(
+      (s) => s.profileId === profileId,
+    );
+    return {
+      profileId,
+      version: cached?.version ?? version,
+      branch: cached?.branch ?? "main",
+      stages: [],
+    };
+  }
+  const result = (await invoke("recipe_apply", {
+    profileId,
+    version,
+    availableModels: availableModels ?? null,
+  })) as RecipeApplyResult;
+  return result;
+}
+
+/**
  * Compute the deterministic profile_id for a (name, targetType) pair,
  * mirroring `RecipeStore::profile_id_for` in Rust. Useful for lookups
  * that don't have the summary in hand.

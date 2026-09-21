@@ -354,7 +354,7 @@ recipes with filesystem references or unsupported stages.
 | `check_recipe_applicability` | ❌. Returns `ValidationResult::{Compatible, MissingModels, IncompatibleVersion}`, not the full §12 applicability matrix |
 | `adapt_recipe` | ⚠️ Partial. `derive_adaptive_parameters` is engine-side only; no IPC |
 | `preview_recipe` | ❌ |
-| `apply_recipe` | ⚠️ Partial. `enhancement_apply_operation` reads recipe_id via the IPC but does not take a `Recipe` named "this profile" |
+| `apply_recipe` | ✅ `recipe_apply(profileId, version, availableModels?)` (CR-08 §22.3). Returns enabled `(stage_id, params)` pairs in Recipe order; runs the schema-version guard + missing-models compatibility check |
 | `save_pipeline_as_recipe` | ❌ |
 | `save_processing_as_recipe` | ❌ |
 | `import_recipe` | ✅ `recipe_import(json)` (CR-08 §19) |
@@ -501,7 +501,7 @@ documented roadmap.
 | §19 (import/export) | 1 | 0 | 0 | 1 |
 | §20 (security) | 0 | 1 | 0 | 1 |
 | §21 (data model) | 7 | 4 | 4 | 15 |
-| §22 (semantic API) | 6 | 4 | 10 | 20 |
+| §22 (semantic API) | 7 | 3 | 10 | 20 |
 | §23 (events) | 0 | 1 | 0 | 1 |
 | §24 (architecture) | 1 | 0 | 0 | 1 |
 | §25 (impl map) | 0 | 1 | 0 | 1 |
@@ -512,9 +512,9 @@ documented roadmap.
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **66** | **29** | **25** | **120** |
+| **Total** | **67** | **28** | **25** | **120** |
 
-**Coverage:** 55% shipped, 24% partial, 21% missing.
+**Coverage:** 56% shipped, 23% partial, 21% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -523,7 +523,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [66, 29, 25, 120]   # a + b + c == 120 per row
+sums = [67, 28, 25, 120]   # a + b + c == 120 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

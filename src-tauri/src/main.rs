@@ -11,7 +11,7 @@ use astroforge_core::gallery::{GalleryItemUpdate, GalleryStore};
 use astroforge_core::ingest::{self, FrameInfo};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig, PipelineResult, Verbosity};
 use astroforge_core::project::ProjectManager;
-use astroforge_core::recipe::{QualityProfile, Recipe, RecipeAiDiffSummary};
+use astroforge_core::recipe::{apply_recipe, QualityProfile, Recipe, RecipeAiDiffSummary};
 use astroforge_core::recipe_store::{RecipeStore, RecipeSummary, RecipeVersion};
 use astroforge_core::session::SessionStore;
 use serde::Serialize;
@@ -493,6 +493,67 @@ fn recipe_pipeline_plan_hash(
     let store = state.0.lock().expect("recipe store mutex poisoned");
     let recipe = store.get(&profile_id, version)?;
     Ok(recipe.pipeline_plan_hash())
+}
+
+/// CR-08 §22.3: apply a Recipe (any profile, any version) and
+/// return the stage-id + params pairs the caller should drive
+/// the next apply round with. The IPC loads the Recipe via
+/// the same `RecipeStore::get` path the duplicate + content-
+/// hash IPCs use, then delegates to
+/// `astroforge_core::recipe::apply_recipe`, which performs the
+/// schema-version guard + the missing-models compatibility
+/// check and returns the enabled stages in order.
+///
+/// `available_models` is the caller-provided inventory of
+/// models currently registered in the running app (no
+/// central registry exists yet; the orchestrator's model
+/// list is the canonical source). When the list is `None`
+/// (or empty), the compatibility check is skipped for
+/// missing-models but the schema-version guard still
+/// runs. Pass `Some(vec![])` for an explicit "no models"
+/// session.
+///
+/// Per-stage parameters are returned in Recipe order. The
+/// caller decides what to do with each stage (apply, skip,
+/// preview). This keeps the IPC a pure function over the
+/// Recipe store; the chained apply is the UI's job.
+#[tauri::command]
+fn recipe_apply(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+    version: u32,
+    available_models: Option<Vec<String>>,
+) -> Result<RecipeApplyResponse, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe = store.get(&profile_id, version)?;
+    let models_slice: &[String] = available_models
+        .as_deref()
+        .unwrap_or(&[]);
+    let stages = apply_recipe(&recipe, models_slice).map_err(|e| {
+        CommandError::Invalid(format!(
+            "recipe {profile_id:?} v{version} is not applicable: {e}"
+        ))
+    })?;
+    Ok(RecipeApplyResponse {
+        profile_id,
+        version: recipe.version,
+        branch: recipe.branch.clone(),
+        stages,
+    })
+}
+
+/// CR-08 §22.3 response payload: the Recipe identity
+/// (version + branch) so the UI can scope follow-up
+/// apply calls + provenance writes, plus the ordered
+/// list of `(stage_id, params)` pairs to drive. The
+/// `profile_id` is echoed back from the request.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecipeApplyResponse {
+    profile_id: String,
+    version: u32,
+    branch: String,
+    stages: Vec<(String, std::collections::HashMap<String, serde_json::Value>)>,
 }
 
 /// CR-08 §22.1: duplicate an existing Recipe (any profile, any
@@ -1041,6 +1102,7 @@ fn main() {
             recipe_export,
             recipe_import,
             recipe_pipeline_plan_hash,
+            recipe_apply,
             recipe_ai_diff_summary,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,

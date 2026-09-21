@@ -2,6 +2,62 @@
 
 ## Unreleased
 
+### Slice §22.3: CR-08 recipe_apply IPC
+
+**Scope.** Closes the §22 `apply_recipe` ⚠️ row by adding
+a new Tauri command that loads a Recipe (any profile, any
+version) and returns the enabled `(stage_id, params)`
+pairs the caller should drive the next apply round with.
+
+**What.**
+
+- `src-tauri/src/main.rs`: new `recipe_apply(profile_id,
+  version, available_models: Option<Vec<String>>)`
+  Tauri command. Loads the Recipe via `RecipeStore::get`
+  (same path the duplicate + content-hash IPCs use), then
+  delegates to `astroforge_core::recipe::apply_recipe`,
+  which performs the schema-version guard + the missing-
+  models compatibility check and returns the enabled
+  stages in Recipe order. Maps the `ApplyError` into a
+  `CommandError::Invalid`. Registered in
+  `invoke_handler` after `recipe_pipeline_plan_hash`.
+- `src/lib/profile-store.ts`: new `applyRecipe` wrapper
+  + `RecipeApplyStage` / `RecipeApplyResult` types.
+  Browser-mode placeholder returns an empty stages list
+  so the UI flow exercises end-to-end without IPC.
+- `crates/astroforge-core/tests/recipe_apply.rs`: 6 new
+  tests pinning the contract: enabled stages returned in
+  Recipe order; disabled stages skipped; missing-models
+  rejection surfaces as a hard error; schema-version
+  rejection surfaces as a hard error; empty model list
+  accepted when `required_models` is empty; apply output
+  round-trips structurally (stage IDs + param keys
+  preserved).
+
+**Verification.** All 6 gates pass: `cargo fmt --check`,
+`clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace` (33 suites, 0 failures),
+`npm run check` (1 pre-existing error + 9 pre-existing
+warnings, unchanged baseline), `npm run build`,
+`mvp_smoke.sh`.
+
+**Honest flags.**
+
+- Same src-tauri lint caveat as §22.1 / §22.2 / §19:
+  the IPC is a thin pass-through over the tested
+  primitives; CI's rust job is the authoritative lint
+  pass.
+- The IPC returns stages only. The chained apply
+  (driving `enhancement_apply_operation` per stage,
+  creating a fresh Image Version per round, writing
+  `recipe_id` for provenance) is the UI's job. A
+  follow-on slice wires `applyRecipe` into the Studio's
+  Recipe panel.
+- `available_models` is the caller's view of the
+  orchestrator's model registry. No central registry
+  exists yet (the orchestrator owns its own model
+  inventory); the IPC accepts what the caller passes.
+
 ### Slice §19: CR-08 recipe_import / recipe_export IPCs
 
 **Scope.** Closes the §22 `import_recipe` + `export_recipe`

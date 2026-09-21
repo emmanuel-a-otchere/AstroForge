@@ -124,6 +124,10 @@
       </span>
     </div>
 
+    {#if qualityReport.summary}
+      <pre class="summary">{qualityReport.summary}</pre>
+    {/if}
+
     <ol class="finding-list">
       {#each qualityReport.findings as f}
         <li class="finding finding-{f.severity}">
@@ -213,6 +217,17 @@
   .verdict-failure {
     background: rgba(255, 100, 100, 0.18);
     color: #ff6464;
+  }
+  .summary {
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+    background: var(--color-surface, #15181f);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-family: ui-monospace, monospace;
+    color: var(--color-text, #e6e9ef);
+    white-space: pre-wrap;
+    word-break: break-word;
   }
   .finding-list {
     list-style: none;

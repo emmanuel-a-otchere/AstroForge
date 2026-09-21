@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+### Slice §22.1: CR-08 recipe_duplicate IPC
+
+**Scope.** Closes the §22 `duplicate_recipe` ❌ row + the §28
+"User can duplicate a Recipe" ❌ row by shipping a single Tauri
+command that reads any Recipe (any profile, any version) and
+saves a copy as a new, independently-named profile at v1.
+
+**What.**
+
+- `src-tauri/src/main.rs`: new `recipe_duplicate(profile_id, version)`
+  IPC + `profile_exists()` helper. Reads the source Recipe,
+  builds a candidate name `"<name> (Copy)"`; if that collides
+  with an existing profile, sweeps `"<name> (Copy 2)"` ..
+  `"<name> (Copy 99)"`; if all 99 collide, falls back to a
+  millisecond-precision timestamp suffix. Calls
+  `next_version_for(new_profile_id)` (returns 1 for a fresh
+  profile_id) and `save`, mirroring the `recipe_save` IPC's
+  version-assignment contract.
+- `src/lib/profile-store.ts`: new `duplicateProfile(profileId, version)`
+  wrapper around `invoke("recipe_duplicate", ...)` with browser-
+  mode placeholder fallback. Optimistically prepends the new
+  summary to `profileStore`.
+- `crates/astroforge-core/tests/recipe_duplicate.rs`: 3 new tests
+  pinning the contract (independent profile + version 1; copy
+  suffix collision sweep; stages + integrity preservation).
+
+**Verification.** All 6 gates pass: `cargo fmt --check`,
+`clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace` (29 suites + 3 new = 32; 0 failures),
+`npm run check` (1 pre-existing error + 9 pre-existing
+warnings, unchanged baseline), `npm run build`,
+`mvp_smoke.sh`.
+
+**Honest flags.**
+
+- The duplicate's `description` is preserved from the source.
+  The UI does not yet surface a "Duplicate" button; the IPC
+  + TS wrapper are ready for the RecipesScreen hookup. Wiring
+  the button is a follow-on slice in the §22 series.
+- `src-tauri` is a binary-only crate outside the cargo
+  workspace, so the workspace `cargo clippy` doesn't compile
+  the handler. The IPC body is pure data-model logic + the
+  existing `RecipeStore` surface; CI's `rust` job (which
+  compiles `src-tauri` via `cd src-tauri && cargo build`) is
+  the authoritative lint pass for the new handler. Local
+  verification leans on the `recipe_duplicate` integration
+  tests in `astroforge-core`.
+- The `(Copy N)` sweep tops out at N=99 before falling back
+  to a timestamp suffix; the timestamp fallback is a safety
+  valve, not a UX expectation. The TS wrapper reflects the
+  same shape.
+
 ### Slice §31: CR-07 acceptance polish batch (5 rows)
 
 **Scope.** Closes the final 5 ⚠️ rows of the §31 acceptance

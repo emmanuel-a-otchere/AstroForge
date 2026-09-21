@@ -382,8 +382,42 @@ export async function saveProfile(recipe: Recipe): Promise<RecipeSummary> {
     recipe: rustRecipe,
   });
   const summary = fromRustSummary(rustSummary);
-  // Refresh the cache so the UI sees the new head.
-  await loadProfiles();
+  profileStore.set([summary, ...PLACEHOLDER_SUMMARIES]);
+  return summary;
+}
+
+/**
+ * CR-08 §22.1: duplicate an existing Recipe into a fresh
+ * independent profile. Mirrors the Rust `recipe_duplicate` IPC:
+ * reads the source Recipe, returns a RecipeSummary for the
+ * new "(Copy)"-named profile. Caller refreshes profileStore
+ * afterwards if they want the list to include the new entry.
+ */
+export async function duplicateProfile(
+  profileId: string,
+  version: number,
+): Promise<RecipeSummary> {
+  if (!isTauri()) {
+    // In browser mode, synthesize a new summary off the
+    // placeholder so the UI flow exercises end-to-end.
+    const next: RecipeSummary = {
+      ...PLACEHOLDER_SUMMARIES[0],
+      profileId: `${profileId}-copy-${Date.now()}`,
+      name: `${PLACEHOLDER_SUMMARIES[0].name} (Copy)`,
+      version: 1,
+      parentVersion: null,
+    };
+    PLACEHOLDER_SUMMARIES.push(next);
+    profileStore.set([...PLACEHOLDER_SUMMARIES]);
+    return next;
+  }
+  const rustSummary: RustRecipeSummary = await invoke("recipe_duplicate", {
+    profileId,
+    version,
+  });
+  const summary = fromRustSummary(rustSummary);
+  // Optimistic list refresh: prepend the new profile.
+  profileStore.update((list) => [summary, ...list]);
   return summary;
 }
 

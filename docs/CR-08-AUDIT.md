@@ -348,7 +348,7 @@ recipes with filesystem references or unsupported stages.
 | `list_recipes` | ✅ `recipe_list` |
 | `create_recipe_version` | ✅ `recipe_save` (when version > 0; auto-assigns next) |
 | `update_recipe` | ⚠️ Partial. `recipe_save` writes a new version; no in-place mutation |
-| `duplicate_recipe` | ❌. No `recipe_duplicate` IPC |
+| `duplicate_recipe` | ✅ `recipe_duplicate(profileId, version)` (CR-08 §22.1) |
 | `delete_recipe` | ❌. No `recipe_delete` / `recipe_archive` IPC |
 | `validate_recipe` | ✅ `recipe_get_for_image_version` + `validate_compatibility` |
 | `check_recipe_applicability` | ❌. Returns `ValidationResult::{Compatible, MissingModels, IncompatibleVersion}`, not the full §12 applicability matrix |
@@ -416,7 +416,7 @@ hashes are all persisted locally.
 |---|---|
 | User can create a Recipe | ✅ |
 | User can edit and version a Recipe | ✅ (save-as-new-version) |
-| User can duplicate a Recipe | ❌ |
+| User can duplicate a Recipe | ✅ (CR-08 §22.1 `recipe_duplicate`) |
 | User can delete/archive a user Recipe | ❌ |
 | System Recipes are protected from modification | ❌ |
 | Recipes have schema versions and content hashes | ⚠️ Schema version ✅; content hash ❌ |
@@ -501,7 +501,7 @@ documented roadmap.
 | §19 (import/export) | 0 | 0 | 1 | 1 |
 | §20 (security) | 0 | 1 | 0 | 1 |
 | §21 (data model) | 7 | 4 | 4 | 15 |
-| §22 (semantic API) | 4 | 5 | 11 | 20 |
+| §22 (semantic API) | 5 | 4 | 11 | 20 |
 | §23 (events) | 0 | 1 | 0 | 1 |
 | §24 (architecture) | 1 | 0 | 0 | 1 |
 | §25 (impl map) | 0 | 1 | 0 | 1 |
@@ -512,9 +512,9 @@ documented roadmap.
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **59** | **31** | **30** | **120** |
+| **Total** | **60** | **30** | **30** | **120** |
 
-**Coverage:** 49% shipped, 26% partial, 25% missing.
+**Coverage:** 50% shipped, 25% partial, 25% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -523,7 +523,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [59, 31, 30, 120]   # a + b + c == 120 per row
+sums = [60, 30, 30, 120]   # a + b + c == 120 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was
@@ -538,6 +538,7 @@ same file):
 | §17 (provenance viewer) | 0/0/1/1 | 1/0/0/1 | `ProvenancePanel.svelte` (B14) + `RecipeStageTimeline.svelte` (B15) |
 | §18 (provenance graph) | 0/0/1/1 | 1/0/0/1 | `VersionDag.svelte` (B8) |
 | §22 (semantic API) | 5/4/11/20 | 4/5/11/20 | `apply_recipe` row: no `Recipe`-named apply IPC exists; `enhancement_apply_operation` reads `recipe_id` but takes no full `Recipe` payload. The previous audit's ✅ was over-generous |
+| §22 (post §22.1) | 4/5/11/20 | 5/4/11/20 | `recipe_duplicate` IPC shipped (PR §22.1). One ❌ row closes; 11 ❌ remain (import/export/save_pipeline_as_recipe/etc.) |
 | §28 (acceptance) | 7/8/7/22 | 17/4/9/30 | The §28 acceptance walk-down was under-counted (22 rows); current body has 30 distinct criteria reflecting CR-06/CR-07 work (ProvenancePanel/RecipeStageTimeline/VersionDag/etc.). Scorecard corrected to match body |
 
 Net effect: +3 ✅ / +2 ⚠️ / −4 ❌ / −4 total rows

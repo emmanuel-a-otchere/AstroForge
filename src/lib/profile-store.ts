@@ -422,6 +422,33 @@ export async function duplicateProfile(
 }
 
 /**
+ * CR-08 §22.2: delete a Recipe profile (every version).
+ * Mirrors the Rust `recipe_delete` IPC: returns the number
+ * of versions deleted. Idempotent: deleting a profile that
+ * does not exist returns 0.
+ */
+export async function deleteProfile(profileId: string): Promise<number> {
+  if (!isTauri()) {
+    // In browser mode, remove the placeholder entries that
+    // match so the UI flow exercises end-to-end.
+    const before = PLACEHOLDER_SUMMARIES.length;
+    for (let i = PLACEHOLDER_SUMMARIES.length - 1; i >= 0; i--) {
+      if (PLACEHOLDER_SUMMARIES[i].profileId === profileId) {
+        PLACEHOLDER_SUMMARIES.splice(i, 1);
+      }
+    }
+    profileStore.set([...PLACEHOLDER_SUMMARIES]);
+    return before - PLACEHOLDER_SUMMARIES.length;
+  }
+  const deleted = (await invoke("recipe_delete", { profileId })) as number;
+  // Optimistic removal from the cached list.
+  profileStore.update((list) =>
+    list.filter((s) => s.profileId !== profileId),
+  );
+  return deleted;
+}
+
+/**
  * Compute the deterministic profile_id for a (name, targetType) pair,
  * mirroring `RecipeStore::profile_id_for` in Rust. Useful for lookups
  * that don't have the summary in hand.

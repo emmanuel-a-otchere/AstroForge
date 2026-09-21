@@ -582,6 +582,24 @@ fn profile_exists(
     }
 }
 
+/// CR-08 §22.2: delete a Recipe profile (every version,
+/// every branch). Returns the number of rows deleted.
+/// Deleting a profile that does not exist returns 0 (the
+/// call is idempotent so the UI can fire delete without a
+/// pre-check). The system-recipe protection the CR-08 §3
+/// spec calls for is not yet implemented; when §3 lands,
+/// this handler is the gate point for the "protected"
+/// check.
+#[tauri::command]
+fn recipe_delete(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+) -> Result<u32, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let deleted = store.delete_profile(&profile_id)?;
+    Ok(deleted as u32)
+}
+
 /// CR-07 §32.6: compute the AI-diff summary for two Recipes.
 /// Pure function: loads both Recipes, calls `recipe_ai_diff_summary`.
 /// Returns CommandError if either Recipe is not found.
@@ -950,6 +968,7 @@ fn main() {
             recipe_get_for_image_version,
             recipe_save,
             recipe_duplicate,
+            recipe_delete,
             recipe_pipeline_plan_hash,
             recipe_ai_diff_summary,
             diff_cache_get_or_compute,

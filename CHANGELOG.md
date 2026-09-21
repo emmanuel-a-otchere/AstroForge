@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+### Slice §22.2: CR-08 recipe_delete IPC
+
+**Scope.** Closes the §22 `delete_recipe` ❌ row + the §28
+"User can delete/archive a user Recipe" ❌ row by shipping
+a `RecipeStore::delete_profile` store method + the
+`recipe_delete` Tauri command that removes every version
+of a profile.
+
+**What.**
+
+- `crates/astroforge-core/src/recipe_store.rs`: new
+  `delete_profile(profile_id) -> Result<usize>` method.
+  Single DELETE over all versions + branches of the named
+  profile; returns the row count. Deleting a missing
+  profile returns `Ok(0)` so the call is idempotent and the
+  UI needs no pre-check.
+- `src-tauri/src/main.rs`: new `recipe_delete(profile_id)`
+  IPC returning the deleted-version count. The handler is
+  the gate point for the future §3 system-recipe
+  "protected from modification" check.
+- `src/lib/profile-store.ts`: new `deleteProfile(profileId)`
+  wrapper with browser-mode placeholder fallback;
+  optimistically removes the profile from the cached list.
+- `crates/astroforge-core/tests/recipe_delete.rs`: 4 new
+  tests pinning the contract (all versions removed in one
+  call; idempotent for missing profiles; sibling profiles
+  untouched; delete-then-recreate restarts lineage at v1).
+
+**Verification.** All 6 gates pass: `cargo fmt --check`,
+`clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace` (31 suites; 0 failures),
+`npm run check` (1 pre-existing error + 9 pre-existing
+warnings, unchanged baseline), `npm run build`,
+`mvp_smoke.sh`.
+
+**Honest flags.**
+
+- The §28 row text says "delete/archive"; only the delete
+  half ships here. There is no archived-flag surface on
+  `Recipe` yet, so "archive" would be a schema addition;
+  the row is marked ✅ with the archive gap noted inline.
+- Deleting a profile does NOT invalidate `recipe_id`
+  references on existing `image_versions` rows; the
+  provenance chain (`recipe_get_for_image_version`) will
+  return the not-found error path for deleted profiles.
+  A tombstone/soft-delete variant is a future decision
+  tied to the §3 system-recipe protection design.
+- Same src-tauri lint caveat as §22.1: the handler is a
+  thin pass-through over the tested store method; CI's
+  rust job is the authoritative lint pass.
+
 ### Slice §22.1: CR-08 recipe_duplicate IPC
 
 **Scope.** Closes the §22 `duplicate_recipe` ❌ row + the §28

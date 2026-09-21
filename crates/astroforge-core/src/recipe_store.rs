@@ -252,6 +252,23 @@ impl RecipeStore {
         Ok(recipe)
     }
 
+    /// CR-08 §22.2: delete every version of a profile.
+    ///
+    /// Removes all rows for the given `profile_id` (all
+    /// versions, all branches) and returns the number of
+    /// rows deleted. Deleting a profile that does not exist
+    /// returns `Ok(0)` rather than an error: the IPC layer
+    /// treats "nothing to delete" as an idempotent success
+    /// so the UI can call delete without a pre-check.
+    pub fn delete_profile(&self, profile_id: &str) -> Result<usize, RecipeStoreError> {
+        let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let deleted = conn.execute(
+            "DELETE FROM recipes WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        Ok(deleted)
+    }
+
     /// Seed the DwarfII v1 profile if no profile with the same
     /// `profile_id` exists yet. Idempotent.
     pub fn seed_if_empty(&self) -> Result<(), RecipeStoreError> {

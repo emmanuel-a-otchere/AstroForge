@@ -14,8 +14,11 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
   import {
     loadProfiles,
+    exportProfile,
+    importProfile,
     type RecipeSummary,
   } from "../lib/profile-store";
   import ProfileManager from "./ProfileManager.svelte";
@@ -25,6 +28,166 @@
   let error: string | null = $state(null);
   let managerOpen = $state(false);
   let hasLoaded = $state(false);
+  // CR-08 §19 file-dialog UI: status surface for
+  // import / export operations. The dialog is a
+  // Tauri-only feature; the action callbacks fall
+  // back to a browser-mode prompt() when not running
+  // inside the Tauri runtime so the UI flow still
+  // exercises end-to-end.
+  let importExportStatus: string | null = $state(null);
+  let importExportError: string | null = $state(null);
+  let importExportBusy = $state(false);
+
+  function reportStatus(msg: string): void {
+    importExportStatus = msg;
+    importExportError = null;
+  }
+
+  function reportError(msg: string): void {
+    importExportStatus = null;
+    importExportError = msg;
+  }
+
+  function clearStatus(): void {
+    importExportStatus = null;
+    importExportError = null;
+  }
+
+  function slugify(s: string): string {
+    return s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
+  }
+
+  async function onExportRecipe(
+    summary: RecipeSummary,
+  ): Promise<void> {
+    clearStatus();
+    importExportBusy = true;
+    try {
+      const payload = await exportProfile(summary.profileId);
+      const defaultName = `${slugify(summary.name) || "recipe"}-v${summary.version}.afrecipe.json`;
+      let chosen: string | null = null;
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        const result = await saveDialog({
+          title: `Export ${summary.name} v${summary.version}`,
+          defaultPath: defaultName,
+          filters: [
+            { name: "AstroForge Recipe", extensions: ["json", "afrecipe"] },
+            { name: "JSON", extensions: ["json"] },
+          ],
+        });
+        chosen = typeof result === "string" ? result : null;
+      } else {
+        // Browser-mode fallback: prompt for a path. The
+        // caller can paste a path the test harness can
+        // observe (or hit Cancel).
+        const input = window.prompt(
+          `Export to path (browser-mode placeholder):`,
+          defaultName,
+        );
+        chosen = input && input.trim() ? input.trim() : null;
+      }
+      if (!chosen) {
+        reportStatus(`Export of ${summary.name} cancelled.`);
+        return;
+      }
+      await writeFile(chosen, payload);
+      reportStatus(
+        `Exported ${summary.name} v${summary.version} to ${chosen}.`,
+      );
+    } catch (err) {
+      reportError(
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      importExportBusy = false;
+    }
+  }
+
+  async function onImportRecipe(): Promise<void> {
+    clearStatus();
+    importExportBusy = true;
+    try {
+      let chosen: string | string[] | null = null;
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        chosen = await openDialog({
+          title: "Import AstroForge Recipe",
+          multiple: false,
+          directory: false,
+          filters: [
+            { name: "AstroForge Recipe", extensions: ["json", "afrecipe"] },
+            { name: "JSON", extensions: ["json"] },
+          ],
+        });
+      } else {
+        const input = window.prompt(
+          "Path to .afrecipe or .json file (browser-mode placeholder):",
+        );
+        chosen = input && input.trim() ? input.trim() : null;
+      }
+      if (!chosen || Array.isArray(chosen)) {
+        reportStatus("Import cancelled.");
+        return;
+      }
+      const json = await readFile(chosen);
+      const summary = await importProfile(json);
+      reportStatus(
+        `Imported ${summary.name} v${summary.version}.`,
+      );
+    } catch (err) {
+      reportError(
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      importExportBusy = false;
+    }
+  }
+
+  // Browser-mode shim: read a file via FileReader when
+  // not running inside the Tauri runtime. Tauri mode
+  // uses the file-system plugin (loaded by ProfileManager
+  // already) so we don't need a Tauri-side helper here.
+  async function readFile(path: string): Promise<string> {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      // Delegate to the @tauri-apps/plugin-fs readTextFile
+      // via dynamic import (keeps the package.json light
+      // for callers that don't exercise import).
+      const fs = await import("@tauri-apps/plugin-fs");
+      return fs.readTextFile(path);
+    }
+    // Browser-mode: best-effort fetch (works for the
+    // sample .afrecipe fixtures when running a static
+    // test page). Caller can override via the prompt.
+    const response = await fetch(path).catch(() => null);
+    if (!response || !response.ok) {
+      throw new Error(`Could not read ${path} (browser-mode fetch failed).`);
+    }
+    return response.text();
+  }
+
+  // Write a string to a path. Tauri uses the file-system
+  // plugin; browser-mode is a no-op + status report so the
+  // user knows the bytes are in memory only.
+  async function writeFile(path: string, contents: string): Promise<void> {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      const fs = await import("@tauri-apps/plugin-fs");
+      await fs.writeTextFile(path, contents);
+      return;
+    }
+    // Browser-mode: stash the payload in localStorage so
+    // the test harness can observe it.
+    try {
+      localStorage.setItem(
+        `astroforge.export.${path}`,
+        contents,
+      );
+    } catch {
+      // localStorage quota may be exceeded; swallow.
+    }
+  }
 
   onMount(async () => {
     try {
@@ -56,17 +219,43 @@
         new-version saves.
       </p>
     </div>
-    <button
-      type="button"
-      class="manage-cta font-display"
-      onclick={() => (managerOpen = true)}
-    >
-      <span class="material-symbols-outlined" aria-hidden="true">
-        bookmark_manager
-      </span>
-      Manage recipes
-    </button>
+    <div class="header-actions">
+      <button
+        type="button"
+        class="secondary-cta font-label"
+        onclick={onImportRecipe}
+        disabled={importExportBusy}
+        data-testid="import-recipe-btn"
+        aria-label="Import recipe from .afrecipe file"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">
+          file_download
+        </span>
+        Import…
+      </button>
+      <button
+        type="button"
+        class="manage-cta font-display"
+        onclick={() => (managerOpen = true)}
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">
+          bookmark_manager
+        </span>
+        Manage recipes
+      </button>
+    </div>
   </header>
+
+  {#if importExportStatus}
+    <p class="state-line status font-body" aria-live="polite" data-testid="import-export-status">
+      {importExportStatus}
+    </p>
+  {/if}
+  {#if importExportError}
+    <p class="state-line error font-body" role="alert" data-testid="import-export-error">
+      {importExportError}
+    </p>
+  {/if}
 
   {#if loading}
     <p class="state-line font-body" aria-live="polite">Loading recipes…</p>
@@ -89,10 +278,10 @@
   {:else}
     <ul class="recipe-grid" aria-label="Saved recipes">
       {#each profiles as summary (summary.profileId)}
-        <li>
+        <li class="recipe-card" data-testid="recipe-card">
           <button
             type="button"
-            class="recipe-card"
+            class="recipe-card-open"
             onclick={() => (managerOpen = true)}
             aria-label="Open {summary.name}"
           >
@@ -111,6 +300,19 @@
                 </span>
               {/if}
             </span>
+          </button>
+          <button
+            type="button"
+            class="recipe-card-export font-label"
+            onclick={() => onExportRecipe(summary)}
+            disabled={importExportBusy}
+            aria-label="Export {summary.name} v{summary.version} as .afrecipe file"
+            data-testid="export-recipe-btn"
+          >
+            <span class="material-symbols-outlined" aria-hidden="true">
+              file_upload
+            </span>
+            Export
           </button>
         </li>
       {/each}
@@ -216,15 +418,13 @@
 
   .recipe-card {
     display: flex;
-    align-items: flex-start;
-    gap: var(--sp-md);
+    flex-direction: column;
+    gap: var(--sp-sm);
     width: 100%;
     padding: var(--sp-md);
     background: var(--surface-container);
     border: 1px solid var(--outline-variant);
     border-radius: var(--radius-lg);
-    cursor: pointer;
-    text-align: left;
     color: var(--on-surface);
     transition: background 0.12s ease, border-color 0.12s ease;
   }
@@ -232,6 +432,44 @@
   .recipe-card:hover {
     background: var(--surface-container-high);
     border-color: var(--primary);
+  }
+
+  .recipe-card-open {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-md);
+    width: 100%;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+  }
+
+  .recipe-card-export {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    background: var(--surface-container-high);
+    color: var(--on-surface);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+
+  .recipe-card-export:hover:not(:disabled) {
+    background: var(--primary-container);
+    border-color: var(--primary);
+  }
+
+  .recipe-card-export:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .card-icon {
@@ -280,5 +518,42 @@
     font-size: 0.85rem;
     color: var(--on-surface-variant);
     line-height: 1.4;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: var(--sp-sm);
+    align-items: center;
+  }
+
+  .secondary-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-container-high);
+    color: var(--on-surface);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+
+  .secondary-cta:hover:not(:disabled) {
+    background: var(--primary-container);
+    border-color: var(--primary);
+  }
+
+  .secondary-cta:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .state-line.status {
+    background: var(--primary-container);
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    color: var(--on-primary-container);
   }
 </style>

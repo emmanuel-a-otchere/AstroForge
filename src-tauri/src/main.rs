@@ -495,6 +495,93 @@ fn recipe_pipeline_plan_hash(
     Ok(recipe.pipeline_plan_hash())
 }
 
+/// CR-08 §22.1: duplicate an existing Recipe (any profile, any
+/// version) into a fresh, independently-named profile at
+/// version 1. The duplicated Recipe carries the same
+/// `stages[]`, `required_models`, `integrity` payload,
+/// `quality_profile`, and `description` as the source; the
+/// new `name` is suffixed `" (Copy)"` and disambiguated if
+/// a profile with that suffix already exists (sweep up to
+/// 99 copies). The new profile has no `parent_version`
+/// (it's a fresh lineage, not a save-of-new-version), so
+/// `recipe_save` auto-assigns `version = 1`.
+#[tauri::command]
+fn recipe_duplicate(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+    version: u32,
+) -> Result<RecipeSummary, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let source = store.get(&profile_id, version)?;
+    // Build the new name. Start with "<name> (Copy)"; if
+    // that name + target_type already exists as a
+    // different profile, try "(Copy 2)" .. "(Copy 99)"; if
+    // all 99 collide, fall back to a millisecond-precision
+    // timestamp suffix so the duplicate is always creatable
+    // (the path through `recipe_save` will then own the
+    // error surface).
+    let base_name = source.name.clone();
+    let mut candidate = format!("{base_name} (Copy)");
+    if !profile_exists(&store, &candidate, &source.target_type) {
+        // First try succeeded.
+    } else {
+        let mut found = None;
+        for n in 2..=99 {
+            let try_name = format!("{base_name} (Copy {n})");
+            if !profile_exists(&store, &try_name, &source.target_type) {
+                candidate = try_name;
+                found = Some(());
+                break;
+            }
+        }
+        if found.is_none() {
+            candidate = format!(
+                "{base_name} (Copy {})",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            );
+        }
+    }
+    let mut owned = source;
+    owned.name = candidate;
+    // Compute the next version for this freshly-named
+    // profile BEFORE save, mirroring the recipe_save IPC's
+    // behavior: next_version_for returns 1 for a brand-new
+    // profile_id, so the duplicate lands at v1 with no
+    // parent_version (it's a fresh lineage, not a
+    // save-of-new-version).
+    let new_profile_id =
+        astroforge_core::recipe_store::RecipeStore::profile_id_for(
+            &owned.name,
+            &owned.target_type,
+        );
+    let next_version = store
+        .next_version_for(&new_profile_id)
+        .map_err(CommandError::from)?;
+    owned.version = if next_version == 0 { 1 } else { next_version };
+    owned.parent_version = None;
+    store.save(&owned).map_err(Into::into)
+}
+
+/// Helper for `recipe_duplicate`: does a profile with the
+/// given name + target_type already exist? Returns true on
+/// UNIQUE-collision risk. Pure read; holds the store lock
+/// for the duration of the call (caller already holds it).
+fn profile_exists(
+    store: &std::sync::MutexGuard<'_, astroforge_core::recipe_store::RecipeStore>,
+    name: &str,
+    target_type: &str,
+) -> bool {
+    let profile_id =
+        astroforge_core::recipe_store::RecipeStore::profile_id_for(name, target_type);
+    match store.list() {
+        Ok(summaries) => summaries.iter().any(|s| s.profile_id == profile_id),
+        Err(_) => false,
+    }
+}
+
 /// CR-07 §32.6: compute the AI-diff summary for two Recipes.
 /// Pure function: loads both Recipes, calls `recipe_ai_diff_summary`.
 /// Returns CommandError if either Recipe is not found.
@@ -862,6 +949,7 @@ fn main() {
             recipe_get_head,
             recipe_get_for_image_version,
             recipe_save,
+            recipe_duplicate,
             recipe_pipeline_plan_hash,
             recipe_ai_diff_summary,
             diff_cache_get_or_compute,

@@ -3,7 +3,7 @@
 **Source:** [`CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md`](CR-07-IMAGE-REVIEW-COMPARISON-DECISION.md)
 **Implementation plan:** [`CR-07-IMPLEMENTATION-PLAN.md`](CR-07-IMPLEMENTATION-PLAN.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-20 (refresh 6: §34 DoD cross-reference sweep: §34 row flips to ✅ as all referenced sections (§23, §24, §32) are now fully shipped; Total corrects to 79 ✅ / 6 ⚠️ / 1 ❌ across 86 rows; §8.1-§8.4 sub-metrics shipped (regional noise, edge response, color gradient, SNR); §29.3b.4 UI integration lands; bundle status updated)
+**Last refresh:** 2026-09-20 (refresh 7: governance sweep: §8 "AI segmentation confidence / artifact indicators / model confidence" row moved out of CR-07 scope (deferred to CR-06 as AI model metadata); §34 DoD cross-reference sweep (§23/§24/§32 all shipped); Total corrects to 79 ✅ / 6 ⚠️ / 0 ❌ across 85 rows; §8 is now 15 ✅ / 0 ⚠️ / 0 ❌)
 **Branch:** `feat/cr-07-29-3b-4-ui-integration` (from `origin/main` at `6cb7ed4`)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
@@ -127,7 +127,7 @@ exposes the "selected region" and "specific feature" scope axes.
 | Saturation percentage | ✅ `saturation_percentage` |
 | Estimated SNR / local SNR | ✅ `estimated_snr` + `local_snr` (§8.4) |
 | Structural contrast | ✅ `local_contrast` |
-| AI segmentation confidence / artifact indicators / model confidence | ⚠️ Partial |
+| ~~AI segmentation confidence / artifact indicators / model confidence~~ | ➡️ Deferred to CR-06 (AI model metadata; out of CR-07 scope) |
 
 Star metrics moved from "Missing" to "Shipped" via the structures
 module. Slice §8 (PR #354) added `saturation_percentage(image) ->
@@ -672,7 +672,7 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §5 (modes) | 5 | 0 | 0 | 5 |
 | §6 (sync nav) | 1 | 0 | 0 | 1 |
 | §7 (scope) | 1 | 0 | 0 | 1 |
-| §8 (metrics) | 15 | 0 | 1 | 16 |
+| §8 (metrics) | 15 | 0 | 0 | 15 |
 | §9 (contextual) | 1 | 0 | 0 | 1 |
 | §10 (delta) | 1 | 0 | 0 | 1 |
 | §11 (assessment) | 0 | 1 | 0 | 1 |
@@ -700,9 +700,9 @@ intent. CR-07 closes the comparison-decision loop end to end.
 | §33 (ADRs) | 1 | 0 | 0 | 1 |
 | §34 (DoD) | 1 | 0 | 0 | 1 |
 | §35 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **79** | **6** | **1** | **86** |
+| **Total** | **79** | **6** | **0** | **85** |
 
-**Coverage:** 86% shipped, 13% partial, 1% missing (post-§23.1..§23.4
+**Coverage:** 93% shipped, 7% partial, 0% missing (post-§23.1..§23.4
 + §24 + §19 close-out + §20 + §26 conceptual-to-actual mapping + §9
 contextual display + §13 AI-aware badge + §8 saturation percentage
 + §32.1 metric validation + §32.2 visual regression
@@ -713,10 +713,12 @@ contextual display + §13 AI-aware badge + §8 saturation percentage
 + §29.3b.1 WGSL shaders for 4 of 4 spatial detectors
 + §29.3b.2 Vitest infra + behavioural tests for WebGPU wrappers
 + §29.2a wire DiffCache through IPC
-+ §29.3b.1a WGSL for background_gradient). The scorecard
-now agrees with the section bodies. **This refresh (refresh 4)**
-flips the §29 row from `2/3/2` to `5/1/0` to reflect the 6
-body bullets (5 ✅ / 1 ⚠️ on §29.3b.4 UI integration; 0 ❌).
++ §29.3b.1a WGSL for background_gradient
++ §8.1 regional noise + §8.2 edge response + §8.3 color gradient
++ §8.4 SNR + §34 DoD cross-reference sweep). The scorecard
+now agrees with the section bodies. **This refresh (refresh 7)**
+moves the §8 "AI segmentation confidence" row out of CR-07 scope
+(deferred to CR-06 as AI model metadata) and sweeps §34 DoD.
 
 ## Bundle status (post-§26 audit refresh)
 

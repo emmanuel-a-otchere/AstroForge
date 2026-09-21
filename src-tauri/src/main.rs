@@ -582,6 +582,75 @@ fn profile_exists(
     }
 }
 
+/// CR-08 §19: export a Recipe (any profile, any version;
+/// version=None exports the head) as its canonical JSON
+/// payload. The payload is the same `payload_json` form the
+/// store persists; `Recipe::to_json` round-trips through
+/// `from_json_migrated` on the import side. The file-save
+/// dialog + `.afrecipe` filename convention live in the UI
+/// follow-on slice; this handler returns the content.
+#[tauri::command]
+fn recipe_export(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+    version: Option<u32>,
+) -> Result<String, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe = match version {
+        Some(v) => store.get(&profile_id, v)?,
+        None => store.get_head(&profile_id)?,
+    };
+    recipe.to_json().map_err(CommandError::from)
+}
+
+/// CR-08 §19: import a Recipe from its canonical JSON
+/// payload. Runs `from_json_migrated` (v1 -> v2 migration,
+/// hard error on unknown future schemas), then RE-LINEAGES
+/// the recipe against the local store: the imported recipe
+/// always lands as the next version of its (name,
+/// target_type) profile, with `parent_version` pointing at
+/// the local head (or None for a fresh profile). Importing
+/// a recipe whose (name, target_type) matches an existing
+/// profile appends to that profile rather than forking a
+/// duplicate; importing under a fresh name starts a new
+/// lineage at v1. The original `version` / `parent_version`
+/// from the foreign chain are intentionally discarded:
+/// version numbers are local-store lineage, and keeping
+/// foreign numbers would create phantom ancestry.
+#[tauri::command]
+fn recipe_import(
+    state: State<'_, RecipeState>,
+    json: String,
+) -> Result<RecipeSummary, CommandError> {
+    let mut recipe =
+        Recipe::from_json_migrated(&json).map_err(CommandError::from)?;
+    if recipe.name.trim().is_empty() {
+        return Err(CommandError::new(
+            "validation",
+            "imported recipe has an empty name",
+        ));
+    }
+    if recipe.target_type.trim().is_empty() {
+        return Err(CommandError::new(
+            "validation",
+            "imported recipe has an empty target_type",
+        ));
+    }
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let profile_id =
+        astroforge_core::recipe_store::RecipeStore::profile_id_for(
+            &recipe.name,
+            &recipe.target_type,
+        );
+    let next_version = store.next_version_for(&profile_id)?;
+    recipe.version = if next_version == 0 { 1 } else { next_version };
+    recipe.parent_version = match store.get_head(&profile_id) {
+        Ok(head) => Some(head.version),
+        Err(_) => None,
+    };
+    store.save(&recipe).map_err(Into::into)
+}
+
 /// CR-08 §22.2: delete a Recipe profile (every version,
 /// every branch). Returns the number of rows deleted.
 /// Deleting a profile that does not exist returns 0 (the
@@ -969,6 +1038,8 @@ fn main() {
             recipe_save,
             recipe_duplicate,
             recipe_delete,
+            recipe_export,
+            recipe_import,
             recipe_pipeline_plan_hash,
             recipe_ai_diff_summary,
             diff_cache_get_or_compute,

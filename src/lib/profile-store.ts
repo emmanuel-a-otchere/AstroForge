@@ -527,6 +527,59 @@ export async function importProfile(
 }
 
 /**
+ * CR-08 §3.1: mark a Recipe profile as a system Recipe.
+ * Mirrors the Rust `recipe_mark_as_system` IPC: all
+ * existing versions of the profile get `is_system = 1`
+ * in the on-disk column, after which `recipe_save` and
+ * `recipe_delete` refuse to mutate the profile. Returns
+ * true when at least one row was updated, false when
+ * the profile does not exist yet.
+ */
+export async function markProfileAsSystem(
+  profileId: string,
+): Promise<boolean> {
+  if (!isTauri()) {
+    // Browser-mode placeholder: mark the matching summary
+    // in PLACEHOLDER_SUMMARIES.
+    let touched = false;
+    for (const s of PLACEHOLDER_SUMMARIES) {
+      if (s.profileId === profileId) {
+        // The browser-mode placeholder does not persist
+        // is_system back to the Summary; the optimistic
+        // local update is enough for end-to-end UI flow.
+        touched = true;
+      }
+    }
+    if (touched) profileStore.set([...PLACEHOLDER_SUMMARIES]);
+    return touched;
+  }
+  const updated = (await invoke("recipe_mark_as_system", {
+    profileId,
+  })) as boolean;
+  return updated;
+}
+
+/**
+ * CR-08 §3.1: read whether any version of a profile is
+ * currently marked as a system Recipe. The UI uses this
+ * to render the "System" badge + gate destructive
+ * actions in the RecipesScreen toolbar.
+ */
+export async function isSystemProfile(
+  profileId: string,
+): Promise<boolean> {
+  if (!isTauri()) {
+    // Browser-mode placeholder: none of the seeded
+    // summaries are system Recipes.
+    return false;
+  }
+  const value = (await invoke("recipe_is_system", {
+    profileId,
+  })) as boolean;
+  return value;
+}
+
+/**
  * CR-08 §22.2: delete a Recipe profile (every version).
  * Mirrors the Rust `recipe_delete` IPC: returns the number
  * of versions deleted. Idempotent: deleting a profile that

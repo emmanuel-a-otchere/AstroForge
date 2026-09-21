@@ -2,6 +2,66 @@
 
 ## Unreleased
 
+### Slice §3.1: CR-08 system-recipe protection
+
+**Scope.** Closes the §3.1 System Recipes row + the §28
+"System Recipes are protected from modification" row by
+adding an `is_system` column to the `recipes` table and
+gating `recipe_save` + `recipe_delete` against it.
+
+**What.**
+
+- `crates/astroforge-core/src/recipe.rs`: new
+  `Recipe::is_system: bool` field (default false in
+  `Recipe::new`). Serialized in the on-disk payload so
+  the import/export round-trip preserves it.
+- `crates/astroforge-core/src/db.rs`: `recipes` table
+  gets `is_system INTEGER NOT NULL DEFAULT 0` plus an
+  index `idx_recipes_is_system` for the O(1) guard
+  check.
+- `crates/astroforge-core/src/recipe_store.rs`:
+  idempotent column-add in `RecipeStore::new` (PRAGMA
+  table_info check + conditional ALTER TABLE), guards in
+  `save` + `delete_profile`, new `mark_as_system` +
+  `is_system_profile` methods, new
+  `RecipeStoreError::SystemRecipeProtected` variant.
+- `src-tauri/src/main.rs`: two new Tauri commands,
+  `recipe_mark_as_system(profile_id)` + `recipe_is_system(profile_id)`.
+  Both registered in `invoke_handler`.
+- `src/lib/profile-store.ts`: `markProfileAsSystem` +
+  `isSystemProfile` wrappers. Browser-mode placeholders
+  for end-to-end UI testing.
+- `crates/astroforge-core/tests/system_recipe_protection.rs`:
+  8 tests pinning the contract: default is false;
+  mark_as_system flips every version; save rejects with
+  SystemRecipeProtected; delete rejects; delete still
+  works on non-system profiles; mark on unknown profile
+  returns false; idempotent migration on reopen;
+  is_system round-trips through save.
+
+**Verification.** All 6 gates pass: `cargo fmt --check`,
+`clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace` (34 suites, 0 failures),
+`npm run check` (1 pre-existing error + 9 pre-existing
+warnings, unchanged baseline), `npm run build`,
+`mvp_smoke.sh`.
+
+**Honest flags.**
+
+- The seed flow that flips a profile to `is_system = 1`
+  on app boot (e.g. for the DwarfII / M42-Natural
+  built-ins) is a follow-on slice. This PR lands the
+  column + the IPC; the actual seeding wiring is
+  RecipesScreen's bootstrap concern.
+- The `is_system` column is mirrored in the on-disk
+  payload_json via `Recipe::is_system`. The column is the
+  authoritative source for the guard check; the
+  payload_json field is for round-tripping through
+  export/import.
+- Same src-tauri lint caveat as prior slices: thin
+  pass-throughs over tested primitives; CI's rust job
+  is the authoritative lint pass.
+
 ### Slice §22.3: CR-08 recipe_apply IPC
 
 **Scope.** Closes the §22 `apply_recipe` ⚠️ row by adding

@@ -51,14 +51,15 @@ Context → Pipeline; Pipeline + Execution → Image Versions).
 
 | Type | Status |
 |---|---|
-| §3.1 System Recipes | ❌ Missing |
+| §3.1 System Recipes | ✅ `is_system` column + `recipe_mark_as_system` IPC (CR-08 §3.1); `recipe_save` + `recipe_delete` refuse to mutate system Recipes |
 | §3.2 User Recipes | ✅ `recipe_store.rs` (sqlite-backed, user CRUD) |
 | §3.3 Project Recipes | ⚠️ Partial — `Recipe` has `project_id` field but no project-scoped CRUD |
-| §3.4 Imported Recipes | ❌ Missing — `Recipe::validate_compatibility` exists but no `.afrecipe` import/export |
+| §3.4 Imported Recipes | ✅ (CR-08 §19 `recipe_export` + `recipe_import`); import re-lineages against the local store |
 
-`RecipesScreen.svelte` + `ProfileManager.svelte` cover user recipes. No
-system-recipe protection (CR-08 §28 "System Recipes are protected from
-modification"). No `.afrecipe` portable format.
+`RecipesScreen.svelte` + `ProfileManager.svelte` cover user recipes.
+System Recipes are protected (CR-08 §3.1): the `is_system` column
+gates `recipe_save` + `recipe_delete`; `recipe_mark_as_system` flips
+the flag. No `.afrecipe` portable format.
 
 ## §4 Recipe Structure — ⚠️ Partial
 
@@ -418,7 +419,7 @@ hashes are all persisted locally.
 | User can edit and version a Recipe | ✅ (save-as-new-version) |
 | User can duplicate a Recipe | ✅ (CR-08 §22.1 `recipe_duplicate`) |
 | User can delete/archive a user Recipe | ✅ (CR-08 §22.2 `recipe_delete`; archive flag is a future surface) |
-| System Recipes are protected from modification | ❌ |
+| System Recipes are protected from modification | ✅ (CR-08 §3.1 `recipe_save` + `recipe_delete` guards; `is_system` column) |
 | Recipes have schema versions and content hashes | ⚠️ Schema version ✅; content hash ❌ |
 | User can apply a Recipe to a Session | ✅ |
 | AstroForge evaluates applicability | ⚠️ Partial |
@@ -483,7 +484,7 @@ documented roadmap.
 | Section | ✅ | ⚠️ | ❌ | Total |
 |---|---|---|---|---|
 | §1–§4 (intent, decision, structure) | 3 | 1 | 0 | 4 |
-| §3 (recipe types) | 1 | 1 | 2 | 4 |
+| §3 (recipe types) | 3 | 1 | 0 | 4 |
 | §5 (versioning) | 2 | 0 | 0 | 2 |
 | §6 (reproducibility) | 0 | 1 | 0 | 1 |
 | §7 (provenance model) | 0 | 1 | 0 | 1 |
@@ -507,14 +508,14 @@ documented roadmap.
 | §25 (impl map) | 0 | 1 | 0 | 1 |
 | §26 (performance) | 1 | 0 | 0 | 1 |
 | §27 (standalone) | 1 | 0 | 0 | 1 |
-| §28 (acceptance) | 21 | 3 | 6 | 30 |
+| §28 (acceptance) | 22 | 3 | 5 | 30 |
 | §29 (test strategy) | 0 | 1 | 0 | 1 |
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **67** | **28** | **25** | **120** |
+| **Total** | **70** | **28** | **22** | **120** |
 
-**Coverage:** 56% shipped, 23% partial, 21% missing.
+**Coverage:** 58% shipped, 23% partial, 18% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -523,7 +524,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [67, 28, 25, 120]   # a + b + c == 120 per row
+sums = [70, 28, 22, 120]   # a + b + c == 120 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

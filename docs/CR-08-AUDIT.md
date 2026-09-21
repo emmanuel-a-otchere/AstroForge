@@ -349,7 +349,7 @@ recipes with filesystem references or unsupported stages.
 | `create_recipe_version` | ✅ `recipe_save` (when version > 0; auto-assigns next) |
 | `update_recipe` | ⚠️ Partial. `recipe_save` writes a new version; no in-place mutation |
 | `duplicate_recipe` | ✅ `recipe_duplicate(profileId, version)` (CR-08 §22.1) |
-| `delete_recipe` | ❌. No `recipe_delete` / `recipe_archive` IPC |
+| `delete_recipe` | ✅ `recipe_delete(profileId)` (CR-08 §22.2) |
 | `validate_recipe` | ✅ `recipe_get_for_image_version` + `validate_compatibility` |
 | `check_recipe_applicability` | ❌. Returns `ValidationResult::{Compatible, MissingModels, IncompatibleVersion}`, not the full §12 applicability matrix |
 | `adapt_recipe` | ⚠️ Partial. `derive_adaptive_parameters` is engine-side only; no IPC |
@@ -417,7 +417,7 @@ hashes are all persisted locally.
 | User can create a Recipe | ✅ |
 | User can edit and version a Recipe | ✅ (save-as-new-version) |
 | User can duplicate a Recipe | ✅ (CR-08 §22.1 `recipe_duplicate`) |
-| User can delete/archive a user Recipe | ❌ |
+| User can delete/archive a user Recipe | ✅ (CR-08 §22.2 `recipe_delete`; archive flag is a future surface) |
 | System Recipes are protected from modification | ❌ |
 | Recipes have schema versions and content hashes | ⚠️ Schema version ✅; content hash ❌ |
 | User can apply a Recipe to a Session | ✅ |
@@ -501,20 +501,20 @@ documented roadmap.
 | §19 (import/export) | 0 | 0 | 1 | 1 |
 | §20 (security) | 0 | 1 | 0 | 1 |
 | §21 (data model) | 7 | 4 | 4 | 15 |
-| §22 (semantic API) | 5 | 4 | 11 | 20 |
+| §22 (semantic API) | 6 | 4 | 10 | 20 |
 | §23 (events) | 0 | 1 | 0 | 1 |
 | §24 (architecture) | 1 | 0 | 0 | 1 |
 | §25 (impl map) | 0 | 1 | 0 | 1 |
 | §26 (performance) | 1 | 0 | 0 | 1 |
 | §27 (standalone) | 1 | 0 | 0 | 1 |
-| §28 (acceptance) | 17 | 4 | 9 | 30 |
+| §28 (acceptance) | 18 | 4 | 8 | 30 |
 | §29 (test strategy) | 0 | 1 | 0 | 1 |
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **60** | **30** | **30** | **120** |
+| **Total** | **62** | **30** | **28** | **120** |
 
-**Coverage:** 50% shipped, 25% partial, 25% missing.
+**Coverage:** 52% shipped, 25% partial, 23% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -523,7 +523,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [60, 30, 30, 120]   # a + b + c == 120 per row
+sums = [62, 30, 28, 120]   # a + b + c == 120 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

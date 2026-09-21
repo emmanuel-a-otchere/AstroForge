@@ -418,7 +418,7 @@ hashes are all persisted locally.
 | User can create a Recipe | ✅ |
 | User can edit and version a Recipe | ✅ (save-as-new-version) |
 | User can duplicate a Recipe | ✅ (CR-08 §22.1 `recipe_duplicate`) |
-| User can delete/archive a user Recipe | ✅ (CR-08 §22.2 `recipe_delete`; archive flag is a future surface) |
+| User can delete/archive a user Recipe | ✅ (CR-08 §22.2 `recipe_delete` + §22.4 `recipe_archive` / `recipe_unarchive`; both IPCs are independent flags) |
 | System Recipes are protected from modification | ✅ (CR-08 §3.1 `recipe_save` + `recipe_delete` guards; `is_system` column) |
 | Recipes have schema versions and content hashes | ⚠️ Schema version ✅; content hash ❌ |
 | User can apply a Recipe to a Session | ✅ |

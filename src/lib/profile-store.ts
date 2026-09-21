@@ -580,6 +580,65 @@ export async function isSystemProfile(
 }
 
 /**
+ * CR-08 §22.4: archive a Recipe profile. Archived
+ * profiles remain on disk but are hidden from the
+ * default `list()` results. Mirrors the Rust
+ * `recipe_archive` IPC. Returns true when at least one
+ * row was updated, false when the profile does not
+ * exist yet.
+ */
+export async function archiveProfile(
+  profileId: string,
+): Promise<boolean> {
+  if (!isTauri()) {
+    // Browser-mode placeholder: none of the seeded
+    // summaries are archived; the toggle is a no-op
+    // until the IPC returns a real result.
+    return false;
+  }
+  const updated = (await invoke("recipe_archive", {
+    profileId,
+  })) as boolean;
+  return updated;
+}
+
+/**
+ * CR-08 §22.4: unarchive a Recipe profile. Mirrors the
+ * Rust `recipe_unarchive` IPC. Returns true when at
+ * least one row was updated.
+ */
+export async function unarchiveProfile(
+  profileId: string,
+): Promise<boolean> {
+  if (!isTauri()) {
+    return false;
+  }
+  const updated = (await invoke("recipe_unarchive", {
+    profileId,
+  })) as boolean;
+  return updated;
+}
+
+/**
+ * CR-08 §22.4: read whether any version of a profile is
+ * currently archived. Mirrors the Rust
+ * `recipe_is_archived` IPC.
+ */
+export async function isArchivedProfile(
+  profileId: string,
+): Promise<boolean> {
+  if (!isTauri()) {
+    // Browser-mode placeholder: none of the seeded
+    // summaries are archived.
+    return false;
+  }
+  const value = (await invoke("recipe_is_archived", {
+    profileId,
+  })) as boolean;
+  return value;
+}
+
+/**
  * CR-08 §22.2: delete a Recipe profile (every version).
  * Mirrors the Rust `recipe_delete` IPC: returns the number
  * of versions deleted. Idempotent: deleting a profile that

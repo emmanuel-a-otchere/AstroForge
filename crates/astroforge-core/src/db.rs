@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS recipes (
     branch TEXT NOT NULL DEFAULT 'main',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     payload_json TEXT NOT NULL,
+    is_system INTEGER NOT NULL DEFAULT 0,
     UNIQUE(profile_id, version, branch)
 );
 
@@ -100,6 +101,8 @@ CREATE INDEX IF NOT EXISTS idx_recipes_target_type
     ON recipes(target_type);
 CREATE INDEX IF NOT EXISTS idx_recipes_name_target
     ON recipes(name, target_type);
+CREATE INDEX IF NOT EXISTS idx_recipes_is_system
+    ON recipes(is_system);
 "#;
 
 /// CR-05 P1 (Decision D-CR05-2) — PipelinePlan / PipelineStage /

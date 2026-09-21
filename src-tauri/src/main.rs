@@ -712,6 +712,33 @@ fn recipe_import(
     store.save(&recipe).map_err(Into::into)
 }
 
+/// CR-08 §3.1: mark a Recipe profile as a system Recipe.
+/// All existing versions of the profile get `is_system = 1`
+/// in the on-disk column, after which `recipe_save` and
+/// `recipe_delete` refuse to mutate the profile. Returns
+/// the `profile_id` so the caller can chain a UI refresh.
+#[tauri::command]
+fn recipe_mark_as_system(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+) -> Result<bool, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    store.mark_as_system(&profile_id).map_err(Into::into)
+}
+
+/// CR-08 §3.1: read whether any version of a profile is
+/// currently marked as a system Recipe. The UI uses this
+/// to render the "System" badge + gate destructive
+/// actions in the RecipesScreen toolbar.
+#[tauri::command]
+fn recipe_is_system(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+) -> Result<bool, CommandError> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    store.is_system_profile(&profile_id).map_err(Into::into)
+}
+
 /// CR-08 §22.2: delete a Recipe profile (every version,
 /// every branch). Returns the number of rows deleted.
 /// Deleting a profile that does not exist returns 0 (the
@@ -1099,6 +1126,8 @@ fn main() {
             recipe_save,
             recipe_duplicate,
             recipe_delete,
+            recipe_mark_as_system,
+            recipe_is_system,
             recipe_export,
             recipe_import,
             recipe_pipeline_plan_hash,

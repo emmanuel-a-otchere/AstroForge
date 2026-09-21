@@ -47,6 +47,14 @@ pub struct Recipe {
     /// straightforward.
     #[serde(default = "default_branch")]
     pub branch: String,
+    /// CR-08 §3.1: marks a Recipe as a system Recipe
+    /// that cannot be modified by the user. System Recipes
+    /// are seeded by the app (e.g. "M42-Natural-v1") and
+    /// are protected from `recipe_save` mutations +
+    /// `recipe_delete`. The column is mirrored in the
+    /// on-disk `recipes` table for an O(1) guard check.
+    #[serde(default)]
+    pub is_system: bool,
     /// ISO-8601 timestamp the version was created.
     #[serde(default = "default_empty_string")]
     pub created_at: String,
@@ -181,6 +189,7 @@ impl Recipe {
             created_at: String::new(),
             flags: Vec::new(),
             quality_profile: QualityProfile::default(),
+            is_system: false,
         }
     }
 

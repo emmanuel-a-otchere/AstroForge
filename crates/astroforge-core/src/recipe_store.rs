@@ -52,6 +52,12 @@ pub enum RecipeStoreError {
     Json(#[from] serde_json::Error),
     #[error("recipe not found: profile_id={profile_id}, version={version}")]
     NotFound { profile_id: String, version: u32 },
+    /// CR-08 §3.1: the caller tried to mutate a system
+    /// Recipe (a recipe whose `is_system` column is set).
+    /// System Recipes are seeded by the app and protected
+    /// from save + delete.
+    #[error("recipe profile {0:?} is a system recipe and cannot be modified")]
+    SystemRecipeProtected(String),
 }
 
 pub struct RecipeStore {
@@ -80,6 +86,26 @@ impl RecipeStore {
         }
         let conn = Connection::open(db_path)?;
         conn.execute_batch(db::RECIPE_SCHEMA_SQL)?;
+        // Idempotent column-add for upgrades from v1 DBs
+        // that predate the §3 system-recipe column. SQLite
+        // has no `ADD COLUMN IF NOT EXISTS`; we read
+        // `PRAGMA table_info` and ALTER only when the
+        // column is missing.
+        let has_is_system: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('recipes') \
+                 WHERE name = 'is_system'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_is_system == 0 {
+            conn.execute(
+                "ALTER TABLE recipes \
+                 ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -132,12 +158,29 @@ impl RecipeStore {
         let payload = owned.to_json()?;
 
         let profile_id = Self::profile_id_for(&owned.name, &owned.target_type);
+        // CR-08 §3.1: refuse to mutate a system Recipe.
+        // The save() path is the only write surface; adding
+        // a guard here protects every code path (UI, IPC,
+        // import) that lands a new version on disk.
         let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let is_system: bool = conn
+            .query_row(
+                "SELECT MAX(is_system) FROM recipes WHERE profile_id = ?1",
+                params![profile_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten()
+            .map(|v| v != 0)
+            .unwrap_or(false);
+        if is_system {
+            return Err(RecipeStoreError::SystemRecipeProtected(profile_id));
+        }
         conn.execute(
             "INSERT INTO recipes \
                 (profile_id, schema_version, name, description, target_type, \
-                 version, parent_version, branch, created_at, payload_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9)",
+                 version, parent_version, branch, created_at, payload_json, is_system) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9, ?10)",
             params![
                 profile_id,
                 owned.schema_version,
@@ -148,6 +191,7 @@ impl RecipeStore {
                 owned.parent_version.map(|v| v as i64),
                 owned.branch,
                 payload,
+                if owned.is_system { 1i64 } else { 0i64 },
             ],
         )?;
 
@@ -262,11 +306,60 @@ impl RecipeStore {
     /// so the UI can call delete without a pre-check.
     pub fn delete_profile(&self, profile_id: &str) -> Result<usize, RecipeStoreError> {
         let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        // CR-08 §3.1: refuse to delete a system Recipe
+        // profile. A user can still call `delete_profile`
+        // on a non-system profile; the guard only blocks
+        // mutations of the system-recipe set.
+        let is_system: bool = conn
+            .query_row(
+                "SELECT MAX(is_system) FROM recipes WHERE profile_id = ?1",
+                params![profile_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten()
+            .map(|v| v != 0)
+            .unwrap_or(false);
+        if is_system {
+            return Err(RecipeStoreError::SystemRecipeProtected(
+                profile_id.to_string(),
+            ));
+        }
         let deleted = conn.execute(
             "DELETE FROM recipes WHERE profile_id = ?1",
             params![profile_id],
         )?;
         Ok(deleted)
+    }
+
+    /// CR-08 §3.1: mark every version of a profile as a
+    /// system Recipe. Returns true when the flag was
+    /// actually flipped (at least one row updated), false
+    /// when no rows existed for that profile_id. Idempotent
+    /// in the sense that re-running it on an already-system
+    /// profile is a no-op.
+    pub fn mark_as_system(&self, profile_id: &str) -> Result<bool, RecipeStoreError> {
+        let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE recipes SET is_system = 1 WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    /// CR-08 §3.1: read whether any version of a profile is
+    /// currently marked as a system Recipe.
+    pub fn is_system_profile(&self, profile_id: &str) -> Result<bool, RecipeStoreError> {
+        let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let v: Option<i64> = conn
+            .query_row(
+                "SELECT MAX(is_system) FROM recipes WHERE profile_id = ?1",
+                params![profile_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(v.map(|x| x != 0).unwrap_or(false))
     }
 
     /// Seed the DwarfII v1 profile if no profile with the same

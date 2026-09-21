@@ -357,8 +357,8 @@ recipes with filesystem references or unsupported stages.
 | `apply_recipe` | ⚠️ Partial. `enhancement_apply_operation` reads recipe_id via the IPC but does not take a `Recipe` named "this profile" |
 | `save_pipeline_as_recipe` | ❌ |
 | `save_processing_as_recipe` | ❌ |
-| `import_recipe` | ❌ |
-| `export_recipe` | ❌ |
+| `import_recipe` | ✅ `recipe_import(json)` (CR-08 §19) |
+| `export_recipe` | ✅ `recipe_export(profileId, version?)` (CR-08 §19) |
 | `get_recipe_provenance` | ❌. `recipe_get_for_image_version` returns the Recipe but not its PipelineRun lineage |
 | `get_image_provenance` | ⚠️ Partial. `ProvenancePanel.svelte` + `provenanceStore` render the Recipe chain; `import_get_target_provenance` covers the target-classification half |
 | `get_reproducibility_report` | ❌. No `ReproducibilityRecord` aggregation (see §6) |
@@ -438,9 +438,9 @@ hashes are all persisted locally.
 | Provenance survives application restart | ✅ |
 | Provenance survives project migration | ⚠️ Partial |
 | AI operations are identifiable | ✅ |
-| Users can inspect provenance without entering Expert mode | ❌ (no `ProvenanceViewer`) |
-| Recipes can be exported | ❌ |
-| Recipes can be imported | ❌ |
+| Users can inspect provenance without entering Expert mode | ✅ (ProvenancePanel.svelte mounted in CompareWorkspace compare-extras) |
+| Recipes can be exported | ✅ (CR-08 §19 `recipe_export`; file-dialog UI is a follow-on slice) |
+| Recipes can be imported | ✅ (CR-08 §19 `recipe_import`; file-dialog UI is a follow-on slice) |
 | Imported recipes are validated | ⚠️ Partial |
 | Invalid recipes cannot execute | ⚠️ Partial |
 | Recipes contain no arbitrary executable code | ✅ (no code field) |
@@ -498,7 +498,7 @@ documented roadmap.
 | §16 (workspace integration) | 0 | 1 | 0 | 1 |
 | §17 (provenance viewer) | 1 | 0 | 0 | 1 |
 | §18 (provenance graph) | 1 | 0 | 0 | 1 |
-| §19 (import/export) | 0 | 0 | 1 | 1 |
+| §19 (import/export) | 1 | 0 | 0 | 1 |
 | §20 (security) | 0 | 1 | 0 | 1 |
 | §21 (data model) | 7 | 4 | 4 | 15 |
 | §22 (semantic API) | 6 | 4 | 10 | 20 |
@@ -507,14 +507,14 @@ documented roadmap.
 | §25 (impl map) | 0 | 1 | 0 | 1 |
 | §26 (performance) | 1 | 0 | 0 | 1 |
 | §27 (standalone) | 1 | 0 | 0 | 1 |
-| §28 (acceptance) | 18 | 4 | 8 | 30 |
+| §28 (acceptance) | 21 | 3 | 6 | 30 |
 | §29 (test strategy) | 0 | 1 | 0 | 1 |
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **62** | **30** | **28** | **120** |
+| **Total** | **66** | **29** | **25** | **120** |
 
-**Coverage:** 52% shipped, 25% partial, 23% missing.
+**Coverage:** 55% shipped, 24% partial, 21% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -523,7 +523,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [62, 30, 28, 120]   # a + b + c == 120 per row
+sums = [66, 29, 25, 120]   # a + b + c == 120 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

@@ -422,6 +422,111 @@ export async function duplicateProfile(
 }
 
 /**
+ * CR-08 §19: export a Recipe (any profile; `version`
+ * omitted exports the head) as its canonical JSON payload.
+ * The file-save dialog + `.afrecipe` filename convention
+ * are a UI follow-on; this returns the content.
+ */
+export async function exportProfile(
+  profileId: string,
+  version?: number,
+): Promise<string> {
+  if (!isTauri()) {
+    const hit = PLACEHOLDER_SUMMARIES.find(
+      (s) => s.profileId === profileId,
+    );
+    if (!hit) {
+      throw new Error(`profile not found: ${profileId}`);
+    }
+    // Minimal placeholder payload mirroring the Rust shape.
+    return JSON.stringify(
+      {
+        schema_version: "2.0",
+        version: hit.version,
+        parent_version: null,
+        name: hit.name,
+        target_type: hit.targetType,
+        description: "",
+        created_at: hit.createdAt,
+        stages: [],
+        required_models: [],
+        integrity: {
+          perceptual_models_used: false,
+          deterministic_models_used: true,
+          seed_recorded: false,
+          models: [],
+        },
+        branch: "main",
+        quality_profile: "natural",
+        flags: [],
+      },
+      null,
+      2,
+    );
+  }
+  return (await invoke("recipe_export", {
+    profileId,
+    version: version ?? null,
+  })) as string;
+}
+
+/**
+ * CR-08 §19: import a Recipe from its canonical JSON
+ * payload. The Rust handler re-lineages the recipe against
+ * the local store: fresh names start at v1; matching
+ * (name, target_type) profiles append as the next version
+ * with `parent_version` pointing at the local head.
+ */
+export async function importProfile(
+  json: string,
+): Promise<RecipeSummary> {
+  if (!isTauri()) {
+    const parsed = JSON.parse(json) as {
+      name?: string;
+      target_type?: string;
+      version?: number;
+    };
+    const name = (parsed.name ?? "").trim();
+    const targetType = (parsed.target_type ?? "").trim();
+    if (!name || !targetType) {
+      throw new Error("imported recipe has an empty name or target_type");
+    }
+    const summary: RecipeSummary = {
+      id: 0,
+      profileId: profileIdFor(name, targetType),
+      schemaVersion: "2.0",
+      name,
+      description: "",
+      targetType,
+      version: 1,
+      parentVersion: null,
+      branch: "main",
+      createdAt: new Date().toISOString(),
+    };
+    PLACEHOLDER_SUMMARIES.unshift(summary);
+    profileStore.set([...PLACEHOLDER_SUMMARIES]);
+    return summary;
+  }
+  const rust = (await invoke("recipe_import", { json })) as RustRecipeSummary;
+  const summary = fromRustSummary(rust);
+  // Optimistic list refresh: if the profile already exists
+  // in the cache, replace its entry with the new head;
+  // otherwise prepend.
+  profileStore.update((list) => {
+    const idx = list.findIndex(
+      (s) => s.profileId === summary.profileId,
+    );
+    if (idx >= 0) {
+      const next = [...list];
+      next[idx] = summary;
+      return next;
+    }
+    return [summary, ...list];
+  });
+  return summary;
+}
+
+/**
  * CR-08 §22.2: delete a Recipe profile (every version).
  * Mirrors the Rust `recipe_delete` IPC: returns the number
  * of versions deleted. Idempotent: deleting a profile that

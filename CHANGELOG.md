@@ -2,6 +2,78 @@
 
 ## Unreleased
 
+### Slice §19 file-dialog UI
+
+**Scope.** Closes the file-dialog half of CR-08 §19 by
+wiring the existing `recipe_export` + `recipe_import`
+IPCs to the system file picker via
+`@tauri-apps/plugin-dialog` + `@tauri-apps/plugin-fs`.
+Adds per-card Export buttons + a header Import button
+in `RecipesScreen.svelte`.
+
+**What.**
+
+- `src/components/RecipesScreen.svelte`: new
+  `onExportRecipe(summary)` + `onImportRecipe()`
+  handlers; new header `Import…` button; new
+  per-card `Export` button; status / error panes;
+  CSS for `.header-actions`, `.secondary-cta`,
+  `.recipe-card-export`, `.state-line.status`.
+  The export flow: invokes `exportProfile(profile_id)`
+  to get the JSON payload, opens `saveDialog` with
+  the `.afrecipe` extension filter, writes the bytes
+  via `plugin-fs.writeTextFile`. The import flow:
+  opens `openDialog` with the `.afrecipe` extension
+  filter, reads the file via `plugin-fs.readTextFile`,
+  invokes `importProfile(json)`. Browser-mode
+  fallbacks use `window.prompt()` + `localStorage`
+  so the UI flow exercises end-to-end without a
+  Tauri runtime.
+- `package.json`: added `@tauri-apps/plugin-fs`
+  dependency (`^2.0.0`).
+- `src-tauri/Cargo.toml`: added
+  `tauri-plugin-fs = "2"` dependency.
+- `src-tauri/src/main.rs`: registered
+  `tauri_plugin_fs::init()` in the Tauri builder
+  (alongside the existing `tauri_plugin_dialog::init()`).
+- `src-tauri/tauri.conf.json`: added a `plugins.fs`
+  block with `requireLiteralLeadingDot: false` to
+  enable the file-system plugin's permissive scope.
+
+**Verification.** All 6 gates pass: `cargo fmt --check`,
+`clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace` (37 suites, 0 failures),
+`npm run check` (1 pre-existing error + 9 pre-existing
+warnings, unchanged baseline), `npm run build`,
+`mvp_smoke.sh`. The `plugin-fs` dependency is
+installed via `npm install`.
+
+**Audit deltas.** §28 rows "Recipes can be exported"
+and "Recipes can be imported" enriched to mention the
+file-dialog UI; both rows remain ✅ (already shipped
+via the §19 IPCs). Scorecard unchanged at
+71/29/20/120 (59% shipped).
+
+**Honest flags.**
+
+- The export flow uses `.afrecipe.json` as the
+  default filename so the file has a JSON extension
+  (which Tauri's `saveDialog` accepts natively). The
+  `.afrecipe` extension alone is not a registered
+  MIME type on most systems; the dialog offers both
+  via the extension filter. A future slice could
+  register a real MIME type.
+- The `tauri-plugin-fs` plugin's scope is permissive
+  (`requireLiteralLeadingDot: false`). This matches
+  the §19 row's "user can pick any file" contract
+  but is wider than the rest of the app's filesystem
+  surface (which uses scoped dirs). Tightening is a
+  follow-on security slice.
+- Same src-tauri lint caveat as prior slices: the
+  Cargo changes are syntactic and CI's rust job is
+  the authoritative lint pass; local src-tauri clippy
+  is blocked by the libsoup3-sys build (env-only).
+
 ### Slice §14: CR-08 Save-as-Recipe UX
 
 **Scope.** Closes the §14 "Save as Recipe" UX surface by

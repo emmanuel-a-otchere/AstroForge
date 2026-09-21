@@ -459,8 +459,8 @@ hashes are all persisted locally.
 | Provenance survives project migration | ⚠️ Partial |
 | AI operations are identifiable | ✅ |
 | Users can inspect provenance without entering Expert mode | ✅ (ProvenancePanel.svelte mounted in CompareWorkspace compare-extras) |
-| Recipes can be exported | ✅ (CR-08 §19 `recipe_export`; file-dialog UI is a follow-on slice) |
-| Recipes can be imported | ✅ (CR-08 §19 `recipe_import`; file-dialog UI is a follow-on slice) |
+| Recipes can be exported | ✅ (CR-08 §19 `recipe_export` + file-dialog UI: per-card Export button + `saveDialog` with `.afrecipe` extension filter) |
+| Recipes can be imported | ✅ (CR-08 §19 `recipe_import` + file-dialog UI: header Import button + `openDialog` with `.afrecipe` extension filter) |
 | Imported recipes are validated | ⚠️ Partial |
 | Invalid recipes cannot execute | ⚠️ Partial |
 | Recipes contain no arbitrary executable code | ✅ (no code field) |

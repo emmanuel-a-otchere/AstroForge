@@ -233,12 +233,21 @@ Compare workspace's BeginnerComparePrompt + the §32.4 test suite
 "Apply suggestion" button). AI comparison is partial credit;
 mechanical parameter diff is the remaining ❌ surface.
 
-## §14 Recipe Save from Successful Processing — ❌ Missing
+## §14 Recipe Save from Successful Processing: ⚠️ Partial (Save-as-Recipe shipped; selection surface still partial)
 
-No "Save as Recipe" prompt after successful pipeline runs. The
-§14 selection surface (which stages / parameters / AI ops / order /
-masks / quality objectives / applicability to capture) is not
-implemented.
+The "Save as Recipe" UX ships via `SaveAsRecipePanel.svelte`
+mounted in `ProcessWorkspace.svelte` next to `ProcessingControls`.
+A user with an active `PipelinePlan` clicks **Save as Recipe**,
+fills in a name (and optional target-type override), and the IPC
+`recipe_save_from_pipeline_plan(plan_id, name, targetType?)` builds
+a `Recipe` from the plan's `parameters_json` (pure-function
+`recipe_from_pipeline_plan` in `astroforge-core`) and persists it
+via `RecipeStore::save` at `version = 1`. The §14 selection
+surface (which stages / parameters / AI ops / order / masks /
+quality objectives / applicability to capture) is not implemented:
+the conversion takes the plan's stages wholesale, in plan order,
+without letting the user pick subsets or override parameters
+beyond `target_type`. That is a follow-on slice.
 
 ## §15 UI Specification — ⚠️ Partial
 
@@ -263,8 +272,14 @@ Apply / Duplicate / Edit buttons).
 ## §16 Processing Workspace Integration — ⚠️ Partial
 
 The §16 post-run prompt (Processing Complete + Review Result / Compare /
-**Save as Recipe** / Export) is not in the processing workspace. The
-"Save as Recipe" call-to-action is missing.
+**Save as Recipe** / Export) IS now in the processing workspace
+(CR-08 §14 `SaveAsRecipePanel.svelte` mounted in `ProcessWorkspace.svelte`
+next to `ProcessingControls`; the backend IPC
+`recipe_save_from_pipeline_plan` builds a Recipe from the plan's
+`parameters_json` and persists via `RecipeStore::save`). The
+post-run prompt for the wider §16 flow (Processing Complete / Review
+Result / Compare) is still a future slice; this PR lands the
+"Save as Recipe" call-to-action only.
 
 ## §17 Provenance Viewer: ✅ Shipped
 
@@ -360,7 +375,7 @@ recipes with filesystem references or unsupported stages.
 | `adapt_recipe` | ⚠️ Partial. `derive_adaptive_parameters` is engine-side only; no IPC |
 | `preview_recipe` | ❌ |
 | `apply_recipe` | ✅ `recipe_apply(profileId, version, availableModels?)` (CR-08 §22.3). Returns enabled `(stage_id, params)` pairs in Recipe order; runs the schema-version guard + missing-models compatibility check |
-| `save_pipeline_as_recipe` | ❌ |
+| `save_pipeline_as_recipe` | ✅ `recipe_save_from_pipeline_plan(plan_id, name, targetType?)` (CR-08 §14); Pure-function `recipe_from_pipeline_plan` builds a Recipe from a `PipelinePlan`'s stages + parameters_json, then persists via `RecipeStore::save` |
 | `save_processing_as_recipe` | ❌ |
 | `import_recipe` | ✅ `recipe_import(json)` (CR-08 §19) |
 | `export_recipe` | ✅ `recipe_export(profileId, version?)` (CR-08 §19) |
@@ -498,7 +513,7 @@ documented roadmap.
 | §11 (application flow) | 0 | 1 | 0 | 1 |
 | §12 (applicability) | 0 | 1 | 0 | 1 |
 | §13 (recipe diff) | 0 | 1 | 0 | 1 |
-| §14 (save from processing) | 0 | 0 | 1 | 1 |
+| §14 (save from proc) | 0 | 1 | 0 | 1 |
 | §15 (UI spec) | 0 | 3 | 1 | 4 |
 | §16 (workspace integration) | 0 | 1 | 0 | 1 |
 | §17 (provenance viewer) | 1 | 0 | 0 | 1 |
@@ -506,7 +521,7 @@ documented roadmap.
 | §19 (import/export) | 1 | 0 | 0 | 1 |
 | §20 (security) | 0 | 1 | 0 | 1 |
 | §21 (data model) | 7 | 4 | 4 | 15 |
-| §22 (semantic API) | 7 | 3 | 10 | 20 |
+| §22 (semantic API) | 8 | 3 | 9 | 20 |
 | §23 (events) | 0 | 1 | 0 | 1 |
 | §24 (architecture) | 1 | 0 | 0 | 1 |
 | §25 (impl map) | 0 | 1 | 0 | 1 |
@@ -517,9 +532,9 @@ documented roadmap.
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **70** | **28** | **22** | **120** |
+| **Total** | **71** | **29** | **20** | **120** |
 
-**Coverage:** 58% shipped, 23% partial, 18% missing.
+**Coverage:** 59% shipped, 24% partial, 17% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -528,7 +543,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [70, 28, 22, 120]   # a + b + c == 120 per row
+sums = [71, 29, 20, 120]   # a + b + c == 120 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

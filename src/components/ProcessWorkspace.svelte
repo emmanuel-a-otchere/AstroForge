@@ -35,6 +35,7 @@
   import RecoveryBanner from "./RecoveryBanner.svelte";
   import AutoPlanPanel from "./AutoPlanPanel.svelte";
   import ProcessingControls from "./ProcessingControls.svelte";
+  import SaveAsRecipePanel from "./SaveAsRecipePanel.svelte";
   import { activeProject } from "../state/project-context";
   import {
     activePlan,
@@ -141,6 +142,15 @@
       <section class="processing-controls-zone" aria-label="Pipeline run controls">
         <ProcessingControls planId={$activePlan.plan_id} />
       </section>
+
+      <!--
+        CR-08 §14: "Save as Recipe" UX. Renders only when
+        an active plan exists; the panel reads `$activePlan`
+        to drive the IPC + modal. Mirrors the existing
+        RecoveryBanner / AutoPlanPanel gating (mounted when
+        the plan is live; absent in the empty-state path).
+      -->
+      <SaveAsRecipePanel />
     {/if}
 
     {#if $workspaceState.runs.length === 0}

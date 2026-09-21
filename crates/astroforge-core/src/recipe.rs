@@ -470,6 +470,87 @@ pub fn apply_recipe(
     Ok(stage_params)
 }
 
+/// CR-08 §14: convert a [`PipelinePlan`] into a new
+/// [`Recipe`] for "Save as Recipe" UX. Pure function --
+/// no IO, no side effects. The caller is responsible
+/// for persisting via `RecipeStore::save()`.
+///
+/// Mapping rules:
+/// - `name` + `target_type` come from the IPC request;
+///   when `target_type` is `None`, the plan's
+///   `target_type` (serialized via serde_json's
+///   `rename_all = "snake_case"`) is used.
+/// - `description` is "Saved from pipeline plan
+///   <plan_id> (session <session_id>)".
+/// - Each `PipelineStage` becomes a `RecipeStage`
+///   with `enabled = pipeline.enabled`. The stage
+///   `parameters_json` is deserialized into the
+///   `RecipeStage.params` HashMap; missing or empty
+///   JSON falls back to an empty HashMap.
+/// - `version` is 1, `parent_version` is None,
+///   `branch` is "main". `required_models` is empty
+///   (the plan does not encode AI model
+///   requirements); `quality_profile` is `Balanced`;
+///   `flags` is empty.
+/// - `is_system` is false (a user-saved Recipe is
+///   never auto-flagged as a system Recipe; the
+///   `mark_as_system` IPC flips it later if needed).
+pub fn recipe_from_pipeline_plan(
+    plan: &crate::domain::PipelinePlan,
+    name: &str,
+    target_type: Option<&str>,
+) -> Recipe {
+    use crate::domain::PipelineStage;
+    use std::collections::HashMap;
+
+    // Derive target_type from the plan when the caller
+    // didn't supply one. `serde_json::to_value` gives us
+    // the canonical snake_case string the plan was
+    // serialized with ("deep_sky", "planet", ...).
+    let resolved_target_type: String = match target_type {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => serde_json::to_value(plan.target_type)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown".to_string()),
+    };
+
+    let mut recipe = Recipe::new(name, &resolved_target_type);
+    recipe.description = format!(
+        "Saved from pipeline plan {} (session {})",
+        plan.plan_id, plan.session_id
+    );
+    recipe.version = 1;
+    recipe.parent_version = None;
+    recipe.branch = "main".into();
+    recipe.quality_profile = QualityProfile::Natural;
+    recipe.is_system = false;
+    recipe.required_models.clear();
+    recipe.flags.clear();
+
+    for PipelineStage {
+        stage_id,
+        parameters_json,
+        enabled,
+        ..
+    } in &plan.stages
+    {
+        let params: HashMap<String, serde_json::Value> = parameters_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        recipe.add_stage(stage_id, params);
+        // add_stage always pushes enabled=true; mirror the
+        // plan's own enabled flag so a disabled plan stage
+        // does not sneak back on in the saved Recipe.
+        if let Some(last) = recipe.stages.last_mut() {
+            last.enabled = *enabled;
+        }
+    }
+
+    recipe
+}
+
 pub fn integrity_label(badge: &IntegrityBadge) -> String {
     if badge.perceptual_models_used {
         "Perceptual AI used".into()

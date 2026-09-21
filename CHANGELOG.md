@@ -2,6 +2,89 @@
 
 ## Unreleased
 
+### Slice §14: CR-08 Save-as-Recipe UX
+
+**Scope.** Closes the §14 "Save as Recipe" UX surface by
+adding a new IPC `recipe_save_from_pipeline_plan` +
+a frontend panel `SaveAsRecipePanel.svelte` mounted in
+`ProcessWorkspace.svelte`. Closes the §22
+`save_pipeline_as_recipe` row and the §16
+post-run-prompt's "Save as Recipe" call-to-action.
+
+**What.**
+
+- `crates/astroforge-core/src/recipe.rs`: new pure
+  function `recipe_from_pipeline_plan(plan, name,
+  target_type?) -> Recipe`. Reads the plan's
+  `parameters_json` per stage, deserializes into the
+  Recipe stage's `params` HashMap, mirrors the plan's
+  `enabled` flag (so a disabled plan stage does NOT
+  silently flip to enabled=true), and defaults
+  `quality_profile = Natural`, `is_system = false`,
+  `branch = "main"`. When `target_type` is omitted,
+  derives from the plan's serialized snake_case form.
+- `src-tauri/src/main.rs`: new Tauri command
+  `recipe_save_from_pipeline_plan(plan_id, name,
+  target_type?)`. Loads the plan via
+  `PipelinePlanStore::load_plan` (clone-then-release
+  pattern so both locks are never held at once),
+  delegates to `recipe_from_pipeline_plan`, computes
+  `next_version_for` before `save`, returns the
+  `RecipeSummary`.
+- `src/components/SaveAsRecipePanel.svelte`: new
+  panel. Renders the "Save as Recipe" button next to
+  `ProcessingControls` when an active plan exists;
+  opens a modal with name + optional target-type
+  override; calls the IPC; shows a success pane with
+  the saved v1 summary.
+- `src/components/ProcessWorkspace.svelte`: mounts
+  `SaveAsRecipePanel` below `ProcessingControls`
+  inside the existing `{#if $activePlan}` block.
+- `src/lib/profile-store.ts`: new `savePipelinePlanAsRecipe`
+  wrapper with browser-mode placeholder for end-to-end
+  UI testing.
+- `crates/astroforge-core/tests/recipe_from_pipeline.rs`:
+  7 tests pinning the conversion contract: empty plan,
+  multi-stage plan preserves order/count, disabled
+  plan stages stay disabled, missing/unparseable
+  parameters_json falls back to empty HashMap,
+  target_type override replaces plan default, empty
+  override falls back to plan, recipe is not
+  auto-flagged as system.
+
+**Verification.** All 6 gates pass: `cargo fmt --check`,
+`clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace` (37 suites, 0 failures),
+`npm run check` (1 pre-existing error + 9 pre-existing
+warnings, unchanged baseline), `npm run build`,
+`mvp_smoke.sh`.
+
+**Audit deltas.** §14 row: ❌ -> ⚠️ (Save-as-Recipe UX
+shipped; the §14 selection surface is still a future
+slice). §16 body updated. §22 IPC table:
+`save_pipeline_as_recipe` row ❌ -> ✅. §22 scorecard
+7/3/10/20 -> 8/3/9/20. Total 70/28/22/120 ->
+71/29/20/120 (59% shipped).
+
+**Honest flags.**
+
+- The §14 selection surface (which stages /
+  parameters / AI ops / order / masks / quality
+  objectives / applicability to capture) is NOT
+  implemented. The conversion takes the plan's stages
+  wholesale, in plan order, without letting the user
+  pick subsets or override parameters beyond
+  `target_type`. That is a follow-on slice.
+- `parameters_json` is a JSON-encoded `HashMap<String,
+  serde_json::Value>` blob stored in the PipelineStage
+  row. The conversion handles `None` and unparseable
+  JSON by falling back to an empty HashMap rather
+  than panicking -- a future test should pin a
+  regression.
+- Same src-tauri lint caveat as prior slices: thin
+  pass-throughs over tested primitives; CI's rust job
+  is the authoritative lint pass.
+
 ### Slice §3.2: CR-08 system-recipe seed flow
 
 **Scope.** Lands the boot-time seed flow that flips the

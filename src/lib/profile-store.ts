@@ -721,6 +721,49 @@ export async function applyRecipe(
 }
 
 /**
+ * CR-08 §14: "Save Pipeline as Recipe" UX. Loads a
+ * PipelinePlan via the Rust `recipe_save_from_pipeline_plan`
+ * IPC, builds a Recipe from the plan's stages, and
+ * persists it via `RecipeStore::save`. Returns the
+ * `RecipeSummary` of the saved v1 Recipe.
+ *
+ * @param planId  The `PipelinePlan.plan_id` to read.
+ * @param name  The new Recipe's name (UI-side input).
+ * @param targetType  Optional override; when omitted, the
+ *   plan's `target_type` (serialized snake_case) is used.
+ */
+export async function savePipelinePlanAsRecipe(
+  planId: string,
+  name: string,
+  targetType?: string,
+): Promise<RecipeSummary> {
+  if (!isTauri()) {
+    // Browser-mode placeholder: build a synthetic summary
+    // so the UI flow exercises end-to-end.
+    const profileId = profileIdFor(name, targetType ?? "unknown");
+    const summary: RecipeSummary = {
+      id: Math.floor(Date.now()),
+      profileId,
+      schemaVersion: "2.0",
+      name,
+      description: `Saved from pipeline plan ${planId}`,
+      targetType: targetType ?? "unknown",
+      version: 1,
+      parentVersion: null,
+      branch: "main",
+      createdAt: new Date().toISOString(),
+    };
+    return summary;
+  }
+  const rust = (await invoke("recipe_save_from_pipeline_plan", {
+    planId,
+    name,
+    targetType: targetType ?? null,
+  })) as RustRecipeSummary;
+  return fromRustSummary(rust);
+}
+
+/**
  * Compute the deterministic profile_id for a (name, targetType) pair,
  * mirroring `RecipeStore::profile_id_for` in Rust. Useful for lookups
  * that don't have the summary in hand.

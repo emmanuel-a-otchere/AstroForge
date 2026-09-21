@@ -712,6 +712,68 @@ fn recipe_import(
     store.save(&recipe).map_err(Into::into)
 }
 
+/// CR-08 §14: "Save Pipeline as Recipe" UX. Loads a
+/// `PipelinePlan`, builds a [`Recipe`] from its stages,
+/// and persists it via `RecipeStore::save`. Mirrors the
+/// `recipe_apply` IPC's pattern: the new IPC is the
+/// production-side companion that turns a session's
+/// terminal pipeline plan into a portable Recipe.
+///
+/// - `plan_id`: the `PipelinePlan.plan_id` to read.
+/// - `name`: the new Recipe's name.
+/// - `target_type`: optional override; when `None`, the
+///   plan's `target_type` (serialized snake_case) is
+///   used.
+///
+/// Returns the `RecipeSummary` of the saved v1 Recipe
+/// (a freshly-saved user Recipe is never flagged as a
+/// system Recipe -- callers use `recipe_mark_as_system`
+/// to flip that if desired).
+#[tauri::command]
+fn recipe_save_from_pipeline_plan(
+    recipe_state: State<'_, RecipeState>,
+    pipeline_state: State<'_, commands_pipeline_plan::PipelinePlanState>,
+    plan_id: String,
+    name: String,
+    target_type: Option<String>,
+) -> Result<RecipeSummary, CommandError> {
+    // Load the plan (clone-then-release pattern so we
+    // don't hold both locks at once).
+    let plan = {
+        let store = pipeline_state
+            .store
+            .lock()
+            .map_err(|_| "pipeline plan store mutex poisoned".to_string())?;
+        store
+            .load_plan(&plan_id)
+            .map_err(|e| format!("failed to load pipeline plan: {e}"))?
+    };
+    // Build the Recipe from the loaded plan (pure function).
+    let mut recipe = astroforge_core::recipe::recipe_from_pipeline_plan(
+        &plan,
+        &name,
+        target_type.as_deref(),
+    );
+    // Assign the next version BEFORE save (mirrors the
+    // recipe_save IPC pattern).
+    let profile_id = astroforge_core::recipe_store::RecipeStore::profile_id_for(
+        &recipe.name,
+        &recipe.target_type,
+    );
+    let version = {
+        let store = recipe_state
+            .0
+            .lock()
+            .expect("recipe store mutex poisoned");
+        store
+            .next_version_for(&profile_id)
+            .map_err(|e| format!("failed to compute next version: {e}"))?
+    };
+    recipe.version = version;
+    let store = recipe_state.0.lock().expect("recipe store mutex poisoned");
+    store.save(&recipe).map_err(Into::into)
+}
+
 /// CR-08 §3.1: mark a Recipe profile as a system Recipe.
 /// All existing versions of the profile get `is_system = 1`
 /// in the on-disk column, after which `recipe_save` and
@@ -1177,6 +1239,7 @@ fn main() {
             recipe_import,
             recipe_pipeline_plan_hash,
             recipe_apply,
+            recipe_save_from_pipeline_plan,
             recipe_ai_diff_summary,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,

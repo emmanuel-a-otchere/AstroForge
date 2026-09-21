@@ -32,6 +32,23 @@ pub struct RecipeSummary {
     pub parent_version: Option<u32>,
     pub branch: String,
     pub created_at: String,
+    /// CR-08 §3.1 / §15: `true` when any row in the profile
+    /// is marked as a system recipe (the head row inherits
+    /// the lineage's `is_system` flag).
+    pub is_system: bool,
+    /// CR-08 §22.4 / §15: `true` when the head row is
+    /// archived (excluded from default list views; surfaced
+    /// only in the Archived tab).
+    pub is_archived: bool,
+    /// CR-08 §15: `true` when the head row was created via
+    /// `recipe_import` (i.e. .afrecipe file). Drives the
+    /// Imported tab classification.
+    pub is_imported: bool,
+    /// CR-08 §15: ISO 8601 timestamp of the most recent
+    /// `recipe_apply` against this profile, or `None` if
+    /// the recipe has never been applied. Drives the
+    /// Recently Used tab ORDER BY DESC.
+    pub last_used_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +82,9 @@ pub struct RecipeStore {
 }
 
 fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecipeSummary> {
+    let raw_is_system: i64 = row.get(10)?;
+    let raw_is_archived: i64 = row.get(11)?;
+    let raw_is_imported: i64 = row.get(12)?;
     Ok(RecipeSummary {
         id: row.get(0)?,
         profile_id: row.get(1)?,
@@ -76,6 +96,10 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecipeSummary> {
         parent_version: row.get::<_, Option<i64>>(7)?.map(|v| v as u32),
         branch: row.get(8)?,
         created_at: row.get(9)?,
+        is_system: raw_is_system != 0,
+        is_archived: raw_is_archived != 0,
+        is_imported: raw_is_imported != 0,
+        last_used_at: row.get(13)?,
     })
 }
 
@@ -122,6 +146,49 @@ impl RecipeStore {
                 [],
             )?;
         }
+        // CR-08 §15: the Recipe Library 5-tab layout reads these flags
+        // and the last-used timestamp to classify a head row into
+        // System / My / Project / Imported / Recently Used. We stamp
+        // `last_used_at` from `recipe_apply`; `is_imported` flips on
+        // when `recipe_import` persists a payload. The columns are
+        // nullable / 0-defaulted so existing rows remain valid.
+        let has_is_imported: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('recipes') \
+                 WHERE name = 'is_imported'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_is_imported == 0 {
+            conn.execute(
+                "ALTER TABLE recipes \
+                 ADD COLUMN is_imported INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        let has_last_used_at: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('recipes') \
+                 WHERE name = 'last_used_at'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_last_used_at == 0 {
+            conn.execute(
+                "ALTER TABLE recipes \
+                 ADD COLUMN last_used_at TEXT",
+                [],
+            )?;
+        }
+        // Index on `last_used_at` so the Recently Used tab can
+        // ORDER BY DESC cheaply as the head-row set grows.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_recipes_last_used_at \
+             ON recipes(last_used_at)",
+            [],
+        )?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -195,8 +262,9 @@ impl RecipeStore {
         conn.execute(
             "INSERT INTO recipes \
                 (profile_id, schema_version, name, description, target_type, \
-                 version, parent_version, branch, created_at, payload_json, is_system) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9, ?10)",
+                 version, parent_version, branch, created_at, payload_json, is_system, \
+                 is_archived, is_imported) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9, ?10, 0, 0)",
             params![
                 profile_id,
                 owned.schema_version,
@@ -213,7 +281,8 @@ impl RecipeStore {
 
         let mut stmt = conn.prepare(
             "SELECT id, profile_id, schema_version, name, description, target_type, \
-                    version, parent_version, branch, created_at \
+                    version, parent_version, branch, created_at, \
+                    is_system, is_archived, is_imported, last_used_at \
              FROM recipes WHERE profile_id = ?1 AND version = ?2 AND branch = ?3",
         )?;
         let row = stmt.query_row(
@@ -227,9 +296,14 @@ impl RecipeStore {
     pub fn list(&self) -> Result<Vec<RecipeSummary>, RecipeStoreError> {
         let conn = self.conn.lock().expect("recipe db mutex poisoned");
         // Active head per profile_id = row with MAX(version) for that id.
+        // §15 Recipe Library 5-tab layout: SELECT also exposes
+        // `is_system`, `is_archived`, `is_imported`, `last_used_at` so the
+        // UI can classify each head row into System / My / Project /
+        // Imported / Recently Used without a second round-trip.
         let mut stmt = conn.prepare(
             "SELECT r.id, r.profile_id, r.schema_version, r.name, r.description, \
-                    r.target_type, r.version, r.parent_version, r.branch, r.created_at \
+                    r.target_type, r.version, r.parent_version, r.branch, r.created_at, \
+                    r.is_system, r.is_archived, r.is_imported, r.last_used_at \
              FROM recipes r \
              INNER JOIN ( \
                  SELECT profile_id, MAX(version) AS max_version \
@@ -420,6 +494,41 @@ impl RecipeStore {
             .optional()?
             .flatten();
         Ok(v.map(|x| x != 0).unwrap_or(false))
+    }
+
+    /// CR-08 §15: stamp `last_used_at = datetime('now')` on
+    /// every row of the given profile. Called from
+    /// `recipe_apply` so the Recently Used tab's
+    /// ORDER BY last_used_at DESC surfaces the just-applied
+    /// profile at the top. No-op when the profile does not
+    /// exist (returns Ok(false)). Updates are tolerated on
+    /// archived and system recipes (the timestamp tracks
+    /// use, not lifecycle).
+    pub fn mark_last_used(&self, profile_id: &str) -> Result<bool, RecipeStoreError> {
+        let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE recipes SET last_used_at = datetime('now') \
+             WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    /// CR-08 §15: flip `is_imported = 1` on every row of the
+    /// given profile. Called from `recipe_import` so the
+    /// Imported tab can classify a head row by origin. The
+    /// flag is a bit on the row (rather than a separate
+    /// lineage) so it survives `recipe_save`'s version
+    /// increment: an imported recipe's v2 keeps the
+    /// imported flag. No-op when the profile does not yet
+    /// exist (returns Ok(false)).
+    pub fn mark_imported(&self, profile_id: &str) -> Result<bool, RecipeStoreError> {
+        let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE recipes SET is_imported = 1 WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        Ok(updated > 0)
     }
 
     /// Seed the DwarfII v1 profile if no profile with the same

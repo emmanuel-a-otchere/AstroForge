@@ -66,6 +66,16 @@ export interface RecipeSummary {
   parentVersion: number | null;
   branch: string;
   createdAt: string;
+  // CR-08 §15: 5-tab classification flags surfaced from
+  // the Rust `RecipeSummary`. `isSystem` and `isArchived`
+  // were already exposed via `mark_as_system` /
+  // `archive_profile` IPCs (CR-08 §3.1, §22.4); the §15
+  // slice folds them onto the head row so the UI can
+  // classify without a second round-trip.
+  isSystem: boolean;
+  isArchived: boolean;
+  isImported: boolean;
+  lastUsedAt: string | null;
 }
 
 export interface RecipeVersion {
@@ -121,6 +131,14 @@ interface RustRecipeSummary {
   parent_version: number | null;
   branch: string;
   created_at: string;
+  // CR-08 §15: Recipe Library 5-tab layout reads these
+  // flags to classify each head row into System / My /
+  // Project / Imported / Recently Used without an
+  // extra round-trip.
+  is_system: boolean;
+  is_archived: boolean;
+  is_imported: boolean;
+  last_used_at: string | null;
 }
 
 interface RustRecipeVersion {
@@ -202,6 +220,14 @@ function fromRustSummary(s: RustRecipeSummary): RecipeSummary {
     parentVersion: s.parent_version,
     branch: s.branch,
     createdAt: s.created_at,
+    // CR-08 §15: pipe the 5-tab classification flags
+    // through to the UI. Defaults match the Rust struct's
+    // serde defaults (false / false / false / null) so
+    // older payloads that predate §15 still parse.
+    isSystem: s.is_system ?? false,
+    isArchived: s.is_archived ?? false,
+    isImported: s.is_imported ?? false,
+    lastUsedAt: s.last_used_at ?? null,
   };
 }
 
@@ -313,6 +339,10 @@ const PLACEHOLDER_SUMMARIES: RecipeSummary[] = [
     parentVersion: null,
     branch: "main",
     createdAt: "2026-09-05T00:00:00Z",
+    isSystem: false,
+    isArchived: false,
+    isImported: false,
+    lastUsedAt: null,
   },
 ];
 
@@ -502,6 +532,14 @@ export async function importProfile(
       parentVersion: null,
       branch: "main",
       createdAt: new Date().toISOString(),
+      // §15: in browser-mode the import flow has no Rust
+      // round-trip, so we set isImported optimistically;
+      // the Tauri-mode round-trip below picks up the real
+      // server-side flag via `fromRustSummary`.
+      isSystem: false,
+      isArchived: false,
+      isImported: true,
+      lastUsedAt: null,
     };
     PLACEHOLDER_SUMMARIES.unshift(summary);
     profileStore.set([...PLACEHOLDER_SUMMARIES]);
@@ -752,6 +790,10 @@ export async function savePipelinePlanAsRecipe(
       parentVersion: null,
       branch: "main",
       createdAt: new Date().toISOString(),
+      isSystem: false,
+      isArchived: false,
+      isImported: false,
+      lastUsedAt: null,
     };
     return summary;
   }

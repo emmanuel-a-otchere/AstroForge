@@ -288,17 +288,36 @@ beyond `target_type`. That is a follow-on slice.
 
 ## §15 UI Specification — ⚠️ Partial
 
-### Recipe Library — ⚠️ Partial
+### Recipe Library — ✅ Shipped
 
-The global nav has **Recipes** (per `RecipesScreen.svelte`). The §15
-5-tab layout (System / My Recipes / Project Recipes / Imported /
-Recently Used) is not implemented; only My Recipes is present.
+The §15 5-tab layout (System / My Recipes / Project Recipes /
+Imported / Recently Used) is implemented in
+`RecipeLibrary.svelte` (mounted inside `RecipesScreen.svelte`):
 
-### Recipe Card — ⚠️ Partial
+- `is_system`, `is_archived`, `is_imported`, `last_used_at` are
+  folded onto the `RecipeSummary` struct (the IPC contract from
+  `recipe_list`); `RecipeStore::mark_last_used` stamps the
+  timestamp on `recipe_apply`; `RecipeStore::mark_imported`
+  flips the bit on `recipe_import`.
+- The Project Recipes tab currently mirrors My Recipes; the
+  project-scoped distinction lands in a follow-on slice that
+  adds `profile.project_id`.
+- Per-tab empty states explain why a tab may be empty (no
+  imports yet, never applied, etc.) so the user is never
+  confused by an empty view.
+- Tabs use the established ARIA tablist/tab/tabpanel pattern
+  from `StudioShell.svelte`; per-tab counts surface in the
+  tab header.
 
-`RecipesScreen.svelte` shows `name + version + target_type`. Missing:
-target type / style / AI usage / applicability / last used /
-provenance status.
+### Recipe Card — ✅ Shipped
+
+`RecipeLibrary.svelte`'s `.recipe-card` renders the §15
+card surface: name + version + target_type + system/imported/
+AI status pills + last-used relative timestamp + description.
+The `provenance status` badge (deterministic / perceptual) is
+not yet wired to the stage list (the summary doesn't carry
+the stage payload); a follow-on slice reads the existing
+`integrity` field via `recipe_get` for the badge.
 
 ### Recipe Detail — ❌ Missing
 

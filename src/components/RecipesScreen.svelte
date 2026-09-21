@@ -19,11 +19,12 @@
     loadProfiles,
     exportProfile,
     importProfile,
+    profileStore,
     type RecipeSummary,
   } from "../lib/profile-store";
   import ProfileManager from "./ProfileManager.svelte";
+  import RecipeLibrary from "./RecipeLibrary.svelte";
 
-  let profiles: RecipeSummary[] = $state([]);
   let loading = $state(true);
   let error: string | null = $state(null);
   let managerOpen = $state(false);
@@ -200,12 +201,12 @@
     }
   });
 
-  // profileStore is the writable source; subscribe to keep the list
-  // fresh after ProfileManager saves a new version.
+  // profileStore is the writable source; refresh after
+  // ProfileManager saves a new version. The §15
+  // RecipeLibrary.svelte subscribes to $profileStore
+  // directly, so no local mirror is needed.
   $effect(() => {
-    void loadProfiles().then((p) => {
-      profiles = p;
-    });
+    void loadProfiles();
   });
 </script>
 
@@ -265,7 +266,7 @@
     <p class="state-line font-body" aria-live="polite">
       Recipe store unavailable in this build.
     </p>
-  {:else if profiles.length === 0}
+  {:else if $profileStore.length === 0}
     <div class="empty-card font-body" aria-live="polite">
       <span class="material-symbols-outlined" aria-hidden="true">bookmark</span>
       <h2 class="font-display">No recipes yet</h2>
@@ -276,47 +277,15 @@
       </p>
     </div>
   {:else}
-    <ul class="recipe-grid" aria-label="Saved recipes">
-      {#each profiles as summary (summary.profileId)}
-        <li class="recipe-card" data-testid="recipe-card">
-          <button
-            type="button"
-            class="recipe-card-open"
-            onclick={() => (managerOpen = true)}
-            aria-label="Open {summary.name}"
-          >
-            <span class="material-symbols-outlined card-icon" aria-hidden="true">
-              bookmark
-            </span>
-            <span class="card-body">
-              <span class="card-title font-display">{summary.name}</span>
-              <span class="card-meta font-body">
-                <span class="badge">v{summary.version}</span>
-                <span class="target">{summary.targetType}</span>
-              </span>
-              {#if summary.description}
-                <span class="card-description font-body">
-                  {summary.description}
-                </span>
-              {/if}
-            </span>
-          </button>
-          <button
-            type="button"
-            class="recipe-card-export font-label"
-            onclick={() => onExportRecipe(summary)}
-            disabled={importExportBusy}
-            aria-label="Export {summary.name} v{summary.version} as .afrecipe file"
-            data-testid="export-recipe-btn"
-          >
-            <span class="material-symbols-outlined" aria-hidden="true">
-              file_upload
-            </span>
-            Export
-          </button>
-        </li>
-      {/each}
-    </ul>
+    <!--
+      CR-08 §15: Recipe Library 5-tab layout (System / My Recipes /
+      Project Recipes / Imported / Recently Used). The library is a
+      pure consumer of `profileStore`: no separate IPC round-trip.
+      Per-tab classification happens client-side against the
+      `isSystem / isImported / lastUsedAt` flags folded onto the
+      head row by §15's IPC contract change.
+    -->
+    <RecipeLibrary />
   {/if}
 
   {#if managerOpen}
@@ -407,118 +376,12 @@
     color: var(--primary);
   }
 
-  .recipe-grid {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--sp-md);
-  }
-
-  .recipe-card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-sm);
-    width: 100%;
-    padding: var(--sp-md);
-    background: var(--surface-container);
-    border: 1px solid var(--outline-variant);
-    border-radius: var(--radius-lg);
-    color: var(--on-surface);
-    transition: background 0.12s ease, border-color 0.12s ease;
-  }
-
-  .recipe-card:hover {
-    background: var(--surface-container-high);
-    border-color: var(--primary);
-  }
-
-  .recipe-card-open {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--sp-md);
-    width: 100%;
-    background: transparent;
-    border: 0;
-    padding: 0;
-    cursor: pointer;
-    text-align: left;
-    color: inherit;
-    font: inherit;
-  }
-
-  .recipe-card-export {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    align-self: flex-start;
-    background: var(--surface-container-high);
-    color: var(--on-surface);
-    border: 1px solid var(--outline-variant);
-    border-radius: var(--radius-sm);
-    padding: 4px 10px;
-    cursor: pointer;
-    font-size: 0.8rem;
-  }
-
-  .recipe-card-export:hover:not(:disabled) {
-    background: var(--primary-container);
-    border-color: var(--primary);
-  }
-
-  .recipe-card-export:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .card-icon {
-    font-size: 28px;
-    color: var(--primary);
-    flex: 0 0 auto;
-  }
-
-  .card-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-xs);
-    min-width: 0;
-  }
-
-  .card-title {
-    font-size: 1rem;
-    font-weight: 600;
-  }
-
-  .card-meta {
-    display: flex;
-    gap: var(--sp-sm);
-    align-items: center;
-    color: var(--on-surface-variant);
-    font-size: 0.85rem;
-  }
-
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    background: var(--surface-container-highest);
-    border: 1px solid var(--outline-variant);
-    border-radius: var(--radius-full);
-    font-size: 0.75rem;
-    color: var(--on-surface);
-  }
-
-  .target {
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-size: 0.75rem;
-  }
-
-  .card-description {
-    font-size: 0.85rem;
-    color: var(--on-surface-variant);
-    line-height: 1.4;
-  }
+  /*
+   * CR-08 §15: the inline recipe-card markup + its
+   * .recipe-grid shell moved to RecipeLibrary.svelte
+   * (5-tab layout). The .recipe-card-* and .card-*
+   * styles below are dead and have been removed.
+   */
 
   .header-actions {
     display: flex;

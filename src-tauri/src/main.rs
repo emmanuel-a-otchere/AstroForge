@@ -1024,8 +1024,12 @@ fn main() {
             let recipe_path = recipe_db_path(&app.handle())?;
             let recipes = RecipeStore::new(&recipe_path)
                 .map_err(|e| format!("failed to open recipe store: {e}"))?;
-            // Seed DwarfII v1 on first launch so the user sees a profile
-            // they can load into a session.
+            // CR-08 §3.2: seed DwarfII v1 + M42-Natural-v1 on
+            // first launch. Both are flipped to is_system = 1
+            // so the §3.1 guard refuses to mutate them.
+            // Idempotent: pre-existing profiles are
+            // left untouched (apart from the system-flag
+            // upgrade path which keeps the flag in sync).
             recipes
                 .seed_if_empty()
                 .map_err(|e| format!("failed to seed recipe store: {e}"))?;

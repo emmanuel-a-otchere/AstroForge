@@ -2,6 +2,74 @@
 
 ## Unreleased
 
+### Slice §3.2: CR-08 system-recipe seed flow
+
+**Scope.** Lands the boot-time seed flow that flips the
+DwarfII v1 + M42-Natural-v1 built-ins to `is_system = 1`
+so the §3.1 guard is active from first launch. Also adds
+the M42-Natural-v1 canonical deep-sky Recipe alongside
+the existing DwarfII v1 built-in.
+
+**What.**
+
+- `crates/astroforge-core/src/seed.rs`: new
+  `m42_natural_v1()` builder (6 stages: background,
+  denoise, color_wb, stretch, sharpen_deconvolution,
+  creative_polish) targeting `deep_sky_narrowband`;
+  new `M42_NATURAL_V1_NAME` + `M42_NATURAL_V1_TARGET_TYPE`
+  constants; 3 new seed.rs tests (well-formed, JSON
+  round-trip, no-AI-models).
+- `crates/astroforge-core/src/recipe_store.rs`:
+  `seed_if_empty` now inserts both DwarfII v1 and
+  M42-Natural-v1; the body is factored through a new
+  `seed_builtin` helper that respects the `is_system`
+  flag on first insert and re-syncs it on repeat
+  launches (so a pre-system-flag schema migration does
+  not leave the profile un-protected). New private
+  `unflag_system` method keeps the seed path symmetric.
+- `src-tauri/src/main.rs`: boot comment updated to
+  reflect the §3.2 flow.
+- `crates/astroforge-core/tests/system_recipe_seed.rs`:
+  7 tests pinning the contract: first-launch seeds
+  DwarfII as system; first-launch seeds M42 as system;
+  both profiles exist at v=1 with `is_system = true`;
+  seed_if_empty is idempotent on repeat; seed-upgrade
+  path flips pre-existing built-ins to system;
+  built-ins refuse user save; built-ins refuse user
+  delete.
+- `crates/astroforge-core/src/recipe_store.rs`: the
+  pre-existing `test_seed_dwarf2_is_idempotent` test
+  updated to assert 2 profiles (DwarfII + M42) instead
+  of 1.
+
+**Verification.** All 6 gates pass: `cargo fmt --check`,
+`clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace` (36 suites, 0 failures),
+  `npm run check` (1 pre-existing error + 9 pre-existing
+  warnings, unchanged baseline), `npm run build`,
+  `mvp_smoke.sh`.
+
+**Honest flags.**
+
+- `M42_NATURAL_V1_TARGET_TYPE = "deep_sky_narrowband"`
+  is a new tag. The session-side code that consumes
+  target_type (e.g. the session orchestrator's
+  pipeline-plan dispatch) does not yet know about
+  `"deep_sky_narrowband"` -- it falls into the default
+  branch. Wiring that dispatch is a follow-on slice;
+  this PR only lands the canonical Recipe.
+- The seed-upgrade path keeps pre-existing built-ins
+  flagged. A user who manually cleared the flag on a
+  built-in will get it flipped back on the next launch
+  -- this is intentional per §3.1's "system recipes
+  are seeded by the app" doctrine but it does mean a
+  user can never demote a built-in via the current
+  `mark_as_system` IPC. A future "demote to user"
+  RPC is a tiny follow-on if you decide to allow it.
+- Same src-tauri lint caveat as prior slices: thin
+  pass-throughs over tested primitives; CI's rust job
+  is the authoritative lint pass.
+
 ### Slice §22.4: CR-08 recipe_archive IPC
 
 **Scope.** Closes the §28 "User can delete/archive a user

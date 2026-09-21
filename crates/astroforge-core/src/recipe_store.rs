@@ -425,23 +425,76 @@ impl RecipeStore {
     /// Seed the DwarfII v1 profile if no profile with the same
     /// `profile_id` exists yet. Idempotent.
     pub fn seed_if_empty(&self) -> Result<(), RecipeStoreError> {
-        let dwarf_id = Self::profile_id_for(
+        self.seed_builtin(
             crate::seed::DWARF2_V1_NAME,
             crate::seed::DWARF2_V1_TARGET_TYPE,
-        );
-        let conn = self.conn.lock().expect("recipe db mutex poisoned");
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM recipes WHERE profile_id = ?1",
-            params![dwarf_id],
-            |row| row.get(0),
+            crate::seed::dwarf2_v1(),
+            /*system=*/ true,
         )?;
-        if count > 0 {
-            return Ok(());
+        self.seed_builtin(
+            crate::seed::M42_NATURAL_V1_NAME,
+            crate::seed::M42_NATURAL_V1_TARGET_TYPE,
+            crate::seed::m42_natural_v1(),
+            /*system=*/ true,
+        )?;
+        Ok(())
+    }
+
+    /// Insert a built-in Recipe if the profile_id is not yet
+    /// on disk. Idempotent: re-running on a DB that already
+    /// has the profile is a no-op. The `system` flag is
+    /// flipped after the save via `mark_as_system`, so the
+    /// column is honored from the very first row onward.
+    fn seed_builtin(
+        &self,
+        name: &str,
+        target_type: &str,
+        builder: Recipe,
+        system: bool,
+    ) -> Result<(), RecipeStoreError> {
+        let profile_id = Self::profile_id_for(name, target_type);
+        {
+            let conn = self.conn.lock().expect("recipe db mutex poisoned");
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM recipes WHERE profile_id = ?1",
+                params![profile_id],
+                |row| row.get(0),
+            )?;
+            if count > 0 {
+                // Built-in already on disk; ensure the
+                // system flag is in the desired state so a
+                // pre-system-flag schema migration does not
+                // leave the profile un-protected.
+                drop(conn);
+                if system {
+                    self.mark_as_system(&profile_id)?;
+                } else {
+                    self.unflag_system(&profile_id)?;
+                }
+                return Ok(());
+            }
         }
-        drop(conn);
-        let recipe = crate::seed::dwarf2_v1();
+        let mut recipe = builder;
+        if system {
+            recipe.is_system = true;
+        }
         self.save(&recipe)?;
         Ok(())
+    }
+
+    /// Opposite of `mark_as_system`: clear the flag on
+    /// every version of a profile. Used by the seed
+    /// idempotency path when a built-in should NOT be a
+    /// system Recipe. The RecipeStore does not currently
+    /// ship any non-system built-ins; the method exists
+    /// so the seed path stays symmetric.
+    fn unflag_system(&self, profile_id: &str) -> Result<bool, RecipeStoreError> {
+        let conn = self.conn.lock().expect("recipe db mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE recipes SET is_system = 0 WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        Ok(updated > 0)
     }
 }
 
@@ -602,14 +655,18 @@ mod tests {
         let store = RecipeStore::new(&temp_db()).unwrap();
         store.seed_if_empty().unwrap();
         let list1 = store.list().unwrap();
-        assert_eq!(list1.len(), 1);
-        assert_eq!(list1[0].name, crate::seed::DWARF2_V1_NAME);
-        assert_eq!(list1[0].version, 1);
+        // CR-08 §3.2: seed_if_empty now inserts both
+        // DwarfII v1 and M42-Natural-v1. Both are flagged
+        // as system Recipes.
+        assert_eq!(list1.len(), 2);
+        let names: Vec<&str> = list1.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&crate::seed::DWARF2_V1_NAME));
+        assert!(names.contains(&crate::seed::M42_NATURAL_V1_NAME));
 
         // Calling again does not duplicate.
         store.seed_if_empty().unwrap();
         let list2 = store.list().unwrap();
-        assert_eq!(list2.len(), 1);
+        assert_eq!(list2.len(), 2);
     }
 
     #[test]

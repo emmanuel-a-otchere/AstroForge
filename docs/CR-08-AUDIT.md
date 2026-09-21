@@ -59,7 +59,11 @@ Context → Pipeline; Pipeline + Execution → Image Versions).
 `RecipesScreen.svelte` + `ProfileManager.svelte` cover user recipes.
 System Recipes are protected (CR-08 §3.1): the `is_system` column
 gates `recipe_save` + `recipe_delete`; `recipe_mark_as_system` flips
-the flag. No `.afrecipe` portable format.
+the flag. The seed flow (CR-08 §3.2) flips DwarfII v1 + M42-Natural-v1
+to `is_system = 1` on first launch via `RecipeStore::seed_if_empty`,
+and re-syncs the flag for pre-existing built-ins (so a pre-system-flag
+schema migration does not leave them un-protected). No `.afrecipe`
+portable format.
 
 ## §4 Recipe Structure — ⚠️ Partial
 

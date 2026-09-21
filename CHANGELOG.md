@@ -69,7 +69,7 @@ warnings, unchanged baseline), `npm run build`,
   Expert mode" row was mis-flagged as ❌ in the stale
   audit ("no `ProvenanceViewer`"); the CR-07 §31
   acceptance-polish slice mounted `ProvenancePanel.svelte`
-  in the `compare-extras` block of `CompareWorkspace` —
+  in the `compare-extras` block of `CompareWorkspace`:
   closing that row as ✅ as part of this slice.
 
 ### Slice §22.2: CR-08 recipe_delete IPC

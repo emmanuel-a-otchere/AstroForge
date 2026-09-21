@@ -75,7 +75,7 @@ fn export_round_trips_through_from_json_migrated() {
 fn import_into_empty_store_lands_at_v1_with_no_parent() {
     let store = in_memory_store();
     let mut source = sample_recipe("m42-natural", "stretch");
-    // Foreign version/parent — must be discarded by import.
+    // Foreign version/parent. Must be discarded by import.
     source.version = 7;
     source.parent_version = Some(6);
     let json = source.to_json().expect("to_json");

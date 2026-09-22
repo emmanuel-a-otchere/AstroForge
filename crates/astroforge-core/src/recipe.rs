@@ -1263,3 +1263,199 @@ pub fn recipe_ai_diff_summary(a: &Recipe, b: &Recipe) -> RecipeAiDiffSummary {
         provenance,
     }
 }
+
+/// CR-08 §13: one row of a per-stage parameter diff.
+/// `key` is the parameter name; `a` is the value in Recipe
+/// A (or `None` if absent); `b` is the value in Recipe B
+/// (or `None` if absent); `change` classifies the kind of
+/// difference (Added / Removed / Changed / Unchanged).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ParamChange {
+    /// Param exists in A but not B.
+    Removed,
+    /// Param exists in B but not A.
+    Added,
+    /// Param exists in both with different JSON values.
+    Changed,
+    /// Param exists in both with the same JSON value (omitted
+    /// from the diff response by default; only surfaced when
+    /// the caller asks for the full table).
+    Unchanged,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ParamDiffEntry {
+    pub key: String,
+    pub a: Option<serde_json::Value>,
+    pub b: Option<serde_json::Value>,
+    pub change: ParamChange,
+}
+
+/// CR-08 §13: per-stage parameter diff. One entry per
+/// `stage_id` that exists in either Recipe. The `enabled`
+/// flag captures whether the stage was enabled / disabled
+/// in either Recipe (a side-channel that does not fit into
+/// the per-param diff).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StageDiffEntry {
+    pub stage_id: String,
+    pub enabled_a: Option<bool>,
+    pub enabled_b: Option<bool>,
+    pub enabled_differs: bool,
+    pub params: Vec<ParamDiffEntry>,
+}
+
+/// CR-08 §13: the full mechanical parameter diff between
+/// two Recipes. Splits stages into three buckets:
+/// - `added`: stages only in Recipe B (params take the
+///   "Added" classification against a `None` A side).
+/// - `removed`: stages only in Recipe A (params take the
+///   "Removed" classification against a `None` B side).
+/// - `modified`: stages in both Recipes. `params` carries
+///   the union of keys across both stages, each classified
+///   Added / Removed / Changed / Unchanged.
+///
+/// `identical` is `true` iff both Recipes have the same
+/// stages in the same order with the same enabled flags
+/// and the same params. The flag drives the "no changes"
+/// empty state in the §13 RecipeDiffPanel UI.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecipeParameterDiff {
+    pub added: Vec<StageDiffEntry>,
+    pub removed: Vec<StageDiffEntry>,
+    pub modified: Vec<StageDiffEntry>,
+    pub identical: bool,
+}
+
+/// CR-08 §13: compute the mechanical parameter diff
+/// between two Recipes. Pure function; no I/O. Walks both
+/// stages lists, classifying each `stage_id`:
+/// - In A only → `removed` (B side = None).
+/// - In B only → `added` (A side = None).
+/// - In both → `modified` (per-param diff against the
+///   union of keys; "enabled" flag carries side-channel).
+///
+/// Stages are ordered: `added` by B's order, `removed` by
+/// A's order, `modified` by A's order (matches the §15
+/// RecipeCard's "left = A" convention used by
+/// CompareWorkspace).
+///
+/// `identical` flips true iff `added` + `removed` are
+/// empty AND every `modified` entry has zero Changed /
+/// Added / Removed params AND the enabled flags match.
+pub fn recipe_parameter_diff(a: &Recipe, b: &Recipe) -> RecipeParameterDiff {
+    let a_stages: std::collections::HashMap<&str, &RecipeStage> =
+        a.stages.iter().map(|s| (s.stage_id.as_str(), s)).collect();
+    let b_stages: std::collections::HashMap<&str, &RecipeStage> =
+        b.stages.iter().map(|s| (s.stage_id.as_str(), s)).collect();
+
+    // Walk A's stages in order. Anything not in B is `removed`.
+    let mut removed: Vec<StageDiffEntry> = Vec::new();
+    let mut modified: Vec<StageDiffEntry> = Vec::new();
+    for stage_a in &a.stages {
+        match b_stages.get(stage_a.stage_id.as_str()) {
+            None => {
+                removed.push(StageDiffEntry {
+                    stage_id: stage_a.stage_id.clone(),
+                    enabled_a: Some(stage_a.enabled),
+                    enabled_b: None,
+                    enabled_differs: true,
+                    params: stage_a
+                        .params
+                        .iter()
+                        .map(|(k, v)| ParamDiffEntry {
+                            key: k.clone(),
+                            a: Some(v.clone()),
+                            b: None,
+                            change: ParamChange::Removed,
+                        })
+                        .collect(),
+                });
+            }
+            Some(stage_b) => {
+                let enabled_differs = stage_a.enabled != stage_b.enabled;
+                // Union of param keys, ordered: A's keys first
+                // in A's order, then B-only keys in B's order.
+                let mut seen = std::collections::HashSet::new();
+                let mut params: Vec<ParamDiffEntry> = Vec::new();
+                for (k, v_a) in &stage_a.params {
+                    seen.insert(k.clone());
+                    let entry = match stage_b.params.get(k) {
+                        None => ParamDiffEntry {
+                            key: k.clone(),
+                            a: Some(v_a.clone()),
+                            b: None,
+                            change: ParamChange::Removed,
+                        },
+                        Some(v_b) if v_a != v_b => ParamDiffEntry {
+                            key: k.clone(),
+                            a: Some(v_a.clone()),
+                            b: Some(v_b.clone()),
+                            change: ParamChange::Changed,
+                        },
+                        Some(_) => ParamDiffEntry {
+                            key: k.clone(),
+                            a: Some(v_a.clone()),
+                            b: Some(v_a.clone()),
+                            change: ParamChange::Unchanged,
+                        },
+                    };
+                    params.push(entry);
+                }
+                for (k, v_b) in &stage_b.params {
+                    if !seen.contains(k) {
+                        params.push(ParamDiffEntry {
+                            key: k.clone(),
+                            a: None,
+                            b: Some(v_b.clone()),
+                            change: ParamChange::Added,
+                        });
+                    }
+                }
+                modified.push(StageDiffEntry {
+                    stage_id: stage_a.stage_id.clone(),
+                    enabled_a: Some(stage_a.enabled),
+                    enabled_b: Some(stage_b.enabled),
+                    enabled_differs,
+                    params,
+                });
+            }
+        }
+    }
+
+    // Anything in B not in A is `added`.
+    let mut added: Vec<StageDiffEntry> = Vec::new();
+    for stage_b in &b.stages {
+        if !a_stages.contains_key(stage_b.stage_id.as_str()) {
+            added.push(StageDiffEntry {
+                stage_id: stage_b.stage_id.clone(),
+                enabled_a: None,
+                enabled_b: Some(stage_b.enabled),
+                enabled_differs: true,
+                params: stage_b
+                    .params
+                    .iter()
+                    .map(|(k, v)| ParamDiffEntry {
+                        key: k.clone(),
+                        a: None,
+                        b: Some(v.clone()),
+                        change: ParamChange::Added,
+                    })
+                    .collect(),
+            });
+        }
+    }
+
+    let identical = added.is_empty()
+        && removed.is_empty()
+        && modified.iter().all(|m| {
+            !m.enabled_differs && m.params.iter().all(|p| p.change == ParamChange::Unchanged)
+        });
+
+    RecipeParameterDiff {
+        added,
+        removed,
+        modified,
+        identical,
+    }
+}

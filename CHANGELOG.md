@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+### Slice §13 Recipe Diff
+
+**Scope.** Closes the mechanical parameter-diff half of
+CR-08 §13 by adding the per-stage `RecipeParameterDiff`
+struct + pure function + Tauri command + Svelte consumer.
+The AI-aware half was already covered by the existing
+`recipe_ai_diff_summary` IPC (§32.6) + `BeginnerComparePrompt`.
+
+**What.**
+
+- `crates/astroforge-core/src/recipe.rs`: new
+  `RecipeParameterDiff` + `StageDiffEntry` + `ParamDiffEntry`
+  + `ParamChange` types. `recipe_parameter_diff(&Recipe, &Recipe)
+  -> RecipeParameterDiff` walks both stages lists and
+  classifies each `stage_id` into `added` / `removed` /
+  `modified` buckets; per-stage `enabled` flag is captured as
+  a side-channel; per-param diff is against the union of keys
+  (Added / Removed / Changed / Unchanged). `identical` flips
+  true iff no stages were added / removed / modified.
+- `src-tauri/src/main.rs`: `recipe_parameter_diff` Tauri
+  command that loads both Recipes via the existing
+  `RecipeStore::get` and delegates to the pure function.
+  Registered in `invoke_handler` alongside
+  `recipe_ai_diff_summary`.
+- `src/lib/astroforge-api.ts`: `RecipeParameterDiffFromRust`
+  + `StageDiffEntryFromRust` + `ParamDiffEntryFromRust` +
+  `ParamChangeFromRust` types mirror the Rust struct shape
+  exactly. `recipeParameterDiff(profileIdA, versionA, profileIdB,
+  versionB)` is the typed wrapper.
+- `src/components/RecipeDiffPanel.svelte` (NEW, ~410 LOC):
+  three disclosure sections (Added / Removed / Modified),
+  per-stage headers with the `enabled` flag side-channel,
+  per-param rows with Added / Removed / Changed / Unchanged
+  pills + A vs B value pairs (color-coded), an
+  `Identical` banner when the diff is empty, and a disabled
+  `Apply suggestion` button (honest affordance pending the
+  §22.3 apply-flow integration). Resolves the underlying
+  Recipes via `recipeGetForImageVersion` + the existing
+  `profileIdFor` helper.
+- `src/components/CompareWorkspace.svelte`: mounts
+  `<RecipeDiffPanel versionIdA={aId} versionIdB={bId} />`
+  below the existing `RecipeStageTimeline` row.
+- `crates/astroforge-core/tests/recipe_parameter_diff.rs`
+  (NEW, 7 tests): identical Recipes, pure Added / pure
+  Removed stages, modified stage against the union of keys,
+  enabled-flag side-channel flip, stage reorder (treated
+  as identical by intent), serde round-trip with the enum
+  tag.
+
+**Audit doc flip.** §13 row: 0 ✅ / 1 ⚠️ / 0 ❌ → 1 ✅ /
+0 ⚠️ / 0 ❌. Scorecard Total: 73 / 27 / 20 → **74 / 26 /
+20 / 120** (62% shipped, 22% partial, 17% missing).
+
 ### Slice §19 file-dialog UI
 
 **Scope.** Closes the file-dialog half of CR-08 §19 by

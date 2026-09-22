@@ -512,6 +512,50 @@ export const recipeAiDiffSummary = (
     versionB,
   }) as Promise<RecipeAiDiffSummaryFromRust>;
 
+// CR-08 §13: mechanical parameter diff between two
+// Recipes. Mirrors the Rust `RecipeParameterDiff` struct:
+// three buckets (`added` / `removed` / `modified`) of
+// per-stage entries; each entry carries the enabled-flag
+// side-channel + a list of per-param entries classified
+// Added / Removed / Changed / Unchanged against the
+// union of keys across the two Recipes.
+export type ParamChangeFromRust = "Removed" | "Added" | "Changed" | "Unchanged";
+
+export interface ParamDiffEntryFromRust {
+  key: string;
+  a: unknown | null;
+  b: unknown | null;
+  change: ParamChangeFromRust;
+}
+
+export interface StageDiffEntryFromRust {
+  stage_id: string;
+  enabled_a: boolean | null;
+  enabled_b: boolean | null;
+  enabled_differs: boolean;
+  params: ParamDiffEntryFromRust[];
+}
+
+export interface RecipeParameterDiffFromRust {
+  added: StageDiffEntryFromRust[];
+  removed: StageDiffEntryFromRust[];
+  modified: StageDiffEntryFromRust[];
+  identical: boolean;
+}
+
+export const recipeParameterDiff = (
+  profileIdA: string,
+  versionA: number,
+  profileIdB: string,
+  versionB: number,
+): Promise<RecipeParameterDiffFromRust> =>
+  invoke("recipe_parameter_diff", {
+    profileIdA,
+    versionA,
+    profileIdB,
+    versionB,
+  }) as Promise<RecipeParameterDiffFromRust>;
+
 // CR-07 §29.2a: server-side diff cache IPC surface.
 // `DiffCache` is a Rust-only in-memory cache. The
 // following 5 commands expose the cache to the JS layer.

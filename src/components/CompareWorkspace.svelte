@@ -34,6 +34,7 @@
   import VersionDag from "./VersionDag.svelte";
   import ProvenancePanel from "./ProvenancePanel.svelte";
   import RecipeStageTimeline from "./RecipeStageTimeline.svelte";
+  import RecipeDiffPanel from "./RecipeDiffPanel.svelte";
   import QualityProfilePicker from "./QualityProfilePicker.svelte";
   import { versionStore, type ImageVersion } from "../state/versions";
   import { studioViewport } from "../state/application";
@@ -1031,6 +1032,20 @@
             versionId={bId}
             versionLabel={versionB?.label ?? "Version B"}
           />
+        </div>
+        <!--
+          CR-08 §13: Recipe parameter-diff panel.
+          Side-by-side per-stage parameter diff for the
+          two selected Recipes. The panel reads
+          `recipeGetForImageVersion` for each side and
+          pipes (profileId, version) into
+          `recipe_parameter_diff`. Mounts below the
+          Recipe Stage Timeline so the user sees the
+          full Recipe identity (timeline) before the
+          diff breakdown.
+        -->
+        <div class="provenance-row">
+          <RecipeDiffPanel versionIdA={aId} versionIdB={bId} />
         </div>
         <!-- CR-07 §22: Quality Profile picker.
              Renders the 4-variant catalog fetched

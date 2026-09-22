@@ -680,6 +680,32 @@ export type AiEnhancementLevelFromRust =
   | "recommended"
   | "advanced";
 
+/**
+ * CR-08 §10.2 Guided tier: high-level processing
+ * objective the Recipe is designed to honour.
+ * Mirrors the Rust
+ * `astroforge_core::recipe::ProcessingObjective`
+ * enum (serde snake_case rename).
+ */
+export type ProcessingObjectiveFromRust =
+  | "preserve_star_colors"
+  | "maximize_detail"
+  | "maximize_smoothness"
+  | "maximize_dynamic_range"
+  | "maximize_reproducibility";
+
+/**
+ * CR-08 §10.2 Guided tier: measurable quality
+ * criteria the Recipe targets. Each field is
+ * optional; absent fields don't constrain the
+ * Recipe.
+ */
+export interface QualityTargetsFromRust {
+  target_snr_db: number | null;
+  target_sharpness: number | null;
+  target_background_smoothness: number | null;
+}
+
 export interface RecipeFromRust {
   schema_version: string;
   name: string;
@@ -689,6 +715,13 @@ export interface RecipeFromRust {
     stage_id: string;
     enabled: boolean;
     params: Record<string, unknown>;
+    // CR-08 §10.2 Guided tier: per-stage AI
+    // Enhancement Level override. When present,
+    // takes precedence over the recipe-level
+    // ai_enhancement_level for this stage.
+    // Optional so legacy Recipes deserialize
+    // unchanged.
+    ai_enhancement_override?: AiEnhancementLevelFromRust | null;
   }>;
   required_models: string[];
   integrity: {
@@ -710,6 +743,22 @@ export interface RecipeFromRust {
   // the field; absent means Recommended (the Rust
   // serde default).
   ai_enhancement_level?: AiEnhancementLevelFromRust;
+  // CR-08 §10.2 Guided tier: high-level processing
+  // objectives the Recipe is designed to honour.
+  // Empty by default; the apply round reads this
+  // list to influence stage selection + ordering.
+  processing_objectives?: ProcessingObjectiveFromRust[];
+  // CR-08 §10.2 Guided tier: measurable quality
+  // criteria the Recipe targets. Each field is
+  // optional; absent fields don't constrain the
+  // Recipe.
+  quality_targets?: QualityTargetsFromRust;
+  // CR-08 §10.2 Guided tier: optional stage IDs
+  // the user has elected to include. The apply
+  // round uses this list to enable the listed
+  // stages if they were otherwise disabled by
+  // the §10.1 Beginner defaults.
+  optional_operations?: string[];
 }
 
 /**

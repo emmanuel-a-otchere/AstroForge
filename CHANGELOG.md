@@ -2,6 +2,88 @@
 
 ## Unreleased
 
+### Slice §10.2 Guided tier
+
+**Scope.** Closes the Guided tier half of CR-08
+§10 Recipe Editor by extending the Recipe struct
+with processing_objectives + quality_targets +
+optional_operations + per-stage AI override,
+then expanding the RecipeEditor.svelte modal with
+a collapsible Guided tier section.
+
+**Backend (Rust).** New `ProcessingObjective` enum
+(5 variants: preserve_star_colors, maximize_detail,
+maximize_smoothness, maximize_dynamic_range,
+maximize_reproducibility) + new `QualityTargets`
+struct (3 optional fields with
+`skip_serializing_if = "Option::is_none"` so absent
+fields don't bloat the JSON). `Recipe` gains
+`processing_objectives: Vec<ProcessingObjective>`,
+`quality_targets: QualityTargets`,
+`optional_operations: Vec<String>`. `RecipeStage`
+gains `ai_enhancement_override:
+Option<AiEnhancementLevel>` so the Guided tier can
+override the recipe-level AI posture per-stage.
+New helper `Recipe::effective_ai_enhancement_for_stage`
+resolves per-stage override (with None falling back
+to recipe-level default + unknown stage IDs
+falling back too). All new fields are
+`#[serde(default)]` so legacy Recipes that predate
+§10.2 deserialize unchanged.
+
+**Frontend (TS + Svelte).** New `ProcessingObjectiveFromRust`
+type alias + `QualityTargetsFromRust` interface in
+`astroforge-api.ts`. Extended `RecipeFromRust` with
+the new fields + per-stage AI override. `RecipeEditor.svelte`
+extended with a collapsible Guided tier section
+(open by default): 5-checkbox objective list, per-stage
+inclusion toggle table (driven by a new `stageIds`
+prop), per-stage AI override row (Inherit + 4-radio
+pills), 3-input quality targets (SNR dB, sharpness,
+background smoothness), optional-operations chip
+row (cosmetic / curves / stacking). The `Save Recipe`
+button remains a disabled preview (the `recipe_save`
+round-trip wiring is a follow-on slice). The Expert
+tier "see Profile Manager" stub remains for the
+progressive-disclosure shape.
+
+**Tests.** 18 new integration tests in
+`recipe_guided_tier.rs` pin the contract:
+`ProcessingObjective` label + tag + round-trip +
+canonical `ALL`; `QualityTargets` default + partial
++ full + skip-serialization semantics; `Recipe::new`
+initializes Guided fields to empty; legacy Recipe
+JSON without Guided fields deserializes via
+defaults; per-stage AI override serde round-trip;
+`effective_ai_enhancement_for_stage` inherits when no
+override + override wins + unknown stage falls back;
+`optional_operations` accepts any string; full
+Recipe serde round-trip on the new fields;
+`add_stage` defaults override to None.
+
+**Test fixture updates.** `recipe_security_validation.rs`
++ `recipe_parameter_diff.rs` were updated for the
+new `RecipeStage.ai_enhancement_override` field
+(None initializer). No semantic changes to those
+tests.
+
+**Audit doc flip.** §10 row: 2 ✅ / 0 ⚠️ / 1 ❌ →
+3 ✅ / 0 ⚠️ / 0 ❌. Total: 76 / 25 / 21 / 122 →
+**77 / 25 / 20 / 122** (63% shipped, 20% partial,
+16% missing).
+
+**Honest flags.** Save Recipe button remains a
+disabled preview (the recipe_save round-trip
+wiring is a follow-on slice). The §20 SPEC_CATALOG
+doesn't yet enforce ranges on the new
+`target_snr_db` / `target_sharpness` /
+`target_background_smoothness` fields (those
+are best added in a follow-on §20.1 spec
+tightening slice). The apply round is not yet
+wired to consult `effective_ai_enhancement_for_stage`
+(follow-on slice).
+
+
 ### Slice §10 Beginner tier
 
 **Scope.** Closes the Beginner tier half of CR-08 §10

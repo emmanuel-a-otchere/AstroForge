@@ -55,6 +55,7 @@ fn recipe_with_stages(stages: Vec<(&str, bool, HashMap<String, serde_json::Value
             stage_id: id.into(),
             enabled,
             params,
+            ai_enhancement_override: None,
         });
     }
     r

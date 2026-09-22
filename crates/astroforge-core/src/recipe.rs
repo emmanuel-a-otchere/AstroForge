@@ -76,6 +76,29 @@ pub struct Recipe {
     /// when no per-stage override is set).
     #[serde(default)]
     pub ai_enhancement_level: AiEnhancementLevel,
+    /// CR-08 §10.2 Guided tier: processing objectives
+    /// (high-level goals the user wants the pipeline
+    /// to honour). Empty by default; the apply round
+    /// reads the list to influence stage selection +
+    /// ordering. The list is finite (see
+    /// [`ProcessingObjective`] for the canonical
+    /// vocabulary).
+    #[serde(default)]
+    pub processing_objectives: Vec<ProcessingObjective>,
+    /// CR-08 §10.2 Guided tier: measurable quality
+    /// criteria the Recipe targets. Each field is
+    /// optional; absent fields don't constrain the
+    /// Recipe. Defaults to empty targets via
+    /// `#[serde(default)]`.
+    #[serde(default)]
+    pub quality_targets: QualityTargets,
+    /// CR-08 §10.2 Guided tier: optional stage IDs
+    /// the user has elected to include. The apply
+    /// round uses this list to enable the listed
+    /// stages if they were otherwise disabled by
+    /// the §10.1 Beginner defaults. Empty by default.
+    #[serde(default)]
+    pub optional_operations: Vec<String>,
 }
 
 fn default_version() -> u32 {
@@ -93,6 +116,15 @@ pub struct RecipeStage {
     pub stage_id: String,
     pub enabled: bool,
     pub params: HashMap<String, serde_json::Value>,
+    /// CR-08 §10.2 Guided tier: per-stage AI
+    /// Enhancement Level override. When `Some`,
+    /// takes precedence over the recipe-level
+    /// `ai_enhancement_level` for this stage.
+    /// Defaults to `None` (inherit recipe-level)
+    /// via `#[serde(default)]` so legacy Recipes
+    /// deserialize unchanged.
+    #[serde(default)]
+    pub ai_enhancement_override: Option<AiEnhancementLevel>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,6 +207,92 @@ impl QualityProfile {
             QualityProfile::Publication => "Balanced for publication; mild smoothing + sharpening.",
         }
     }
+}
+
+/// CR-08 §10.2 Guided tier: high-level processing
+/// objectives the user can select. Each objective
+/// is a stable string tag (serde-snake-case) so
+/// downstream code can pattern-match on it without
+/// parsing free-form labels. The list is intentionally
+/// finite: extending it requires updating
+/// `ProcessingObjective::ALL` + adding the tag to
+/// every code site that pattern-matches.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessingObjective {
+    /// Preserve star colors (avoid color shifts).
+    PreserveStarColors,
+    /// Maximize fine detail (resist smoothing).
+    MaximizeDetail,
+    /// Maximize smoothness (favour low noise).
+    MaximizeSmoothness,
+    /// Maximize dynamic range (preserve headroom).
+    MaximizeDynamicRange,
+    /// Favor reproducibility (deterministic chain).
+    MaximizeReproducibility,
+}
+
+impl ProcessingObjective {
+    /// All variants in display order. Used by the
+    /// frontend picker.
+    pub const ALL: [ProcessingObjective; 5] = [
+        ProcessingObjective::PreserveStarColors,
+        ProcessingObjective::MaximizeDetail,
+        ProcessingObjective::MaximizeSmoothness,
+        ProcessingObjective::MaximizeDynamicRange,
+        ProcessingObjective::MaximizeReproducibility,
+    ];
+
+    /// Short display label.
+    pub fn label(self) -> &'static str {
+        match self {
+            ProcessingObjective::PreserveStarColors => "Preserve star colors",
+            ProcessingObjective::MaximizeDetail => "Maximize detail",
+            ProcessingObjective::MaximizeSmoothness => "Maximize smoothness",
+            ProcessingObjective::MaximizeDynamicRange => "Maximize dynamic range",
+            ProcessingObjective::MaximizeReproducibility => "Maximize reproducibility",
+        }
+    }
+
+    /// Snake-case tag (matches serde default).
+    pub fn tag(self) -> &'static str {
+        match self {
+            ProcessingObjective::PreserveStarColors => "preserve_star_colors",
+            ProcessingObjective::MaximizeDetail => "maximize_detail",
+            ProcessingObjective::MaximizeSmoothness => "maximize_smoothness",
+            ProcessingObjective::MaximizeDynamicRange => "maximize_dynamic_range",
+            ProcessingObjective::MaximizeReproducibility => "maximize_reproducibility",
+        }
+    }
+}
+
+/// CR-08 §10.2 Guided tier: measurable quality
+/// criteria the Recipe targets. Each field is
+/// optional; absent fields don't constrain the
+/// Recipe. Ranges are enforced by the §20
+/// validation pipeline (which now also covers
+/// these targets as a follow-on).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct QualityTargets {
+    /// Target signal-to-noise ratio in decibels.
+    /// Typical natural-night pipelines aim for
+    /// 30-45 dB; publication-grade pipelines aim
+    /// for 40+ dB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_snr_db: Option<f64>,
+    /// Target sharpness score (0.0-1.0). The
+    /// pipeline measures edge sharpness on a
+    /// reference patch; the score is compared
+    /// against this target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_sharpness: Option<f64>,
+    /// Target background smoothness score
+    /// (0.0-1.0). The pipeline measures low-
+    /// frequency noise on a background patch;
+    /// the score is compared against this
+    /// target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_background_smoothness: Option<f64>,
 }
 
 /// CR-08 §10: AI enhancement level axis. The Beginner
@@ -270,6 +388,9 @@ impl Recipe {
             flags: Vec::new(),
             quality_profile: QualityProfile::default(),
             ai_enhancement_level: AiEnhancementLevel::default(),
+            processing_objectives: Vec::new(),
+            quality_targets: QualityTargets::default(),
+            optional_operations: Vec::new(),
             is_system: false,
         }
     }
@@ -279,6 +400,7 @@ impl Recipe {
             stage_id: stage_id.into(),
             enabled: true,
             params,
+            ai_enhancement_override: None,
         });
     }
 
@@ -296,6 +418,22 @@ impl Recipe {
 
     pub fn set_seed_recorded(&mut self, recorded: bool) {
         self.integrity.seed_recorded = recorded;
+    }
+
+    /// CR-08 §10.2 Guided tier: resolve the
+    /// effective [`AiEnhancementLevel`] for a given
+    /// stage. Per-stage overrides (set via the
+    /// Guided-tier UI) take precedence over the
+    /// recipe-level default. When the stage isn't
+    /// found in `stages`, the recipe-level default
+    /// is returned (the helper never panics on
+    /// unknown stage IDs).
+    pub fn effective_ai_enhancement_for_stage(&self, stage_id: &str) -> AiEnhancementLevel {
+        self.stages
+            .iter()
+            .find(|s| s.stage_id == stage_id)
+            .and_then(|s| s.ai_enhancement_override)
+            .unwrap_or(self.ai_enhancement_level)
     }
 
     pub fn to_json(&self) -> Result<String, serde_json::Error> {

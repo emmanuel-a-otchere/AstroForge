@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-22 (refresh 2: §13 Recipe Diff + §15 Recipe Library 5-tab layout + Recipe Card shipped. §13: `recipe_parameter_diff` pure function + IPC + RecipeDiffPanel.svelte + 7 new tests. §15: RecipeSummary struct folds `is_system / is_archived / is_imported / last_used_at`; RecipeStore::mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
+**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -373,23 +373,100 @@ schema-versioned / hashable / portable / path-independent / platform-
 independent / validation-friendly) describe an unimplemented file
 format.
 
-## §20 Recipe Security — ⚠️ Partial
+## §20 Recipe Security: ✅ Shipped
 
 `Recipe::validate_compatibility()` enforces:
 - Schema version match
 - Available models
 
-**Missing:**
-- Parameter range validation (any params accepted today)
-- Resource requirement validation
-- Dependency validation
-- File-system reference rejection
-- Executable payload rejection (no Python, no shell)
+The full §20 security-validation pipeline ships via PR #392:
 
-The recipe struct itself doesn't carry arbitrary code (only structured
-fields), so §20 "A recipe cannot execute arbitrary shell commands" is
-implicit. But there is no explicit validation pipeline that rejects
-recipes with filesystem references or unsupported stages.
+- New `astroforge_core::validation` module (`validation.rs`):
+  - `ParamRange` (min/max inclusive bounds; either optional).
+  - `StageSpec` (per-stage spec: `params` ranges,
+    `required_stages` deps, `resource_units` cost).
+  - `SecurityViolation` (kind + stage_id + param_key +
+    message) + `SecurityValidationReport` (total
+    resource units + violations list).
+  - `validate_recipe_security(&Recipe, &HashMap<String,
+    StageSpec>) -> SecurityValidationReport`: pure
+    function that runs five checks in one pass:
+    1. **Range**: per-(stage, param) numeric bounds
+       declared in the spec table are enforced.
+    2. **Dependency**: a stage declaring
+       `required_stages` cannot be enabled when
+       any required stage is missing or disabled;
+       spec-catalog absence is also flagged.
+    3. **Filesystem reference rejection**: any
+       string param value containing an absolute
+       path (`/`, `\`, `~/`, `://`) is rejected.
+    4. **Executable payload rejection**: shebang
+       `#!/...` + Python (`os.system(`,
+       `subprocess.`, `eval(`, `exec(`) + shell
+       (`shell_exec`) + HTML (`<script>`,
+       `</script>`) signatures are rejected.
+    5. **Resource budget ceiling**: the sum of
+       every enabled stage's `resource_units`
+       must be ≤ `MAX_RESOURCE_UNITS` (300).
+- Canonical `SPEC_CATALOG` static
+  (`LazyLock<HashMap<String, StageSpec>>`) in
+  `src-tauri/src/main.rs` covering stretch /
+  denoise / sharpen / color_calibration /
+  debayer / crop / cosmetic / curves /
+  stacking. Mirrors the §22 quality catalog
+  shape so the §20 UI panel renders the same
+  stage list verbatim.
+- `recipe_security_validate` Tauri command:
+  loads the Recipe via `RecipeStore::get`,
+  delegates to the pure function.
+- `recipeSecurityValidate()` TS wrapper +
+  `SecurityViolationFromRust` /
+  `SecurityValidationReportFromRust` types
+  in `astroforge-api.ts`.
+- `SecurityValidationPanel.svelte` (NEW,
+  ~420 LOC): mounts in any Recipe surface that
+  has a (profileId, version) pair. Renders a
+  status pill (Safe / N violations / Loading /
+  Error) + a resource-budget progress bar +
+  per-class violation groups (range / dependency /
+  filesystem / executable / resource) with
+  per-row tooltips. Apply button enable state
+  mirrors `report.is_safe()`. Honest disabled
+  stub for the §20 apply-flow integration
+  (follow-on slice).
+- 21 new tests in
+  `recipe_security_validation.rs` pin the
+  contract: safe Recipe is empty, out-of-range
+  below / above, dependency missing /
+  disabled / satisfied / spec-catalog absence,
+  filesystem absolute-posix / home-relative /
+  URL-scheme / legitimate-relative, executable
+  shebang + 7 needle matches / non-matching
+  case-sensitive substring, resource budget
+  over / exactly-at-max / disabled-stages
+  excluded, composition surfaces all five
+  classes in one pass, serde round-trip,
+  half-infinite ranges.
+
+**Out of scope** (follow-on slice):
+
+- **Apply-flow integration**: the §20
+  `SecurityValidationPanel` Apply button is a
+  disabled preview; threading the
+  `SecurityValidationReport` through
+  `recipe_apply` (so unsafe Recipes are
+  blocked at the apply round) lands in a
+  follow-on slice.
+- **Per-quality-profile spec tightening**:
+  the canonical `SPEC_CATALOG` ships with
+  conservative defaults; the §22 quality
+  catalog per-stage ranges are a follow-on
+  slice that walks each quality profile
+  (Natural / Detail / Clean / Publication).
+- **Recipe-store `save` rejection**: wiring
+  the validation report into the RecipeStore's
+  save path so unsafe Recipes can't be
+  persisted is a follow-on slice.
 
 ## §21 Data Model — ⚠️ Partial
 
@@ -565,7 +642,7 @@ documented roadmap.
 | §7 (provenance model) | 0 | 1 | 0 | 1 |
 | §8 (processing provenance) | 5 | 1 | 0 | 6 |
 | §9 (AI provenance) | 13 | 1 | 0 | 14 |
-| §10 (recipe editor) | 1 | 0 | 0 | 1 |
+| §10 (recipe editor) | 2 | 0 | 1 | 3 |
 | §11 (application flow) | 0 | 1 | 0 | 1 |
 | §12 (applicability) | 0 | 1 | 0 | 1 |
 | §13 (recipe diff) | 1 | 0 | 0 | 1 |
@@ -575,7 +652,7 @@ documented roadmap.
 | §17 (provenance viewer) | 1 | 0 | 0 | 1 |
 | §18 (provenance graph) | 1 | 0 | 0 | 1 |
 | §19 (import/export) | 1 | 0 | 0 | 1 |
-| §20 (security) | 0 | 1 | 0 | 1 |
+| §20 (security) | 1 | 0 | 0 | 1 |
 | §21 (data model) | 7 | 4 | 4 | 15 |
 | §22 (semantic API) | 8 | 3 | 9 | 20 |
 | §23 (events) | 0 | 1 | 0 | 1 |
@@ -588,9 +665,9 @@ documented roadmap.
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **74** | **26** | **20** | **120** |
+| **Total** | **76** | **25** | **21** | **122** |
 
-**Coverage:** 62% shipped, 22% partial, 17% missing.
+**Coverage:** 62% shipped, 20% partial, 17% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -599,7 +676,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [74, 26, 20, 120]   # a + b + c == 120 per row
+sums = [76, 25, 21, 122]   # a + b + c == 122 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

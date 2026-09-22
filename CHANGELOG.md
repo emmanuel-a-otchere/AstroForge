@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+
 ### Slice §13 Recipe Diff
 
 **Scope.** Closes the mechanical parameter-diff half of
@@ -54,6 +55,58 @@ The AI-aware half was already covered by the existing
 **Audit doc flip.** §13 row: 0 ✅ / 1 ⚠️ / 0 ❌ → 1 ✅ /
 0 ⚠️ / 0 ❌. Scorecard Total: 73 / 27 / 20 → **74 / 26 /
 20 / 120** (62% shipped, 22% partial, 17% missing).
+
+
+### Slice §15 Recipe Library 5-tab layout
+
+**Scope.** Closes the Recipe Library + Recipe Card halves
+of CR-08 §15 by adding a 5-tab classification layout
+(System / My Recipes / Project Recipes / Imported /
+Recently Used) in `RecipeLibrary.svelte`, mounted inside
+`RecipesScreen.svelte`. The Recipe Detail page (§15.3)
+remains a follow-on slice.
+
+**What.**
+
+- `crates/astroforge-core/src/recipe_store.rs`:
+  `RecipeSummary` struct gains `is_system`, `is_archived`,
+  `is_imported`, `last_used_at` fields. `list()` query
+  exposes them; `save()` INSERT folds `is_archived` +
+  `is_imported` defaults (`0, 0`). New
+  `mark_last_used(profile_id)` + `mark_imported(profile_id)`
+  helpers + idempotent ALTER TABLE migration that adds
+  the two new columns to legacy stores + an index on
+  `last_used_at`.
+- `src-tauri/src/main.rs`: `recipe_apply` calls
+  `mark_last_used` on every apply; `recipe_import` calls
+  `mark_imported` after `save`.
+- `src/lib/profile-store.ts`: `RecipeSummary` interface
+  extended with the four new fields; `fromRustSummary`
+  pipes them through; the three `PLACEHOLDER_SUMMARIES`
+  literal constructions satisfy the new shape.
+- `src/components/RecipeLibrary.svelte`: new component
+  with ARIA tablist / tab / tabpanel pattern (mirrors
+  `StudioShell.svelte`'s tab shape). Per-tab
+  classification (`filterForTab`) reads the four flags
+  off the head row; Recently Used sorts by
+  `lastUsedAt DESC`. Each tab has its own empty state
+  explaining why it may be empty. Card surface: name +
+  version + target type + system/imported/AI status pills
+  + relative last-used timestamp + description.
+- `src/components/RecipesScreen.svelte`: imports
+  `RecipeLibrary` + `profileStore`; removes the inline
+  recipe-card markup (moved into the new component);
+  the `profiles` local mirror is gone (the library
+  subscribes to `$profileStore` directly).
+- `crates/astroforge-core/tests/recipe_library.rs`:
+  new 8-test file pinning the migration idempotency +
+  the helpers' behavior + the RecipeSummary serde
+  round-trip + the legacy-store reopen path.
+
+**Audit doc flip.** §15 row: 0 ✅ / 3 ⚠️ / 1 ❌ → 2 ✅ /
+1 ⚠️ / 1 ❌ (Recipe Library + Recipe Card flipped;
+Recipe Detail still ❌). Scorecard Total: 71 / 29 / 20 →
+73 / 27 / 20 (61% shipped, 22% partial, 17% missing).
 
 ### Slice §19 file-dialog UI
 

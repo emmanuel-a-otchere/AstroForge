@@ -534,6 +534,17 @@ fn recipe_apply(
             "recipe {profile_id:?} v{version} is not applicable: {e}"
         ))
     })?;
+    // CR-08 §15: stamp `last_used_at` so the Recently Used
+    // tab surfaces this recipe at the top after the apply.
+    // The stamp is best-effort: if the row vanished between
+    // the `get` and now (e.g. concurrent delete), the apply
+    // result is still returned; the UI just won't show it
+    // in Recently Used.
+    if let Err(e) = store.mark_last_used(&profile_id) {
+        eprintln!(
+            "recipe_apply: failed to stamp last_used_at for {profile_id:?}: {e}"
+        );
+    }
     Ok(RecipeApplyResponse {
         profile_id,
         version: recipe.version,
@@ -709,7 +720,18 @@ fn recipe_import(
         Ok(head) => Some(head.version),
         Err(_) => None,
     };
-    store.save(&recipe).map_err(Into::into)
+    let summary = store.save(&recipe).map_err(Into::into)?;
+    // CR-08 §15: flag the just-saved head row as imported so
+    // the Imported tab can classify it. The flag lives on
+    // every row of the profile, so a subsequent `recipe_save`
+    // (user-edits the imported recipe) keeps the imported
+    // classification.
+    if let Err(e) = store.mark_imported(&profile_id) {
+        eprintln!(
+            "recipe_import: failed to mark_imported for {profile_id:?}: {e}"
+        );
+    }
+    Ok(summary)
 }
 
 /// CR-08 §14: "Save Pipeline as Recipe" UX. Loads a

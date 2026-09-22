@@ -668,6 +668,18 @@ export const diffCacheLen = (): Promise<number> =>
 // translation. We declare this here (rather than importing
 // from profile-store) to keep the IPC layer self-contained
 // and avoid a profile-store.ts <-> astroforge-api.ts cycle.
+// CR-08 §10 Beginner tier axis. Mirrors the Rust
+// `AiEnhancementLevel` enum (lowercase tag). The
+// Beginner editor tier surfaces this as a 4-radio
+// picker; the field is persisted on the Recipe so
+// the user's Beginner pick survives a future Expert
+// pass.
+export type AiEnhancementLevelFromRust =
+  | "off"
+  | "conservative"
+  | "recommended"
+  | "advanced";
+
 export interface RecipeFromRust {
   schema_version: string;
   name: string;
@@ -693,6 +705,11 @@ export interface RecipeFromRust {
   branch: string;
   created_at: string;
   flags: string[];
+  // CR-08 §10: Beginner-tier pick. Optional for
+  // forward-compat with legacy Recipes that predate
+  // the field; absent means Recommended (the Rust
+  // serde default).
+  ai_enhancement_level?: AiEnhancementLevelFromRust;
 }
 
 /**

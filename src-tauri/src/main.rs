@@ -875,6 +875,31 @@ fn recipe_ai_diff_summary(
     Ok(ai_diff_fn(&recipe_a, &recipe_b))
 }
 
+/// CR-08 §13: compute the mechanical parameter diff for
+/// two Recipes. Pure function: loads both Recipes, calls
+/// `recipe_parameter_diff`. Returns the per-stage
+/// Added / Removed / Modified breakdown that the
+/// `RecipeDiffPanel.svelte` consumer renders side-by-side
+/// in CompareWorkspace. Returns CommandError if either
+/// Recipe is not found.
+#[tauri::command]
+fn recipe_parameter_diff(
+    state: State<'_, RecipeState>,
+    profile_id_a: String,
+    version_a: u32,
+    profile_id_b: String,
+    version_b: u32,
+) -> Result<
+    astroforge_core::recipe::RecipeParameterDiff,
+    CommandError,
+> {
+    use astroforge_core::recipe::recipe_parameter_diff as param_diff_fn;
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe_a = store.get(&profile_id_a, version_a)?;
+    let recipe_b = store.get(&profile_id_b, version_b)?;
+    Ok(param_diff_fn(&recipe_a, &recipe_b))
+}
+
 /// CR-07 §29.2a: get-or-compute a diff image.
 /// Cache lookup keyed by (version_a_id, version_b_id, mode, gain).
 /// On miss, computes via `compute_diff` + stores. The mode
@@ -1242,6 +1267,7 @@ fn main() {
             recipe_apply,
             recipe_save_from_pipeline_plan,
             recipe_ai_diff_summary,
+            recipe_parameter_diff,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,
             diff_cache_clear,

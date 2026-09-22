@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-21 (refresh 1: stale-audit reconciliation against current code. Verified-flipped rows: §5 content-hash ✅ (Recipe::pipeline_plan_hash), §17 ProvenanceViewer ✅ (ProvenancePanel.svelte + RecipeStageTimeline.svelte), §18 DAG ✅ (VersionDag.svelte). Verified-still-partial (audit text was correct): §3 system + imported recipes, §9 mask_id + application_version on AiOperation, §10 beginner/guided editor tiers, §13 recipe-diff surface, §14 save-as-recipe, §15 Recipe Library 5-tab layout + RecipeDetail, §19 .afrecipe format, §20 param range / dependency / filesystem-rejection validation, §22 duplicate_recipe / delete_recipe / check_recipe_applicability / save_pipeline_as_recipe / import / export / get_recipe_provenance / compare_recipe_versions, §28 acceptance rows, §29 reproducibility + security tests, §30 9 ADRs)
+**Last refresh:** 2026-09-22 (refresh 2: §13 Recipe Diff + §15 Recipe Library 5-tab layout + Recipe Card shipped. §13: `recipe_parameter_diff` pure function + IPC + RecipeDiffPanel.svelte + 7 new tests. §15: RecipeSummary struct folds `is_system / is_archived / is_imported / last_used_at`; RecipeStore::mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -218,7 +218,7 @@ Order] buttons.
 filter config / camera characteristics / image dimensions / dataset
 quality / available resources / installed AI models).
 
-## §13 Recipe Diff: ⚠️ Partial
+## §13 Recipe Diff: ✅ Shipped
 
 `recipe_ai_diff_summary(&Recipe, &Recipe) -> RecipeAiDiffSummary`
 (CR-07 §32.4 + §32.6 IPC) covers the AI-aware half of §13:
@@ -228,10 +228,47 @@ Wired through IPC as `recipe_ai_diff_summary` and consumed by the
 Compare workspace's BeginnerComparePrompt + the §32.4 test suite
 (36 tests).
 
-**Missing:** the full §13 parameter-level side-by-side table
-(per-stage params, per-`AdaptiveParameterSet` reason lines, recommended
-"Apply suggestion" button). AI comparison is partial credit;
-mechanical parameter diff is the remaining ❌ surface.
+The mechanical parameter-diff half ships via PR #390:
+
+- `recipe_parameter_diff(&Recipe, &Recipe) -> RecipeParameterDiff`
+  in `recipe.rs` (CR-08 §13): pure function that walks both
+  Recipes' stages, classifying each `stage_id` into one of three
+  buckets:
+  - `added`: stages only in Recipe B (params take the
+    "Added" classification against a `None` A side).
+  - `removed`: stages only in Recipe A.
+  - `modified`: stages in both; per-param diff against the
+    union of keys (Added / Removed / Changed / Unchanged)
+    plus the `enabled` flag side-channel.
+  - `identical`: true iff no stages were added / removed /
+    modified (drives the §13 RecipeDiffPanel's "no changes"
+    empty state).
+- `recipe_parameter_diff` Tauri command in `main.rs` (loads both
+  Recipes via the existing `RecipeStore::get` + delegates to the
+  pure function). Registered in `invoke_handler` alongside the
+  existing `recipe_ai_diff_summary`.
+- `recipeParameterDiff()` TS wrapper + the `RecipeParameterDiffFromRust`
+  type family in `astroforge-api.ts` (mirror the Rust struct
+  shape exactly).
+- `RecipeDiffPanel.svelte` (mounted in `CompareWorkspace.svelte`
+  below the existing `RecipeStageTimeline` row): three disclosure
+  sections (Added / Removed / Modified), per-stage headers with
+  the `enabled` flag side-channel, per-param rows with
+  Added / Removed / Changed pills + A vs B value pairs (color-coded),
+  identical-pill banner when the diff is empty, and a disabled
+  `Apply suggestion` button (honest affordance pending the
+  §22.3 apply-flow integration that threads through this panel).
+
+**Per-AdaptiveParameterSet reason lines:** deferred to the
+AdaptiveParameterSet integration slice when that data path
+lands. The current diff panel surfaces the raw key + value
+pair; reason-line captions are a follow-on enhancement.
+
+**7 new tests** pin the contract in
+`recipe_parameter_diff.rs`: identical Recipes, pure Added /
+pure Removed stages, modified stage against the union of keys,
+enabled-flag side-channel flip, stage reorder (treated as
+identical by intent), serde round-trip with the enum tag.
 
 ## §14 Recipe Save from Successful Processing: ⚠️ Partial (Save-as-Recipe shipped; selection surface still partial)
 
@@ -512,9 +549,9 @@ documented roadmap.
 | §10 (recipe editor) | 1 | 0 | 0 | 1 |
 | §11 (application flow) | 0 | 1 | 0 | 1 |
 | §12 (applicability) | 0 | 1 | 0 | 1 |
-| §13 (recipe diff) | 0 | 1 | 0 | 1 |
+| §13 (recipe diff) | 1 | 0 | 0 | 1 |
 | §14 (save from proc) | 0 | 1 | 0 | 1 |
-| §15 (UI spec) | 0 | 3 | 1 | 4 |
+| §15 (UI spec) | 2 | 1 | 1 | 4 |
 | §16 (workspace integration) | 0 | 1 | 0 | 1 |
 | §17 (provenance viewer) | 1 | 0 | 0 | 1 |
 | §18 (provenance graph) | 1 | 0 | 0 | 1 |
@@ -532,9 +569,9 @@ documented roadmap.
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **71** | **29** | **20** | **120** |
+| **Total** | **74** | **26** | **20** | **120** |
 
-**Coverage:** 59% shipped, 24% partial, 17% missing.
+**Coverage:** 62% shipped, 22% partial, 17% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -543,7 +580,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [71, 29, 20, 120]   # a + b + c == 120 per row
+sums = [74, 26, 20, 120]   # a + b + c == 120 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

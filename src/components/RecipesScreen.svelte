@@ -26,7 +26,15 @@
   import RecipeLibrary from "./RecipeLibrary.svelte";
   import RecipeEditor, {
     type BeginnerTierPayload,
+    type EditorPayload,
   } from "./RecipeEditor.svelte";
+  import type {
+    ProcessingObjectiveFromRust,
+    QualityTargetsFromRust,
+  } from "../lib/astroforge-api";
+  import type {
+    AiEnhancementLevelFromRust,
+  } from "../lib/astroforge-api";
 
   let loading = $state(true);
   let error: string | null = $state(null);
@@ -43,6 +51,29 @@
     qualityProfile: "natural",
     aiEnhancementLevel: "recommended",
   });
+  // CR-08 §10.2 Guided tier: extended payload
+  // surface. The Beginner tier's 4 fields remain
+  // on `beginnerDraft`; the Guided tier fields
+  // live alongside (defaulted empty / null).
+  let guidedDraft = $state({
+    processingObjectives: [] as ProcessingObjectiveFromRust[],
+    qualityTargets: {
+      target_snr_db: null,
+      target_sharpness: null,
+      target_background_smoothness: null,
+    } as QualityTargetsFromRust,
+    optionalOperations: [] as string[],
+    stageOverrides: {} as Record<
+      string,
+      AiEnhancementLevelFromRust | null
+    >,
+    stageEnabled: {} as Record<string, boolean>,
+  });
+  // The set of stage IDs the editor's per-stage
+  // inclusion + override sections render. Empty
+  // by default; the Expert tier (ProfileManager)
+  // is the source of truth for the stage list.
+  let editorStageIds: string[] = $state([]);
   // CR-08 §19 file-dialog UI: status surface for
   // import / export operations. The dialog is a
   // Tauri-only feature; the action callbacks fall
@@ -356,15 +387,33 @@
           </button>
         </header>
         <RecipeEditor
-          initial={beginnerDraft}
-          onChange={(next) => (beginnerDraft = next)}
+          initial={{
+            ...beginnerDraft,
+            ...guidedDraft,
+          } as EditorPayload}
+          stageIds={editorStageIds}
+          onChange={(next) => {
+            beginnerDraft = {
+              name: next.name,
+              targetType: next.targetType,
+              qualityProfile: next.qualityProfile,
+              aiEnhancementLevel: next.aiEnhancementLevel,
+            };
+            guidedDraft = {
+              processingObjectives: next.processingObjectives,
+              qualityTargets: next.qualityTargets,
+              optionalOperations: next.optionalOperations,
+              stageOverrides: next.stageOverrides,
+              stageEnabled: next.stageEnabled,
+            };
+          }}
         />
         <footer class="modal-footer">
           <p class="font-body modal-footer-note">
-            The Beginner tier captures the four essentials. Guided
-            (objectives + stage inclusion) and Expert (constraints +
-            ranges) tiers land in follow-on slices; for now, the
-            Profile Manager covers Expert-mode editing.
+            Beginner captures the 4 essentials. Guided adds
+            objectives + stage inclusion + AI overrides +
+            quality targets + optional operations. Expert is
+            the Profile Manager.
           </p>
           <button
             type="button"

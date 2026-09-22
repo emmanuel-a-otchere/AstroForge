@@ -180,11 +180,13 @@ fn enabled_flag_change_marks_modified_even_with_identical_params() {
         stage_id: "stretch".to_string(),
         enabled: true,
         params: p.clone(),
+        ai_enhancement_override: None,
     };
     let mut stage_b = astroforge_core::recipe::RecipeStage {
         stage_id: "stretch".to_string(),
         enabled: false,
         params: p,
+        ai_enhancement_override: None,
     };
     a.stages.push(stage_a.clone());
     b.stages.push(stage_b.clone());

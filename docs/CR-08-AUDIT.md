@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
+**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 + §10.2 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. §10.2: ProcessingObjective enum + QualityTargets struct + per-stage AI override + RecipeEditor.svelte Guided tier section + 18 tests. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -179,10 +179,12 @@ This is **very close to complete.** Two gaps:
 - Mask ID (could be added as `mask_id: Option<String>`)
 - Application version (could be added or queried from project metadata)
 
-## §10 Recipe Editor: ⚠️ Partial (Beginner tier shipped; Guided + Expert progressive-disclosure still partial)
+## §10 Recipe Editor: ⚠️ Partial (Beginner + Guided tiers shipped; Expert progressive-disclosure still partial)
 
 The CR-08 §10 progressive-disclosure editor (Beginner / Guided / Expert)
-ships the **Beginner tier** via PR #391:
+ships the **Beginner + Guided tiers** via PR #391 + PR #393:
+
+**Beginner tier (PR #391):**
 
 - `AiEnhancementLevel` enum (`off` / `conservative` / `recommended` /
   `advanced`) added to `astroforge-core::recipe`; `Recommended` is
@@ -197,22 +199,67 @@ ships the **Beginner tier** via PR #391:
 - Processing Style binds to the existing `QualityProfilePicker`
   so the §22 4-variant picker is reused rather than
   duplicated.
-- Modal renders honest disabled stubs for the Guided + Expert
-  tiers ("coming soon" buttons) so the user reads the
-  shape of the larger progressive-disclosure shell rather
-  than missing the controls.
-- 9 new tests pin the Rust contract in
-  `recipe_beginner_tier.rs`: default variant, ALL display
-  order, label/description non-emptiness, serde round-trip,
-  lowercase wire tag, legacy Recipe deserialize
-  compatibility, Beginner-tier input round-trip via
-  `recipe_save`, hash influence (quality_profile +
-  ai_enhancement_level both flip the §32.4 content hash).
+
+**Guided tier (PR #393):**
+
+- `ProcessingObjective` enum (5 variants: `PreserveStarColors`,
+  `MaximizeDetail`, `MaximizeSmoothness`, `MaximizeDynamicRange`,
+  `MaximizeReproducibility`) added to `astroforge-core::recipe`
+  with serde `snake_case` rename so the wire format is
+  stable. `ProcessingObjective::ALL` is the canonical
+  list; extending it requires updating both the Rust enum
+  + the TS type alias + the Guided tier checkbox list.
+- `QualityTargets` struct (optional `target_snr_db`,
+  `target_sharpness`, `target_background_smoothness`
+  fields; `skip_serializing_if = "Option::is_none"` so
+  Recipes that didn't set them stay compact) added to
+  `astroforge-core::recipe`.
+- `Recipe.processing_objectives: Vec<ProcessingObjective>`
+  + `Recipe.quality_targets: QualityTargets` +
+  `Recipe.optional_operations: Vec<String>` (the last
+  is the list of stage IDs the user elected to enable
+  beyond the §10.1 Beginner defaults) added to the
+  Recipe struct, all `#[serde(default)]`.
+- `RecipeStage.ai_enhancement_override: Option<AiEnhancementLevel>`
+  added so the Guided tier can override the recipe-level
+  AI posture per-stage. `None` inherits the recipe-level
+  default.
+- `Recipe::effective_ai_enhancement_for_stage(stage_id)`
+  helper: per-stage override wins; unknown stage IDs
+  fall back to recipe-level default; the helper never
+  panics.
+- `RecipeEditor.svelte` extended with a collapsible
+  Guided tier section mounted below the Beginner
+  section: 5-checkbox objective list, stage-inclusion
+  toggle table (driven by the new `stageIds` prop), per-
+  stage AI override row (Inherit + 4-radio pills),
+  3-input quality targets (SNR dB / sharpness /
+  background smoothness, all optional), optional-
+  operations chip row (cosmetic / curves / stacking).
+- `RecipesScreen.svelte` extended to mount the new
+  `EditorPayload` shape (Beginner fields stay on
+  `beginnerDraft`; Guided fields live on `guidedDraft`).
+- 18 new tests pin the Rust contract in
+  `recipe_guided_tier.rs`: `ProcessingObjective::label`
+  + `tag`, serde round-trip per variant, `ALL` is
+  canonical, `QualityTargets` partial + full
+  construction + skip-serialization semantics,
+  legacy Recipe deserialization (Recipes predating
+  §10.2 deserialize via `#[serde(default)]` with
+  empty `processing_objectives` / `quality_targets`
+  / `optional_operations`), per-stage AI override
+  serde round-trip, effective-AI helper inherits
+  when no override + override wins + unknown stage
+  falls back, `optional_operations` accepts any
+  string, full Recipe serde round-trip on the new
+  fields, `add_stage` default `None` override.
+- The `RecipeSecurityValidation` test fixture was
+  updated for the new `RecipeStage` field
+  (`ai_enhancement_override: None`); `recipe_parameter_diff`
+  test fixture likewise.
 
 **Still partial:**
 
-- **Guided tier**: objectives + stage inclusion + AI
-  preferences + quality targets + optional operations. Follow-on slice.
 - **Expert tier progressive disclosure**: the existing
   `ProfileManager.svelte` (stages table + per-stage params)
   is the Expert surface, but it doesn't yet integrate into
@@ -220,13 +267,22 @@ ships the **Beginner tier** via PR #391:
   Follow-on slice.
 - **Save round-trip**: the modal's `Save Recipe` button is a
   disabled preview; wiring it to `recipe_save` is a follow-on
-  slice (the `Recipe` struct already carries the new field,
+  slice (the `Recipe` struct already carries the new fields,
   so the wire-shape change is the small piece left).
+- **§20 validation on Guided tier**: the §20 SPEC_CATALOG
+  doesn't yet enforce ranges on the Guided tier's new
+  fields (`target_snr_db` 20-60 dB, `target_sharpness` 0-1,
+  `target_background_smoothness` 0-1). Follow-on slice
+  that adds Guided-tier ranges to the spec table.
+- **Apply round integration**: the `effective_ai_enhancement_for_stage`
+  helper resolves the per-stage override at runtime; the
+  apply round is not yet wired to consult it. Follow-on
+  slice.
 
 | §10 tier | Existing |
 |---|---|
 | Beginner (name + target + style + AI level) | ✅ |
-| Guided (objectives + stages + AI preferences + quality targets) | ❌ |
+| Guided (objectives + stages + AI preferences + quality targets) | ✅ |
 | Expert (constraints + ranges + execution + model selection) | ✅ Stages table |
 
 ## §11 Recipe Application Flow — ⚠️ Partial
@@ -676,7 +732,7 @@ documented roadmap.
 | §7 (provenance model) | 0 | 1 | 0 | 1 |
 | §8 (processing provenance) | 5 | 1 | 0 | 6 |
 | §9 (AI provenance) | 13 | 1 | 0 | 14 |
-| §10 (recipe editor) | 2 | 0 | 1 | 3 |
+| §10 (recipe editor) | 3 | 0 | 0 | 3 |
 | §11 (application flow) | 0 | 1 | 0 | 1 |
 | §12 (applicability) | 0 | 1 | 0 | 1 |
 | §13 (recipe diff) | 1 | 0 | 0 | 1 |
@@ -699,9 +755,9 @@ documented roadmap.
 | §30 (ADRs) | 0 | 0 | 1 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **76** | **25** | **21** | **122** |
+| **Total** | **77** | **25** | **20** | **122** |
 
-**Coverage:** 62% shipped, 20% partial, 17% missing.
+**Coverage:** 63% shipped, 20% partial, 16% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -710,7 +766,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [76, 25, 21, 122]   # a + b + c == 122 per row
+sums = [77, 25, 20, 122]   # a + b + c == 122 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

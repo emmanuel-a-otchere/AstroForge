@@ -2,6 +2,80 @@
 
 ## Unreleased
 
+### Slice §30 ADRs
+
+**Scope.** Closes CR-08 §30 Architectural Decision
+Records by shipping the 9 ADRs (ADR-08.1 through
+ADR-08.9) under `docs/adr/0012-cr08-*` through
+`0020-cr08-*`. Each ADR carries: status (Accepted
+2026-09-22), source spec gate, related ADRs, and
+the context / decision / consequences triad that
+matches the existing CR-07 ADR format. The
+canonical ADR index in `docs/adr/README.md` lists
+all 9 ADRs alongside the existing 11 CR-07 ADRs.
+
+**The 9 ADRs.**
+
+- **ADR-0012 / ADR-08.1: Recipe Represents Intent.**
+  Recipes capture intent (target type, style,
+  quality profile, AI posture, processing
+  objectives, quality targets) but never the
+  concrete pipeline. The pipeline is a
+  dataset-specific projection. Option 1 in the
+  decision matrix.
+- **ADR-0013 / ADR-08.2: Recipe and Pipeline Are
+  Distinct.** Strict separation: a Recipe never
+  carries execution data; a Pipeline is a fresh
+  object each apply round and references the
+  Recipe by (profile_id, version).
+- **ADR-0014 / ADR-08.3: Recipe Adaptation Must Be
+  Explicit.** AstroForge may intelligently adapt
+  a Recipe, but must disclose meaningful changes.
+  The apply round produces an `AdaptiveParameters`
+  record with `reason: String` per derivation;
+  the UI surfaces per-adaptation reasons.
+- **ADR-0015 / ADR-08.4: Historical Execution Is
+  Immutable.** Each Pipeline pins to the
+  (profile_id, version) pair it was derived from.
+  Saving a new Recipe version creates a new row
+  in the Recipe store; it never updates prior
+  rows or referencing executions.
+- **ADR-0016 / ADR-08.5: Provenance Is First-Class
+  Data.** `ProvenanceRecord` + `ProvenanceEdge`
+  types are part of the §21 data model; the §17
+  viewer + §18 DAG UI query the structured data
+  model directly.
+- **ADR-0017 / ADR-08.6: AI Identity Is Part of
+  Provenance.** `ModelUsage` carries
+  `model_name` + `model_type` + (planned)
+  `model_version` + `weights_sha256`. Execution
+  seed is recorded on the Recipe's
+  `integrity.seed_recorded` flag.
+- **ADR-0018 / ADR-08.7: Reproducibility Is
+  Qualified.** `ReproducibilityClass` enum:
+  `ExactlyReproducible` (no AI, all
+  deterministic) / `MateriallyReproducible` (AI
+  with recorded seeds) / `InherentlyVariable`
+  (no reproducible path).
+- **ADR-0019 / ADR-08.8: Recipes Cannot Execute
+  Arbitrary Code.** The §20 validation pipeline
+  rejects executable payloads (shebang,
+  `os.system(`, `subprocess.`, `eval(`, `exec(`,
+  `<script`, `</script`, `shell_exec`). The
+  Recipe struct's params accept only JSON values;
+  strings are scanned by the §20 checks.
+- **ADR-0020 / ADR-08.9: Provenance Is Human-
+  Readable.** Progressive disclosure: summary by
+  default, "Show technical" toggle reveals the
+  raw `ProvenanceRecord` inline. Both views read
+  from the same structured data model.
+
+**Audit doc flip.** §30 row: 0 ✅ / 0 ⚠️ / 1 ❌ →
+1 ✅ / 0 ⚠️ / 0 ❌. Total: 77 / 25 / 20 / 122 →
+**78 / 25 / 19 / 122** (64% shipped, 20% partial,
+16% missing).
+
+
 ### Slice §10.2 Guided tier
 
 **Scope.** Closes the Guided tier half of CR-08

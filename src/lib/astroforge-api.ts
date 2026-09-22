@@ -466,6 +466,25 @@ export const recipeGetForImageVersion = (
     RecipeFromRust | null
   >;
 
+// CR-08 §15: Recipe Detail lookup by (profile_id, version).
+// Mirrors the existing Tauri command `recipe_get`. Returns
+// the `Recipe` (snake_case from the Rust struct), or null
+// when the (profile_id, version) pair is not found. The
+// `RecipeDetail.svelte` component uses this wrapper to load
+// the full Recipe body after the user picks a card from
+// `RecipeLibrary.svelte`.
+//
+// Returns null (rather than throwing) on missing entries
+// so the UI can render a graceful empty state without
+// surrounding each call in a try/catch.
+export const recipeGet = (
+  profileId: string,
+  version: number,
+): Promise<RecipeFromRust | null> =>
+  invoke("recipe_get", { profileId, version }) as Promise<
+    RecipeFromRust | null
+  >;
+
 // CR-07 §32.6: compute the pipeline plan hash for a Recipe.
 // Pure server-side computation. Returns the lowercase
 // hex SHA-256 of the canonicalized Recipe. Throws
@@ -759,6 +778,12 @@ export interface RecipeFromRust {
   // stages if they were otherwise disabled by
   // the §10.1 Beginner defaults.
   optional_operations?: string[];
+  // CR-07 §22: Quality Profile axis. Defaults to
+  // `Natural` for legacy Recipes that did not carry
+  // this field. The §15 Recipe Detail surface reads
+  // this field via `recipeGet(profileId, version)`
+  // to render the "Style" meta-row.
+  quality_profile?: string;
 }
 
 /**

@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 + §10.2 + §30 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. §10.2: ProcessingObjective enum + QualityTargets struct + per-stage AI override + RecipeEditor.svelte Guided tier section + 18 tests. §30: 9 ADRs (ADR-0012 through ADR-0020) covering Recipe-as-intent, Recipe/Pipeline distinction, explicit adaptation, immutable history, provenance-as-data, AI identity, qualified reproducibility, no-arbitrary-code, human-readable provenance. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
+**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 + §10.2 + §30 + §15.3 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. §10.2: ProcessingObjective enum + QualityTargets struct + per-stage AI override + RecipeEditor.svelte Guided tier section + 18 tests. §30: 9 ADRs (ADR-0012 through ADR-0020) covering Recipe-as-intent, Recipe/Pipeline distinction, explicit adaptation, immutable history, provenance-as-data, AI identity, qualified reproducibility, no-arbitrary-code, human-readable provenance. §15.3: RecipeDetail.svelte rendering the §15 layout (title bar with version + description + Target/AI/Style meta-grid + Processing Intent bullets + Required Models chips + [Apply Recipe] / [Duplicate] / [Edit] action buttons); recipeGet(profileId, version) IPC wrapper; quality_profile field added to RecipeFromRust TS interface; RecipeLibrary.svelte onSelect prop; RecipesScreen.svelte mounts RecipeDetail beside Library. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -376,7 +376,7 @@ the conversion takes the plan's stages wholesale, in plan order,
 without letting the user pick subsets or override parameters
 beyond `target_type`. That is a follow-on slice.
 
-## §15 UI Specification — ⚠️ Partial
+## §15 UI Specification: ✅ Shipped (Library + Card + Detail all shipped)
 
 ### Recipe Library — ✅ Shipped
 
@@ -409,11 +409,72 @@ not yet wired to the stage list (the summary doesn't carry
 the stage payload); a follow-on slice reads the existing
 `integrity` field via `recipe_get` for the badge.
 
-### Recipe Detail — ❌ Missing
+### Recipe Detail: ✅ Shipped
 
-No `RecipeDetail.svelte` with the §15 layout (Title bar with version /
-Description / Target / AI / Style / Processing Intent bullets /
-Apply / Duplicate / Edit buttons).
+`RecipeDetail.svelte` renders the §15 layout
+(Title bar with version + description + Target /
+AI / Style meta-grid + Processing Intent bullets
++ Required Models chips + [Apply Recipe] /
+[Duplicate] / [Edit] action buttons):
+
+- Title bar shows the Recipe's `name` + `version`
+  + status pills (System / Imported / AI /
+  Perceptual / Deterministic).
+- Description renders the `description` field; the
+  summary's fallback description covers the
+  pre-load state.
+- Meta-grid: Target (target_type), AI (the
+  §10.2 `ai_enhancement_level` label; defaults
+  to "Recommended" when absent), Style (the
+  §22 `quality_profile` label; defaults to
+  "Natural" when absent), Stages (count of
+  configured stages from the full Recipe body).
+- Processing Intent bullets render the §10.2
+  `processing_objectives` list with mapped
+  user-readable labels; the section is hidden
+  when the list is empty.
+- Required Models chips render the Recipe's
+  `required_models` array with monospace chips.
+- Action buttons emit `onApply` / `onDuplicate` /
+  `onEdit` events with the (profileId, version)
+  pair. Each button is disabled when the full
+  Recipe body hasn't loaded yet (the events
+  fire with the loaded Recipe's identity, never
+  with a partial identity). The parent wires
+  these events to `recipe_apply` /
+  `recipe_save` (with derived name) /
+  §10 Recipe Editor pre-fill respectively;
+  the wiring is the follow-on slice per the
+  §15 audit-row note below.
+- The component handles five load states:
+  Empty (no summary), Loading (IPC in flight),
+  Ready (full body loaded), Missing (IPC
+  returned null; the Recipe was deleted between
+  the Library render and the click), and Error
+  (IPC threw; the user can Retry).
+- New IPC wrapper `recipeGet(profileId,
+  version)` in `src/lib/astroforge-api.ts`
+  calls the existing `recipe_get` Tauri command
+  with a return type of `RecipeFromRust | null`
+  (matches the existing `recipe_get_for_image_version`
+  convention).
+- `RecipeLibrary.svelte` extended with optional
+  `onSelect?: (summary: RecipeSummary) => void`
+  prop; when supplied, cards become
+  listbox-style click targets (Enter / Space
+  activates, hover/focus outlines surface).
+- `RecipesScreen.svelte` selects the Recipe in
+  state and mounts `RecipeDetail.svelte` beside
+  the Library; the action handlers are
+  intentional stubs that capture the
+  (profileId, version) pair so the parent's
+  wiring lands without re-plumbing the
+  component.
+- `quality_profile` field added to the
+  `RecipeFromRust` TS interface (the Rust struct
+  carries it; the TS contract missed it until
+  this slice; legacy Recipes default to
+  `Natural` per the §10.2 serde default).
 
 ## §16 Processing Workspace Integration — ⚠️ Partial
 
@@ -777,7 +838,7 @@ documented roadmap.
 | §12 (applicability) | 0 | 1 | 0 | 1 |
 | §13 (recipe diff) | 1 | 0 | 0 | 1 |
 | §14 (save from proc) | 0 | 1 | 0 | 1 |
-| §15 (UI spec) | 2 | 1 | 1 | 4 |
+| §15 (UI spec) | 3 | 1 | 0 | 4 |
 | §16 (workspace integration) | 0 | 1 | 0 | 1 |
 | §17 (provenance viewer) | 1 | 0 | 0 | 1 |
 | §18 (provenance graph) | 1 | 0 | 0 | 1 |
@@ -795,9 +856,9 @@ documented roadmap.
 | §30 (ADRs) | 1 | 0 | 0 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **78** | **25** | **19** | **122** |
+| **Total** | **79** | **25** | **18** | **122** |
 
-**Coverage:** 64% shipped, 20% partial, 16% missing.
+**Coverage:** 65% shipped, 20% partial, 15% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -806,7 +867,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [78, 25, 19, 122]   # a + b + c == 122 per row
+sums = [79, 25, 18, 122]   # a + b + c == 122 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

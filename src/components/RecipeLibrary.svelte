@@ -33,6 +33,19 @@
 <script lang="ts">
   import { profileStore, type RecipeSummary } from "../lib/profile-store";
 
+  /** CR-08 §15: Optional click handler. Fires when
+   * the user clicks a Recipe card. The parent
+   * (typically `RecipesScreen.svelte`) uses this
+   * to populate the §15 Recipe Detail panel +
+   * downstream apply/duplicate/edit flows.
+   * When omitted, cards are non-interactive
+   * (rendered as a `<ul>` without click handlers).
+   */
+  interface Props {
+    onSelect?: (summary: RecipeSummary) => void;
+  }
+  let { onSelect }: Props = $props();
+
   /** Active tab key. Drives the visible classification. */
   type TabKey = "system" | "mine" | "project" | "imported" | "recent";
   let activeTab: TabKey = $state("mine");
@@ -209,7 +222,23 @@
         {:else}
           <ul class="recipe-grid" aria-label="{tab.label} recipes">
             {#each filterForTab($profileStore, tab.key) as summary (summary.profileId)}
-              <li class="recipe-card" data-testid="recipe-card">
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+              <li
+                class="recipe-card"
+                class:clickable={onSelect !== undefined}
+                role={onSelect ? "button" : undefined}
+                tabindex={onSelect ? 0 : undefined}
+                onclick={onSelect ? () => onSelect(summary) : undefined}
+                onkeydown={onSelect
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelect(summary);
+                      }
+                    }
+                  : undefined}
+                data-testid="recipe-card"
+              >
                 <div class="card-head">
                   <span class="material-symbols-outlined card-icon" aria-hidden="true">
                     bookmark
@@ -349,6 +378,21 @@
     border: 1px solid var(--outline-variant);
     border-radius: var(--radius-lg);
     color: var(--on-surface);
+  }
+
+  .recipe-card.clickable {
+    cursor: pointer;
+    transition: border-color 0.1s ease, background 0.1s ease;
+  }
+
+  .recipe-card.clickable:hover {
+    border-color: var(--primary);
+    background: var(--surface-container-high);
+  }
+
+  .recipe-card.clickable:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
   }
 
   .card-head {

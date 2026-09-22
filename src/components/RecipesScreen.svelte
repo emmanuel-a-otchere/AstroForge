@@ -24,6 +24,7 @@
   } from "../lib/profile-store";
   import ProfileManager from "./ProfileManager.svelte";
   import RecipeLibrary from "./RecipeLibrary.svelte";
+  import RecipeDetail from "./RecipeDetail.svelte";
   import RecipeEditor, {
     type BeginnerTierPayload,
     type EditorPayload,
@@ -74,6 +75,11 @@
   // by default; the Expert tier (ProfileManager)
   // is the source of truth for the stage list.
   let editorStageIds: string[] = $state([]);
+  // CR-08 §15: Recipe Detail selection state.
+  // The Library renders cards; clicking one sets
+  // `selectedSummary` which the Detail panel
+  // reads to load the full Recipe body.
+  let selectedSummary: RecipeSummary | null = $state(null);
   // CR-08 §19 file-dialog UI: status surface for
   // import / export operations. The dialog is a
   // Tauri-only feature; the action callbacks fall
@@ -342,7 +348,34 @@
       `isSystem / isImported / lastUsedAt` flags folded onto the
       head row by §15's IPC contract change.
     -->
-    <RecipeLibrary />
+    <RecipeLibrary
+      onSelect={(summary) => (selectedSummary = summary)}
+    />
+    <RecipeDetail
+      summary={selectedSummary}
+      onApply={(_profileId, _version) => {
+        // CR-08 §15 Recipe Detail Apply action.
+        // The Apply round integration (recipe_apply
+        // IPC + Session picker) is a follow-on slice.
+        // For this slice the action is a stub that
+        // receives the (profileId, version) pair so
+        // the parent's wiring lands in a follow-on
+        // slice without re-plumbing the component.
+      }}
+      onDuplicate={(_profileId, _version) => {
+        // CR-08 §15 Recipe Detail Duplicate action.
+        // The Duplicate IPC wiring (recipe_save with
+        // a derived name) is a follow-on slice; the
+        // component's surface + event payload are in.
+      }}
+      onEdit={(_profileId, _version) => {
+        // CR-08 §15 Recipe Detail Edit action.
+        // The Edit modal wiring (open §10 Recipe
+        // Editor pre-filled with the Recipe's
+        // current fields) is a follow-on slice; the
+        // component's surface + event payload are in.
+      }}
+    />
   {/if}
 
   {#if managerOpen}

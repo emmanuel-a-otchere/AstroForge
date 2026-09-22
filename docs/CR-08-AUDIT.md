@@ -179,19 +179,53 @@ This is **very close to complete.** Two gaps:
 - Mask ID (could be added as `mask_id: Option<String>`)
 - Application version (could be added or queried from project metadata)
 
-## §10 Recipe Editor — ⚠️ Partial
+## §10 Recipe Editor: ⚠️ Partial (Beginner tier shipped; Guided + Expert progressive-disclosure still partial)
 
 The CR-08 §10 progressive-disclosure editor (Beginner / Guided / Expert)
-is **not implemented.**
+ships the **Beginner tier** via PR #391:
 
-Existing `ProfileManager.svelte` is **expert-only**: stages table with
-parameters (read-only for stages, save-as-new-version). No target-type
-choice, no processing-style radio buttons, no AI enhancement level,
-no AI class toggles.
+- `AiEnhancementLevel` enum (`off` / `conservative` / `recommended` /
+  `advanced`) added to `astroforge-core::recipe`; `Recommended` is
+  the serde-default for legacy Recipes that predate §10.
+- `ai_enhancement_level` field added to the `Recipe` struct
+  (`#[serde(default)]` so legacy rows deserialize cleanly).
+- `RecipeEditor.svelte` (mounted in `RecipesScreen.svelte` via
+  the new `New Recipe (Beginner)` header button): collects
+  the four Beginner-tier inputs (Recipe Name + Target Type +
+  Processing Style + AI Enhancement level) and emits a
+  `BeginnerTierPayload` via `onChange`.
+- Processing Style binds to the existing `QualityProfilePicker`
+  so the §22 4-variant picker is reused rather than
+  duplicated.
+- Modal renders honest disabled stubs for the Guided + Expert
+  tiers ("coming soon" buttons) so the user reads the
+  shape of the larger progressive-disclosure shell rather
+  than missing the controls.
+- 9 new tests pin the Rust contract in
+  `recipe_beginner_tier.rs`: default variant, ALL display
+  order, label/description non-emptiness, serde round-trip,
+  lowercase wire tag, legacy Recipe deserialize
+  compatibility, Beginner-tier input round-trip via
+  `recipe_save`, hash influence (quality_profile +
+  ai_enhancement_level both flip the §32.4 content hash).
+
+**Still partial:**
+
+- **Guided tier**: objectives + stage inclusion + AI
+  preferences + quality targets + optional operations. Follow-on slice.
+- **Expert tier progressive disclosure**: the existing
+  `ProfileManager.svelte` (stages table + per-stage params)
+  is the Expert surface, but it doesn't yet integrate into
+  the §10 modal's tabbed Beginner / Guided / Expert shell.
+  Follow-on slice.
+- **Save round-trip**: the modal's `Save Recipe` button is a
+  disabled preview; wiring it to `recipe_save` is a follow-on
+  slice (the `Recipe` struct already carries the new field,
+  so the wire-shape change is the small piece left).
 
 | §10 tier | Existing |
 |---|---|
-| Beginner (name + target + style + AI level) | ❌ |
+| Beginner (name + target + style + AI level) | ✅ |
 | Guided (objectives + stages + AI preferences + quality targets) | ❌ |
 | Expert (constraints + ranges + execution + model selection) | ✅ Stages table |
 

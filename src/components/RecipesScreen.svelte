@@ -24,11 +24,25 @@
   } from "../lib/profile-store";
   import ProfileManager from "./ProfileManager.svelte";
   import RecipeLibrary from "./RecipeLibrary.svelte";
+  import RecipeEditor, {
+    type BeginnerTierPayload,
+  } from "./RecipeEditor.svelte";
 
   let loading = $state(true);
   let error: string | null = $state(null);
   let managerOpen = $state(false);
+  let beginnerEditorOpen = $state(false);
   let hasLoaded = $state(false);
+  // CR-08 §10: live Beginner-tier payload. The
+  // component emits every edit; the parent's
+  // `saveBeginnerDraft` handler persists via
+  // `recipe_save` when the user confirms.
+  let beginnerDraft: BeginnerTierPayload = $state({
+    name: "",
+    targetType: "",
+    qualityProfile: "natural",
+    aiEnhancementLevel: "recommended",
+  });
   // CR-08 §19 file-dialog UI: status surface for
   // import / export operations. The dialog is a
   // Tauri-only feature; the action callbacks fall
@@ -237,6 +251,18 @@
       <button
         type="button"
         class="manage-cta font-display"
+        onclick={() => (beginnerEditorOpen = true)}
+        aria-label="Create a new recipe using the Beginner tier editor"
+        data-testid="beginner-new-recipe-btn"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">
+          add_circle
+        </span>
+        New Recipe (Beginner)
+      </button>
+      <button
+        type="button"
+        class="secondary-cta font-label"
         onclick={() => (managerOpen = true)}
       >
         <span class="material-symbols-outlined" aria-hidden="true">
@@ -290,6 +316,68 @@
 
   {#if managerOpen}
     <ProfileManager onClose={() => (managerOpen = false)} />
+  {/if}
+
+  <!--
+    CR-08 §10 Beginner tier editor modal. The
+    Beginner tier's four fields (name + target_type +
+    quality_profile + ai_enhancement_level) collect
+    via `onChange`; the persisted save round-trip
+    through `recipe_save` lands in a follow-on slice
+    that wires the modal's "Save" button to the
+    IPC. For this slice the modal renders the
+    Beginner surface as a preview so the user can
+    see the §10 progressive-disclosure shell shape.
+  -->
+  {#if beginnerEditorOpen}
+    <div
+      class="beginner-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Beginner tier recipe editor"
+      data-testid="beginner-editor-modal"
+    >
+      <button
+        type="button"
+        class="beginner-modal-backdrop"
+        aria-label="Close Beginner editor"
+        onclick={() => (beginnerEditorOpen = false)}
+      ></button>
+      <div class="beginner-modal-panel" role="document">
+        <header class="modal-header">
+          <h2 class="font-display">New Recipe: Beginner tier</h2>
+          <button
+            type="button"
+            class="modal-close font-label"
+            onclick={() => (beginnerEditorOpen = false)}
+            aria-label="Close Beginner editor"
+          >
+            Close
+          </button>
+        </header>
+        <RecipeEditor
+          initial={beginnerDraft}
+          onChange={(next) => (beginnerDraft = next)}
+        />
+        <footer class="modal-footer">
+          <p class="font-body modal-footer-note">
+            The Beginner tier captures the four essentials. Guided
+            (objectives + stage inclusion) and Expert (constraints +
+            ranges) tiers land in follow-on slices; for now, the
+            Profile Manager covers Expert-mode editing.
+          </p>
+          <button
+            type="button"
+            class="modal-save font-label"
+            disabled
+            title="Save round-trip wires to recipe_save IPC in a follow-on slice"
+            data-testid="beginner-save-btn"
+          >
+            Save Recipe (preview)
+          </button>
+        </footer>
+      </div>
+    </div>
   {/if}
 </section>
 
@@ -418,5 +506,106 @@
     border-radius: var(--radius-sm);
     padding: 8px 12px;
     color: var(--on-primary-container);
+  }
+
+  /*
+   * CR-08 §10 Beginner tier modal styles. Mirrors the
+   * modal-backdrop + modal-panel pattern from the
+   * ProfileManager modal so the user gets a consistent
+   * modal UX across tiers.
+   */
+  .beginner-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--sp-md);
+  }
+
+  .beginner-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .beginner-modal-backdrop:focus {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+  }
+
+  .beginner-modal-panel {
+    position: relative;
+    background: var(--surface-container);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-lg);
+    padding: var(--sp-lg);
+    width: min(640px, 100%);
+    max-height: 90vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-md);
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-sm);
+  }
+
+  .modal-header h2 {
+    margin: 0;
+    font-size: 1.15rem;
+  }
+
+  .modal-close {
+    background: transparent;
+    color: var(--on-surface-variant);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    padding: var(--sp-xs) var(--sp-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+
+  .modal-close:hover {
+    color: var(--on-surface);
+    border-color: var(--primary);
+  }
+
+  .modal-footer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-sm);
+    padding-top: var(--sp-sm);
+    border-top: 1px solid var(--outline-variant);
+  }
+
+  .modal-footer-note {
+    margin: 0;
+    color: var(--on-surface-variant);
+    font-size: 0.85rem;
+  }
+
+  .modal-save {
+    align-self: flex-end;
+    background: var(--primary);
+    color: var(--on-primary);
+    border: none;
+    border-radius: var(--radius-md);
+    padding: var(--sp-sm) var(--sp-md);
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+
+  .modal-save:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

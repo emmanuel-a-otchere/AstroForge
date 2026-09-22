@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+### Slice §10 Beginner tier
+
+**Scope.** Closes the Beginner tier half of CR-08 §10
+Recipe Editor by adding the `AiEnhancementLevel` enum +
+`ai_enhancement_level` field on Recipe + the new
+`RecipeEditor.svelte` Beginner-tier modal. Guided + Expert
+progressive-disclosure shells land in follow-on slices.
+
+**What.**
+
+- `crates/astroforge-core/src/recipe.rs`: new
+  `AiEnhancementLevel` enum (`off` / `conservative` /
+  `recommended` / `advanced`) with `ALL` constant +
+  `label()` + `description()` helpers. `#[default]` is
+  `Recommended`. Added `ai_enhancement_level` field to
+  the `Recipe` struct with `#[serde(default)]` so
+  legacy Recipes deserialize cleanly.
+- `crates/astroforge-core/tests/recipe_beginner_tier.rs`
+  (NEW, 9 tests): default variant is Recommended, ALL
+  has 4 variants in display order, labels + descriptions
+  are non-empty, serde round-trips through all four,
+  lowercase wire tag, legacy Recipe JSON without
+  `ai_enhancement_level` deserializes as Recommended,
+  Beginner-tier input round-trip via `to_json` +
+  `from_json_migrated`, both `quality_profile` +
+  `ai_enhancement_level` flip the §32.4 content hash.
+- `src/lib/astroforge-api.ts`: new
+  `AiEnhancementLevelFromRust` type alias; the
+  `RecipeFromRust` interface gains the optional
+  `ai_enhancement_level` field (forward-compat with
+  legacy Recipes).
+- `src/components/RecipeEditor.svelte` (NEW, ~410 LOC):
+  Beginner-tier surface with the four inputs (Recipe
+  Name + Target Type + Processing Style + AI
+  Enhancement). Processing Style binds to the existing
+  `QualityProfilePicker`. AI Enhancement uses a 4-radio
+  card grid (Off / Conservative / Recommended /
+  Advanced) with the same descriptions surfaced in the
+  audit doc. Disabled honest-stub buttons for the
+  Guided + Expert tiers render the shape of the larger
+  progressive-disclosure shell.
+- `src/components/RecipesScreen.svelte`: new
+  `New Recipe (Beginner)` header button + modal mount
+  with a backdrop button (keyboard-accessible close) +
+  a disabled `Save Recipe (preview)` button (the
+  Recipe struct already carries the new field, so the
+  save round-trip is a follow-on slice).
+
+**Audit doc flip.** §10 row: 1 ✅ / 0 ⚠️ / 0 ❌ (1 total:
+Expert only) → 2 ✅ / 0 ⚠️ / 1 ❌ (3 total: Beginner + Expert
+shipped, Guided still missing). Scorecard Total: 74 / 26 /
+20 / 120 → **75 / 26 / 21 / 122** (61% shipped, 21%
+partial, 17% missing).
+
+
 ### Slice §20 Recipe Security
 
 **Scope.** Closes CR-08 §20 Recipe Security by
@@ -60,7 +115,7 @@ round.
 **Audit doc flip.** §20 row: 0 ✅ / 1 ⚠️ / 0 ❌ →
 1 ✅ / 0 ⚠️ / 0 ❌. Total: 75 / 26 / 21 / 122 →
 **76 / 25 / 21 / 122** (62% shipped, 20% partial,
-17% missing).
+17% missing). (feat(core): CR-08 §10 Beginner tier)
 
 
 

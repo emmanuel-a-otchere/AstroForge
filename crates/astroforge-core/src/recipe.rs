@@ -66,6 +66,16 @@ pub struct Recipe {
     /// for legacy Recipes that did not carry this field.
     #[serde(default)]
     pub quality_profile: QualityProfile,
+    /// CR-08 §10: AI Enhancement Level axis (Beginner
+    /// editor tier). Defaults to `Recommended` via
+    /// `#[serde(default)]` so legacy Recipes deserialize
+    /// cleanly. The Beginner tier picker writes this
+    /// field; the Guided + Expert tiers may override it
+    /// per-stage without touching the recipe-level
+    /// value (the recipe-level value is the default
+    /// when no per-stage override is set).
+    #[serde(default)]
+    pub ai_enhancement_level: AiEnhancementLevel,
 }
 
 fn default_version() -> u32 {
@@ -167,6 +177,76 @@ impl QualityProfile {
     }
 }
 
+/// CR-08 §10: AI enhancement level axis. The Beginner
+/// editor tier surfaces this as a 4-radio picker; the
+/// Guided tier can override per-stage; the Expert tier
+/// can opt out entirely. The level is persisted on the
+/// Recipe itself so a "Recommended" Beginner pick
+/// survives a future Expert pass (no recomputation
+/// needed when the user opens the editor again).
+///
+/// `serde(default)` keeps legacy Recipes readable: the
+/// field is absent on rows that predate §10's slice,
+/// deserialization falls back to `Recommended` (the
+/// project's default AI posture).
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AiEnhancementLevel {
+    /// No AI enhancement at all. The Recipe's
+    /// `integrity.perceptual_models_used` must be false.
+    Off,
+    /// Minimal AI; the apply round skips any
+    /// "advanced" AI stages.
+    Conservative,
+    /// Project default. Honors the Recipe's
+    /// `required_models` as written.
+    #[default]
+    Recommended,
+    /// All available AI stages run; the apply round
+    /// surfaces warnings for stages that exceed the
+    /// session's resource budget.
+    Advanced,
+}
+
+impl AiEnhancementLevel {
+    /// All four variants in display order. Used by the
+    /// frontend picker.
+    pub const ALL: [AiEnhancementLevel; 4] = [
+        AiEnhancementLevel::Off,
+        AiEnhancementLevel::Conservative,
+        AiEnhancementLevel::Recommended,
+        AiEnhancementLevel::Advanced,
+    ];
+
+    /// Short display label (e.g. "Off").
+    pub fn label(self) -> &'static str {
+        match self {
+            AiEnhancementLevel::Off => "Off",
+            AiEnhancementLevel::Conservative => "Conservative",
+            AiEnhancementLevel::Recommended => "Recommended",
+            AiEnhancementLevel::Advanced => "Advanced",
+        }
+    }
+
+    /// One-line description for the picker UI.
+    pub fn description(self) -> &'static str {
+        match self {
+            AiEnhancementLevel::Off => {
+                "No AI enhancement. The Recipe runs as a pure deterministic pipeline."
+            }
+            AiEnhancementLevel::Conservative => {
+                "Minimal AI. The apply round skips advanced AI stages."
+            }
+            AiEnhancementLevel::Recommended => {
+                "Project default. Honors the Recipe's required_models as written."
+            }
+            AiEnhancementLevel::Advanced => {
+                "All AI stages run. Apply surfaces warnings when the session budget is tight."
+            }
+        }
+    }
+}
+
 impl Recipe {
     /// Build a new v2 Recipe. The current schema is always produced.
     pub fn new(name: &str, target_type: &str) -> Self {
@@ -189,6 +269,7 @@ impl Recipe {
             created_at: String::new(),
             flags: Vec::new(),
             quality_profile: QualityProfile::default(),
+            ai_enhancement_level: AiEnhancementLevel::default(),
             is_system: false,
         }
     }

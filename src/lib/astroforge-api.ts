@@ -556,6 +556,49 @@ export const recipeParameterDiff = (
     versionB,
   }) as Promise<RecipeParameterDiffFromRust>;
 
+/**
+ * CR-08 §20: Recipe security validation report.
+ * Mirrors the Rust
+ * `astroforge_core::validation::SecurityValidationReport`
+ * type. The apply round + the §20 UI panel
+ * consume this exact shape.
+ */
+export interface SecurityViolationFromRust {
+  /** Class of violation. Stable string tag:
+   * `"range"` / `"dependency"` /
+   * `"filesystem"` / `"executable"` /
+   * `"resource"`. */
+  kind: string;
+  stage_id: string | null;
+  param_key: string | null;
+  /** Human-readable description surfaced verbatim
+   * by the §20 UI panel. */
+  message: string;
+}
+
+export interface SecurityValidationReportFromRust {
+  /** Sum of every enabled stage's
+   * `resource_units`. */
+  total_resource_units: number;
+  /** All violations surfaced in this pass.
+   * Empty when the Recipe is safe. */
+  violations: SecurityViolationFromRust[];
+}
+
+/**
+ * CR-08 §20: validate a Recipe against the §20
+ * stage-spec table. Returns the full report so
+ * the §20 UI panel can render every violation in
+ * one pass.
+ */
+export const recipeSecurityValidate = (
+  profileId: string,
+  version: number,
+): Promise<SecurityValidationReportFromRust> =>
+  invoke("recipe_security_validate", { profileId, version }) as Promise<
+    SecurityValidationReportFromRust
+  >;
+
 // CR-07 §29.2a: server-side diff cache IPC surface.
 // `DiffCache` is a Rust-only in-memory cache. The
 // following 5 commands expose the cache to the JS layer.

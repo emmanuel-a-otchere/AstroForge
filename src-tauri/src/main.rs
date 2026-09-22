@@ -14,8 +14,75 @@ use astroforge_core::project::ProjectManager;
 use astroforge_core::recipe::{apply_recipe, QualityProfile, Recipe, RecipeAiDiffSummary};
 use astroforge_core::recipe_store::{RecipeStore, RecipeSummary, RecipeVersion};
 use astroforge_core::session::SessionStore;
+use astroforge_core::validation::StageSpec;
 use serde::Serialize;
 use tauri::{Manager, State};
+
+/// CR-08 §20: canonical stage spec catalog. The
+/// stage IDs are drawn from the existing
+/// `pipeline_plan_hash` ordering in
+/// `astroforge-core::recipe` (the §32.4 content
+/// hash sorts stages by `stage_id`); the spec
+/// entries document the §20 ranges + dependencies
+/// for the canonical stages that ship in §22
+/// quality catalogs.
+///
+/// `LazyLock` keeps the spec table out of the
+/// hot loop (it's built once at process start).
+/// The table mirrors the §22 quality profile
+/// catalog shape so the §20 UI panel can render
+/// the same stage list verbatim.
+static SPEC_CATALOG: std::sync::LazyLock<
+    std::collections::HashMap<String, StageSpec>,
+> = std::sync::LazyLock::new(|| {
+    use astroforge_core::validation::ParamRange;
+    let mut m: std::collections::HashMap<String, StageSpec> =
+        std::collections::HashMap::new();
+
+    // Each stage ships with:
+    // - resource_units (rough cost estimate
+    //   against MAX_RESOURCE_UNITS = 300)
+    // - per-key numeric ranges for any param
+    //   that benefits from clamping (e.g.
+    //   denoise radius, stretch bias)
+    // - dependency edges (e.g. color_calibration
+    //   depends on debayer)
+    //
+    // The specs are intentionally conservative;
+    // a follow-on slice that walks the §22
+    // quality-catalog recipes will tighten
+    // individual ranges per quality profile.
+    let mut stretch = StageSpec::cheap("stretch", 80);
+    stretch
+        .params
+        .insert("bias".into(), ParamRange::bounded(0.0, 1.0));
+    m.insert("stretch".into(), stretch);
+
+    let mut denoise = StageSpec::cheap("denoise", 60);
+    denoise
+        .params
+        .insert("radius".into(), ParamRange::bounded(0.5, 5.0));
+    m.insert("denoise".into(), denoise);
+
+    let mut sharpen = StageSpec::cheap("sharpen", 40);
+    sharpen
+        .params
+        .insert("amount".into(), ParamRange::bounded(0.0, 2.0));
+    m.insert("sharpen".into(), sharpen);
+
+    let mut color_calibration = StageSpec::cheap("color_calibration", 50);
+    color_calibration
+        .required_stages
+        .push("debayer".into());
+    m.insert("color_calibration".into(), color_calibration);
+
+    m.insert("debayer".into(), StageSpec::cheap("debayer", 30));
+    m.insert("crop".into(), StageSpec::cheap("crop", 10));
+    m.insert("cosmetic".into(), StageSpec::cheap("cosmetic", 20));
+    m.insert("curves".into(), StageSpec::cheap("curves", 30));
+    m.insert("stacking".into(), StageSpec::cheap("stacking", 100));
+    m
+});
 
 mod commands_ai_enhancement;
 mod commands_ai_models;
@@ -922,6 +989,31 @@ fn recipe_parameter_diff(
     Ok(param_diff_fn(&recipe_a, &recipe_b))
 }
 
+/// CR-08 §20: validate a Recipe against the
+/// §20 stage-spec table for the five risk classes
+/// (range, dependency, filesystem, executable,
+/// resource). Pure function on top of the
+/// `validation::validate_recipe_security` core +
+/// the canonical `SPEC_CATALOG` constant. Returns
+/// the full `SecurityValidationReport` so the
+/// §20 UI panel can render every violation in
+/// a single render. Returns CommandError if the
+/// Recipe is not found.
+#[tauri::command]
+fn recipe_security_validate(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+    version: u32,
+) -> Result<
+    astroforge_core::validation::SecurityValidationReport,
+    CommandError,
+> {
+    use astroforge_core::validation::validate_recipe_security;
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe = store.get(&profile_id, version)?;
+    Ok(validate_recipe_security(&recipe, &SPEC_CATALOG))
+}
+
 /// CR-07 §29.2a: get-or-compute a diff image.
 /// Cache lookup keyed by (version_a_id, version_b_id, mode, gain).
 /// On miss, computes via `compute_diff` + stores. The mode
@@ -1290,6 +1382,7 @@ fn main() {
             recipe_save_from_pipeline_plan,
             recipe_ai_diff_summary,
             recipe_parameter_diff,
+            recipe_security_validate,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,
             diff_cache_clear,

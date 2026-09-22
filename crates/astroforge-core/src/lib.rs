@@ -73,6 +73,7 @@ pub mod streaming_metrics;
 pub mod stretching;
 pub mod target_detection;
 pub mod telemetry;
+pub mod validation;
 
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")

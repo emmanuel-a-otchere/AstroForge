@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+### Slice §20 Recipe Security
+
+**Scope.** Closes CR-08 §20 Recipe Security by
+shipping the full 5-check validation pipeline
+(range / dependency / filesystem / executable /
+resource) plus the IPC + TS + Svelte UI panel
+that surfaces violations before the apply
+round.
+
+**What.**
+
+- `crates/astroforge-core/src/validation.rs`
+  (NEW, ~430 LOC): `ParamRange` (min/max inclusive
+  bounds; either optional), `StageSpec` (per-stage
+  spec: `params` ranges, `required_stages` deps,
+  `resource_units` cost), `SecurityViolation` +
+  `SecurityValidationReport` types, plus
+  `validate_recipe_security(&Recipe, &HashMap<String,
+  StageSpec>) -> SecurityValidationReport`: pure
+  function that runs the five checks in one pass.
+  `MAX_RESOURCE_UNITS = 300` ceiling.
+- `crates/astroforge-core/src/lib.rs`: registered
+  the new `validation` module.
+- `crates/astroforge-core/tests/recipe_security_validation.rs`
+  (NEW, 21 tests): safe Recipe is empty, out-of-range
+  below / above, dependency missing / disabled /
+  satisfied / spec-catalog absence, filesystem
+  absolute-posix / home-relative / URL-scheme /
+  legitimate-relative, executable shebang + 7 needle
+  matches / non-matching case-sensitive substring,
+  resource budget over / exactly-at-max /
+  disabled-stages excluded, composition surfaces
+  all five classes in one pass, serde round-trip,
+  half-infinite ranges.
+- `src-tauri/src/main.rs`: `SPEC_CATALOG` static
+  (`LazyLock<HashMap<String, StageSpec>>`) covering
+  stretch / denoise / sharpen / color_calibration
+  / debayer / crop / cosmetic / curves / stacking.
+  `recipe_security_validate` Tauri command (loads
+  the Recipe via `RecipeStore::get`, delegates to
+  the pure function).
+- `src/lib/astroforge-api.ts`: `SecurityViolationFromRust`
+  + `SecurityValidationReportFromRust` types +
+  `recipeSecurityValidate()` typed wrapper.
+- `src/components/SecurityValidationPanel.svelte`
+  (NEW, ~420 LOC): mounts in any Recipe surface
+  that has a (profileId, version) pair. Renders a
+  status pill (Safe / N violations / Loading /
+  Error) + a resource-budget progress bar + per-
+  class violation groups with per-row tooltips.
+  Apply button enable state mirrors
+  `report.is_safe()`. Honest disabled stub for
+  the §20 apply-flow integration (follow-on
+  slice).
+
+**Audit doc flip.** §20 row: 0 ✅ / 1 ⚠️ / 0 ❌ →
+1 ✅ / 0 ⚠️ / 0 ❌. Total: 75 / 26 / 21 / 122 →
+**76 / 25 / 21 / 122** (62% shipped, 20% partial,
+17% missing).
+
+
 
 ### Slice §13 Recipe Diff
 

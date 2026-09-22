@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+### Slice §15 Recipe Detail
+
+**Scope.** Closes the Recipe Detail half of CR-08
+§15 UI Specification by shipping `RecipeDetail.svelte`
+with the §15 spec'd layout (Title bar with version /
+Description / Target / AI / Style meta-grid /
+Processing Intent bullets / Required Models chips /
+[Apply Recipe] / [Duplicate] / [Edit] action buttons).
+
+**Frontend (TS + Svelte).** New `RecipeDetail.svelte`
+component (~530 LOC) rendering the §15 layout
+verbatim. Five load states are handled: Empty (no
+summary), Loading (IPC in flight), Ready (full
+body loaded), Missing (IPC returned null; the
+Recipe was deleted between Library render and
+click), and Error (IPC threw; user can Retry).
+
+New IPC wrapper `recipeGet(profileId, version)` in
+`src/lib/astroforge-api.ts` calls the existing
+`recipe_get` Tauri command with a return type of
+`RecipeFromRust | null` (matches the existing
+`recipe_get_for_image_version` convention).
+
+`RecipeLibrary.svelte` extended with optional
+`onSelect?: (summary: RecipeSummary) => void`
+prop; when supplied, cards become listbox-style
+click targets (Enter / Space activates, hover /
+focus outlines surface). When omitted, cards
+render as a plain `<ul>` (back-compat for any
+existing consumer).
+
+`RecipesScreen.svelte` selects the Recipe in state
+and mounts `RecipeDetail.svelte` beside the
+Library; the action handlers are intentional
+stubs that capture the (profileId, version) pair
+so the parent's wiring lands without re-plumbing
+the component.
+
+`quality_profile` field added to the
+`RecipeFromRust` TS interface (the Rust struct
+carries it; the TS contract missed it until this
+slice; legacy Recipes default to `Natural` per
+the §10.2 serde default).
+
+**Audit doc flip.** §15 row: 2 ✅ / 1 ⚠️ / 1 ❌ →
+3 ✅ / 1 ⚠️ / 0 ❌. §15 sub-heading: ⚠️ Partial
+→ ✅ Shipped (Library + Card + Detail all
+shipped). Total: 78 / 25 / 19 / 122 →
+**79 / 25 / 18 / 122** (65% shipped, 20%
+partial, 15% missing).
+
+**Honest flags.** The [Apply Recipe] / [Duplicate]
+/ [Edit] buttons emit events but the IPC wiring
+for each is a follow-on slice:
+- Apply → recipe_apply IPC + Session picker
+  (follow-on; the button is fully functional
+  surface-wise)
+- Duplicate → recipe_save with a derived name
+  (follow-on)
+- Edit → §10 Recipe Editor pre-fill (follow-on)
+
+The Project Recipes tab in the Library still
+mirrors My Recipes (the project-scoped
+distinction via `profile.project_id` is a
+follow-on slice).
+The Recipe Card's provenance status badge
+(deterministic / perceptual) is still not bound
+to the actual stage list (the summary doesn't
+carry stage payload; a follow-on slice reads
+the existing `integrity` field via
+`recipe_get` for the badge).
+
+
 ### Slice §30 ADRs
 
 **Scope.** Closes CR-08 §30 Architectural Decision

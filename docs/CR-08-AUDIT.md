@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 + §10.2 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. §10.2: ProcessingObjective enum + QualityTargets struct + per-stage AI override + RecipeEditor.svelte Guided tier section + 18 tests. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
+**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 + §10.2 + §30 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. §10.2: ProcessingObjective enum + QualityTargets struct + per-stage AI override + RecipeEditor.svelte Guided tier section + 18 tests. §30: 9 ADRs (ADR-0012 through ADR-0020) covering Recipe-as-intent, Recipe/Pipeline distinction, explicit adaptation, immutable history, provenance-as-data, AI identity, qualified reproducibility, no-arbitrary-code, human-readable provenance. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -698,9 +698,49 @@ hashes are all persisted locally.
 - Security tests (invalid stages, invalid parameters, filesystem refs,
   executable payloads, unsupported models — must all fail safely).
 
-## §30 Architectural Decision Records — ❌ Missing
+## §30 Architectural Decision Records: ✅ Shipped
 
-None of ADR-08.1 through ADR-08.9 exist as `docs/adr/`.
+ADR-08.1 through ADR-08.9 ship via PR #394:
+9 architecture decision records under
+`docs/adr/0012-cr08-recipe-represents-intent.md`
+through `0020-cr08-provenance-human-readable.md`.
+Each ADR carries: status (Accepted 2026-09-22),
+source spec gate, related ADRs, and the
+context / decision / consequences triad that
+matches the existing CR-07 ADR format. The
+canonical ADR index in `docs/adr/README.md`
+lists all 9 ADRs alongside the existing
+11 CR-07 ADRs.
+
+The 9 ADRs cover:
+
+- **ADR-0012 / ADR-08.1**: Recipe represents
+  intent (not UI actions, not implementation
+  details; per §1-§4 audit rows).
+- **ADR-0013 / ADR-08.2**: Recipe and Pipeline are
+  distinct (Recipe is durable; Pipeline is
+  dataset-specific).
+- **ADR-0014 / ADR-08.3**: Recipe adaptation is
+  explicit (the apply round discloses
+  per-adaptation reasons).
+- **ADR-0015 / ADR-08.4**: Historical execution is
+  immutable (Recipe v2 never updates prior
+  executions).
+- **ADR-0016 / ADR-08.5**: Provenance is first-
+  class data (structured `ProvenanceRecord` +
+  `ProvenanceEdge` in §21 data model).
+- **ADR-0017 / ADR-08.6**: AI identity is part of
+  provenance (`ModelUsage.model_name` +
+  `model_type` + (planned) `weights_sha256`).
+- **ADR-0018 / ADR-08.7**: Reproducibility is
+  qualified (`ExactlyReproducible` /
+  `MateriallyReproducible` / `InherentlyVariable`).
+- **ADR-0019 / ADR-08.8**: Recipes cannot execute
+  arbitrary code (the §20 validation pipeline
+  enforces executable payload rejection).
+- **ADR-0020 / ADR-08.9**: Provenance is human-
+  readable (progressive disclosure: summary by
+  default, technical detail on toggle).
 
 ## §31 Definition of Done — see §28
 
@@ -752,12 +792,12 @@ documented roadmap.
 | §27 (standalone) | 1 | 0 | 0 | 1 |
 | §28 (acceptance) | 22 | 3 | 5 | 30 |
 | §29 (test strategy) | 0 | 1 | 0 | 1 |
-| §30 (ADRs) | 0 | 0 | 1 | 1 |
+| §30 (ADRs) | 1 | 0 | 0 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **77** | **25** | **20** | **122** |
+| **Total** | **78** | **25** | **19** | **122** |
 
-**Coverage:** 63% shipped, 20% partial, 16% missing.
+**Coverage:** 64% shipped, 20% partial, 16% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -766,7 +806,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [77, 25, 20, 122]   # a + b + c == 122 per row
+sums = [78, 25, 19, 122]   # a + b + c == 122 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

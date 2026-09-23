@@ -6256,3 +6256,21 @@ milestone landed; this slice corrects the drift.
   active slice plan; reality is 1.2.0 spec, CR-02..06 shipped, and
   the active plans are CR-03 / CR-04 / CR-05 / CR-06 tranches).
   The plan now points at the M9 audit for current programme state.
+
+### Slice §10.3 save round-trip + Guided tier range validation
+
+**Scope.** Closes the two CR-08 §10 close-out items the audit flagged as "Still partial" in its §10 section: the modal's "Save Recipe" button round-trips through the `recipe_save` IPC, and the Guided tier's `QualityTargets` fields are validated against the §20 spec table at submit time.
+
+**Frontend (TS + Svelte).** `RecipesScreen.svelte` replaces the disabled "Save Recipe (preview)" stub with a wired button that fires `handleSaveBeginnerDraft`. The handler folds the combined Beginner + Guided draft into a `Recipe` shape (schema_version 2.0, all §10.2 fields populated) and persists via `saveProfile`. Success closes the modal and surfaces a "Saved as vN" banner on the screen behind; failure renders an inline `role="alert"` error in the modal footer (uses the `error-container` palette so it reads as honest failure, not a silent no-op). The button enable state derives from `canSaveBeginner` (name + target_type non-empty + not currently saving); `aria-busy` flips during the in-flight call so screen readers know the work is pending.
+
+`src/lib/profile-store.ts` extended: `Recipe` gains the §10 Beginner pick, §10.2 Guided tier fields, §15 quality profile axis, and per-stage `ai_enhancement_override`. `RustRecipe` / `RustRecipeStage` mirror the snake_case wire shape. `toRustRecipe` forwards every new field to the IPC, defaulting legacy callers to Natural / Recommended / empty / None so the round-trip is forward-compatible.
+
+**Backend (Rust).** `crates/astroforge-core/src/validation.rs` extended with a 6th validation class (Recipe-level range check for the Guided tier QualityTargets): `target_snr_db` in 20-60 dB, `target_sharpness` in 0-1, `target_background_smoothness` in 0-1. The new `RECIPE_LEVEL_STAGE_ID` sentinel (`$recipe`) anchors the violations so the UI panel can group them under a dedicated Recipe header. `recipe_level_targets_ranges()` exposes the bound table for the §20 panel to render inline. `validate_recipe_security` runs the check as Pass 4 (after the per-stage range / dependency / filesystem / executable / resource passes).
+
+**Tests.** 7 new tests in `crates/astroforge-core/tests/recipe_security_validation.rs` pin the new contract: the bound table defines three fields with the documented ranges; a Recipe with in-range targets passes; out-of-range SNR / sharpness / smoothness each produce a `recipe_level` violation anchored on the sentinel stage_id; `None` fields produce no violations (forward-compat with legacy Recipes); all three out-of-range at once surfaces three separate violations in a single pass. The pre-existing 21 tests still pass (the `None` default on legacy Recipes ensures the new check does not regress existing composition / range / dependency / filesystem / executable / resource tests).
+
+**Audit rows closed.** §10 "Save round-trip wiring" + §10 "§20 validation on Guided tier"; §22 `update_recipe` flipped to shipped via the in-place save round-trip.
+
+**Out of scope (intentional).** §10 Expert tier integration (ProfileManager into the §10 modal tabbed shell) and §10 Apply round consulting `effective_ai_enhancement_for_stage` land in the next slice; their scope is independent and would push this PR past the time budget.
+
+**Honest flags.** The save error surface is rendered via an `error-container` palette token with a fallback to `#fde8e7` / `#410002` / `#b3261e` so the visual reads as honest failure in dark + light themes even if the token is not defined. The translation `toRustRecipe` defaults `quality_profile` to `natural` even when the caller omits it; if the Rust serde default ever changes, this default needs to change in lockstep.

@@ -179,7 +179,7 @@ This is **very close to complete.** Two gaps:
 - Mask ID (could be added as `mask_id: Option<String>`)
 - Application version (could be added or queried from project metadata)
 
-## §10 Recipe Editor: ⚠️ Partial (Beginner + Guided tiers shipped; Expert progressive-disclosure still partial)
+## §10 Recipe Editor: ⚠️ Partial (Save round-trip + Guided range validation shipped refresh 3; Expert tier integration + apply round consultation still partial)
 
 The CR-08 §10 progressive-disclosure editor (Beginner / Guided / Expert)
 ships the **Beginner + Guided tiers** via PR #391 + PR #393:
@@ -258,26 +258,64 @@ ships the **Beginner + Guided tiers** via PR #391 + PR #393:
   (`ai_enhancement_override: None`); `recipe_parameter_diff`
   test fixture likewise.
 
-**Still partial:**
+**Still partial (2 of 4 close-out items shipped this tranche; 2 remaining):**
 
 - **Expert tier progressive disclosure**: the existing
   `ProfileManager.svelte` (stages table + per-stage params)
   is the Expert surface, but it doesn't yet integrate into
   the §10 modal's tabbed Beginner / Guided / Expert shell.
   Follow-on slice.
-- **Save round-trip**: the modal's `Save Recipe` button is a
-  disabled preview; wiring it to `recipe_save` is a follow-on
-  slice (the `Recipe` struct already carries the new fields,
-  so the wire-shape change is the small piece left).
-- **§20 validation on Guided tier**: the §20 SPEC_CATALOG
-  doesn't yet enforce ranges on the Guided tier's new
-  fields (`target_snr_db` 20-60 dB, `target_sharpness` 0-1,
-  `target_background_smoothness` 0-1). Follow-on slice
-  that adds Guided-tier ranges to the spec table.
 - **Apply round integration**: the `effective_ai_enhancement_for_stage`
   helper resolves the per-stage override at runtime; the
   apply round is not yet wired to consult it. Follow-on
   slice.
+
+**Shipped this tranche (refresh 3):**
+
+- **Save round-trip wiring**: the modal's `Save Recipe`
+  button now fires `handleSaveBeginnerDraft`, which folds
+  the combined Beginner + Guided draft into a `Recipe`
+  shape (schema_version 2.0) and persists via
+  `saveProfile` -> `recipe_save` IPC. Success closes the
+  modal + surfaces a "Saved as vN" banner on the screen
+  behind; failure renders an inline `role="alert"` error
+  in the modal footer (uses the `error-container` palette
+  so it reads as honest failure, not a silent no-op).
+  Button enable state derives from `canSaveBeginner`
+  (name + target_type non-empty + not currently saving);
+  `aria-busy` flips during the in-flight call so screen
+  readers know the work is pending. Closes the §10 ❌
+  "Save round-trip" item + the §22 ⚠️ `update_recipe`
+  partial flip.
+- **§20 validation on Guided tier**: the validation
+  pipeline gained a 6th check class (Pass 4 in
+  `validate_recipe_security`) that enforces the
+  Guided tier's `QualityTargets` ranges:
+  - `target_snr_db` ∈ 20-60 dB
+  - `target_sharpness` ∈ 0-1
+  - `target_background_smoothness` ∈ 0-1
+  The new `RECIPE_LEVEL_STAGE_ID` sentinel
+  (`"$recipe"`) anchors the violations so the UI
+  panel can group them under a dedicated "Recipe"
+  header. `recipe_level_targets_ranges()` exposes
+  the bound table for the §20 panel to render
+  inline. 7 new tests pin the contract:
+  - the bound table defines three fields with the
+    documented ranges,
+  - a Recipe with in-range targets passes,
+  - out-of-range SNR / sharpness / smoothness each
+    produce a `recipe_level` violation anchored on
+    the sentinel stage_id,
+  - `None` fields produce no violations
+    (forward-compat with legacy Recipes),
+  - all three out-of-range at once surfaces three
+    separate violations in a single pass.
+  The pre-existing 21 tests still pass (the `None`
+  default on legacy Recipes ensures the new check
+  does not regress the existing composition /
+  range / dependency / filesystem / executable /
+  resource tests). Closes the §10 ⚠️ "§20
+  validation on Guided tier" item.
 
 | §10 tier | Existing |
 |---|---|

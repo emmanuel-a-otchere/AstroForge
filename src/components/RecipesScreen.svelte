@@ -19,7 +19,9 @@
     loadProfiles,
     exportProfile,
     importProfile,
+    saveProfile,
     profileStore,
+    type Recipe,
     type RecipeSummary,
   } from "../lib/profile-store";
   import ProfileManager from "./ProfileManager.svelte";
@@ -89,6 +91,30 @@
   let importExportStatus: string | null = $state(null);
   let importExportError: string | null = $state(null);
   let importExportBusy = $state(false);
+
+  // CR-08 §10 save round-trip: status + error
+  // surface for the Save Recipe button. Success
+  // is reported via the importExportStatus banner
+  // (the modal closes on success so the user sees
+  // the "Saved as v1" message on the screen
+  // behind). The error stays inside the modal
+  // footer so the user can retry without losing
+  // their draft.
+  let saveError: string | null = $state(null);
+  let saveBusy = $state(false);
+
+  // CR-08 §10: derive whether the Beginner modal's
+  // save button is enabled. Both the Beginner tier
+  // (Recipe Name + Target Type) must be non-empty
+  // AND no save is currently in flight. The Guided
+  // tier fields are optional; the §20 validation
+  // pipeline catches out-of-range QualityTargets
+  // values at submit time.
+  let canSaveBeginner: boolean = $derived(
+    !saveBusy &&
+      beginnerDraft.name.trim().length > 0 &&
+      beginnerDraft.targetType.trim().length > 0,
+  );
 
   function reportStatus(msg: string): void {
     importExportStatus = msg;
@@ -259,6 +285,68 @@
   $effect(() => {
     void loadProfiles();
   });
+
+  // CR-08 §10 save round-trip: persist the
+  // Beginner + Guided tier drafts as a new Recipe.
+  // The translation folds the combined draft into
+  // a `Recipe` shape the `recipe_save` IPC accepts,
+  // sets `version = 0` so the Rust side computes
+  // the next version, and stamps an empty
+  // `created_at` (the Rust layer fills the wall
+  // clock).
+  async function handleSaveBeginnerDraft(): Promise<void> {
+    if (!canSaveBeginner) return;
+    saveBusy = true;
+    saveError = null;
+    try {
+      // Translate Beginner + Guided draft into a
+      // Recipe. The Recipe schema version is "2.0"
+      // (matches the §10.2 schema). Stages start
+      // empty: the Expert tier (ProfileManager) is
+      // the source of truth for the stage list;
+      // the Beginner modal creates a metadata-only
+      // shell that the user populates from the
+      // Expert surface afterwards.
+      const recipe: Recipe = {
+        schemaVersion: "2.0",
+        name: beginnerDraft.name.trim(),
+        description: "",
+        targetType: beginnerDraft.targetType.trim(),
+        stages: [],
+        requiredModels: [],
+        integrity: {
+          perceptualModelsUsed: false,
+          deterministicModelsUsed: false,
+          seedRecorded: false,
+          models: [],
+        },
+        version: 0,
+        parentVersion: null,
+        branch: "main",
+        createdAt: "",
+        flags: [],
+        qualityProfile: beginnerDraft.qualityProfile,
+        aiEnhancementLevel: beginnerDraft.aiEnhancementLevel,
+        processingObjectives: guidedDraft.processingObjectives,
+        qualityTargets: guidedDraft.qualityTargets,
+        optionalOperations: guidedDraft.optionalOperations,
+      };
+      const summary = await saveProfile(recipe);
+      // Success: surface "Saved as vN" on the
+      // screen banner and close the modal. The
+      // user's draft is reset by re-deriving the
+      // empty Beginner defaults; the Library
+      // re-renders via the profileStore subscription.
+      reportStatus(
+        `Saved ${summary.name} as v${summary.version}.`,
+      );
+      beginnerEditorOpen = false;
+    } catch (err) {
+      saveError = err instanceof Error ? err.message : String(err);
+    } finally {
+      saveBusy = false;
+    }
+  }
 </script>
 
 <section class="recipes-screen" aria-label="Recipes">
@@ -386,12 +474,15 @@
     CR-08 §10 Beginner tier editor modal. The
     Beginner tier's four fields (name + target_type +
     quality_profile + ai_enhancement_level) collect
-    via `onChange`; the persisted save round-trip
-    through `recipe_save` lands in a follow-on slice
-    that wires the modal's "Save" button to the
-    IPC. For this slice the modal renders the
-    Beginner surface as a preview so the user can
-    see the §10 progressive-disclosure shell shape.
+    via `onChange`; the modal's "Save Recipe"
+    button fires `handleSaveBeginnerDraft` which
+    folds the Beginner + Guided drafts into a
+    Recipe and persists via the `recipe_save` IPC
+    (synchronous shape via `saveProfile`).
+    Success closes the modal + surfaces a
+    "Saved as vN" status banner on the screen
+    behind. Failure surfaces inline in the modal
+    footer.
   -->
   {#if beginnerEditorOpen}
     <div
@@ -448,14 +539,24 @@
             quality targets + optional operations. Expert is
             the Profile Manager.
           </p>
+          {#if saveError}
+            <p
+              class="font-body modal-save-error"
+              role="alert"
+              data-testid="beginner-save-error"
+            >
+              {saveError}
+            </p>
+          {/if}
           <button
             type="button"
             class="modal-save font-label"
-            disabled
-            title="Save round-trip wires to recipe_save IPC in a follow-on slice"
+            disabled={!canSaveBeginner}
+            onclick={handleSaveBeginnerDraft}
+            aria-busy={saveBusy}
             data-testid="beginner-save-btn"
           >
-            Save Recipe (preview)
+            {saveBusy ? "Saving…" : "Save Recipe"}
           </button>
         </footer>
       </div>
@@ -689,5 +790,15 @@
   .modal-save:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .modal-save-error {
+    margin: 0;
+    padding: var(--sp-sm) var(--sp-md);
+    background: var(--error-container, #fde8e7);
+    color: var(--on-error-container, #410002);
+    border-left: 3px solid var(--error, #b3261e);
+    border-radius: var(--radius-sm, 4px);
+    font-size: 0.85rem;
   }
 </style>

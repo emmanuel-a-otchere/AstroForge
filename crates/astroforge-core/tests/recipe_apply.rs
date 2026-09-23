@@ -176,3 +176,124 @@ fn round_trip_save_get_apply_preserves_pipeline_shape() {
         }
     }
 }
+
+// ─── CR-08 §10.4 apply round integration tests ───
+//
+// The apply round now consults
+// `effective_ai_enhancement_for_stage(stage_id)` and
+// stamps the resolved AI Enhancement Level into the
+// returned params hash under the `_ai_enhancement_level`
+// key. The IPC serializes this key alongside the
+// user-set params so the apply round can drive per-stage
+// AI posture without a second round-trip.
+//
+// The contract: every enabled stage's returned params
+// hash contains the resolved level as a string label
+// ("Off" / "Conservative" / "Recommended" / "Advanced").
+// The resolve order is per-stage override > recipe-level
+// default; unknown stage IDs fall back to recipe-level.
+
+use astroforge_core::recipe::AiEnhancementLevel;
+
+fn recipe_with_ai_level(name: &str, target: &str, level: AiEnhancementLevel) -> Recipe {
+    let mut r = sample_recipe(name, target);
+    r.ai_enhancement_level = level;
+    r
+}
+
+#[test]
+fn apply_returns_recipe_level_ai_enhancement_for_each_enabled_stage() {
+    // Recipe-level ai_enhancement_level = Recommended
+    // (the serde default). Every enabled stage's
+    // returned params hash carries
+    // _ai_enhancement_level = "Recommended" because
+    // there are no per-stage overrides.
+    let recipe = recipe_with_ai_level("m42-natural", "stretch", AiEnhancementLevel::Recommended);
+    let stages = apply_recipe(&recipe, &["m42-blur-v2".to_string()]).expect("apply");
+
+    assert!(!stages.is_empty());
+    for (stage_id, params) in &stages {
+        let v = params
+            .get("_ai_enhancement_level")
+            .unwrap_or_else(|| panic!("stage {stage_id} must carry resolved AI level"));
+        let s = v
+            .as_str()
+            .unwrap_or_else(|| panic!("AI level must serialize as string"));
+        assert_eq!(
+            s, "Recommended",
+            "recipe-level default must surface as Recommended for stage {stage_id}"
+        );
+    }
+}
+
+#[test]
+fn apply_returns_per_stage_override_when_set() {
+    // Per-stage override wins over recipe-level.
+    // Recipe level = Conservative; stretch override
+    // = Advanced; crop has no override (falls back to
+    // Conservative).
+    let mut recipe = recipe_with_ai_level("m42-mix", "stretch", AiEnhancementLevel::Conservative);
+    for stage in &mut recipe.stages {
+        if stage.stage_id == "stretch" {
+            stage.ai_enhancement_override = Some(AiEnhancementLevel::Advanced);
+        }
+    }
+    let stages = apply_recipe(&recipe, &["m42-blur-v2".to_string()]).expect("apply");
+
+    let by_id: HashMap<&str, &str> = stages
+        .iter()
+        .map(|(id, params)| {
+            (
+                id.as_str(),
+                params
+                    .get("_ai_enhancement_level")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
+            )
+        })
+        .collect();
+    assert_eq!(by_id.get("stretch").copied(), Some("Advanced"));
+    assert_eq!(by_id.get("crop").copied(), Some("Conservative"));
+}
+
+#[test]
+fn apply_off_ai_level_serializes_as_off_label() {
+    let recipe = recipe_with_ai_level("deterministic", "stretch", AiEnhancementLevel::Off);
+    let stages = apply_recipe(&recipe, &["m42-blur-v2".to_string()]).expect("apply");
+    for (stage_id, params) in &stages {
+        assert_eq!(
+            params.get("_ai_enhancement_level").and_then(|v| v.as_str()),
+            Some("Off"),
+            "stage {stage_id} must surface as Off"
+        );
+    }
+}
+
+#[test]
+fn apply_preserves_user_set_params_alongside_resolved_level() {
+    // Source stage params stay intact (the
+    // _ai_enhancement_level key is additive, not
+    // destructive). The round-trip contract still
+    // holds: every source key is present in the
+    // returned hash.
+    let recipe = recipe_with_ai_level("m42-natural", "stretch", AiEnhancementLevel::Advanced);
+    let stages = apply_recipe(&recipe, &["m42-blur-v2".to_string()]).expect("apply");
+
+    for (stage_id, got_params) in &stages {
+        let source_stage = recipe
+            .stages
+            .iter()
+            .find(|s| &s.stage_id == stage_id)
+            .expect("source stage present");
+        for k in source_stage.params.keys() {
+            assert!(
+                got_params.contains_key(k),
+                "apply preserves source key {k:?} for stage {stage_id}"
+            );
+        }
+        assert!(
+            got_params.contains_key("_ai_enhancement_level"),
+            "apply adds resolved AI level for stage {stage_id}"
+        );
+    }
+}

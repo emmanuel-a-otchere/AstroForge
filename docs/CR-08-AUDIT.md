@@ -179,7 +179,7 @@ This is **very close to complete.** Two gaps:
 - Mask ID (could be added as `mask_id: Option<String>`)
 - Application version (could be added or queried from project metadata)
 
-## §10 Recipe Editor: ⚠️ Partial (Save round-trip + Guided range validation shipped refresh 3; Expert tier integration + apply round consultation still partial)
+## §10 Recipe Editor: ⚠️ Partial (Save round-trip + Guided range validation shipped refresh 3; Expert tier integration + apply round consultation shipped refresh 4; §10 modal close-out now complete)
 
 The CR-08 §10 progressive-disclosure editor (Beginner / Guided / Expert)
 ships the **Beginner + Guided tiers** via PR #391 + PR #393:
@@ -258,19 +258,47 @@ ships the **Beginner + Guided tiers** via PR #391 + PR #393:
   (`ai_enhancement_override: None`); `recipe_parameter_diff`
   test fixture likewise.
 
-**Still partial (2 of 4 close-out items shipped this tranche; 2 remaining):**
+**Still partial (the §10 modal close-out is complete; 2 of 4 close-out items shipped across refresh 3 + 4; 0 remaining):**
 
-- **Expert tier progressive disclosure**: the existing
-  `ProfileManager.svelte` (stages table + per-stage params)
-  is the Expert surface, but it doesn't yet integrate into
-  the §10 modal's tabbed Beginner / Guided / Expert shell.
-  Follow-on slice.
-- **Apply round integration**: the `effective_ai_enhancement_for_stage`
-  helper resolves the per-stage override at runtime; the
-  apply round is not yet wired to consult it. Follow-on
-  slice.
+- **Expert tier progressive disclosure**: shipped refresh 4.
+  The `RecipeEditor.svelte` modal grew a third
+  collapsible section that renders a read-only
+  summary table of the Recipe's stages (per-row
+  enabled pill + AI override preview) plus a
+  "Open in Profile Manager" button. The button
+  is wired via the new optional `onOpenExpert`
+  callback; the parent (`RecipesScreen.svelte`)
+  closes the Beginner modal and opens the
+  existing ProfileManager modal so the user
+  edits stages + params via the source-of-truth
+  surface. Closes the §10 ❌ "Expert tier
+  progressive disclosure" item.
+- **Apply round integration**: shipped refresh
+  4. `crates/astroforge-core/src/recipe.rs::apply_recipe`
+  now consults
+  `effective_ai_enhancement_for_stage(stage_id)`
+  for each enabled stage and stamps the resolved
+  AI Enhancement Level into the returned params
+  hash under the `_ai_enhancement_level` key
+  (snake_case string label like "Off" /
+  "Conservative" / "Recommended" / "Advanced").
+  The helper resolves per-stage override >
+  recipe-level default; unknown stage IDs fall
+  back to recipe-level. 4 new tests pin the
+  contract (recipe-level default, per-stage
+  override wins, "Off" label, additive key
+  preserves user-set params). Closes the §10
+  ⚠️ "Apply round integration" item.
 
-**Shipped this tranche (refresh 3):**
+**Shipped this tranche (refresh 4):**
+
+- **Expert tier integration**: see the "Still
+  partial (the §10 modal close-out is complete)"
+  block above.
+- **Apply round integration**: see the same
+  block.
+
+**Shipped earlier (refresh 3):**
 
 - **Save round-trip wiring**: the modal's `Save Recipe`
   button now fires `handleSaveBeginnerDraft`, which folds
@@ -321,7 +349,7 @@ ships the **Beginner + Guided tiers** via PR #391 + PR #393:
 |---|---|
 | Beginner (name + target + style + AI level) | ✅ |
 | Guided (objectives + stages + AI preferences + quality targets) | ✅ |
-| Expert (constraints + ranges + execution + model selection) | ✅ Stages table |
+| Expert (constraints + ranges + execution + model selection) | ✅ Stages table + summary handoff to Profile Manager |
 
 ## §11 Recipe Application Flow — ⚠️ Partial
 

@@ -108,9 +108,24 @@
     /** Optional disabled state (e.g. system Recipe
      * protection flips this on). */
     disabled?: boolean;
+    /** CR-08 §10.4 Expert tier: optional callback
+     * fired when the user clicks "Open in Profile
+     * Manager". The parent typically opens the
+     * existing ProfileManager modal scoped to the
+     * current Recipe's (profileId, version)
+     * pair. Optional so the editor renders the
+     * Expert section as a read-only summary when
+     * no ProfileManager handle is available. */
+    onOpenExpert?: () => void;
   }
 
-  let { initial, stageIds, onChange, disabled = false }: Props = $props();
+  let {
+    initial,
+    stageIds,
+    onChange,
+    disabled = false,
+    onOpenExpert,
+  }: Props = $props();
 
   // §10 Beginner + Guided tier local form state.
   // The parent owns the durable copy; the
@@ -157,6 +172,16 @@
   // can collapse it by passing `initial` with
   // collapsed = true in a follow-on slice.
   let guidedOpen = $state(true);
+
+  // CR-08 §10.4 Expert tier: collapsible state.
+  // Open by default so the summary table is
+  // visible; the user can collapse it like the
+  // Guided tier. The Expert section never owns
+  // durable form state (the ProfileManager is the
+  // source of truth for per-stage params +
+  // constraints), so the section is purely
+  // navigational + summary.
+  let expertOpen = $state(true);
 
   // Fire `onChange` whenever any field changes.
   // The parent's callback owns debouncing +
@@ -569,23 +594,95 @@
   {/if}
 </section>
 
-<section class="tier-future" aria-label="Recipe editor: future tiers">
-  <button
-    type="button"
-    class="tier-future-cta font-label"
-    disabled
-    title="Expert tier is the existing ProfileManager (stages table + per-stage params); wired in a follow-on slice"
-    data-testid="beginner-expert-stub"
-  >
-    <span class="material-symbols-outlined" aria-hidden="true">code</span>
-    Expert tier: see Profile Manager
-  </button>
+<section class="expert-tier" aria-label="Recipe editor: Expert tier">
+  <header class="tier-header">
+    <button
+      type="button"
+      class="tier-toggle font-label"
+      aria-expanded={expertOpen}
+      aria-controls="expert-tier-body"
+      onclick={() => (expertOpen = !expertOpen)}
+      data-testid="expert-tier-toggle"
+    >
+      <span class="material-symbols-outlined" aria-hidden="true">
+        {expertOpen ? "expand_less" : "expand_more"}
+      </span>
+      Expert
+      <span class="tier-hint font-body">
+        {expertOpen
+          ? "click to collapse"
+          : "stages + params + constraints + masks + reproducibility"}
+      </span>
+    </button>
+    <p class="font-body tier-subtitle">
+      Stages, per-stage parameters, execution constraints, masks, and
+      reproducibility controls live in the Profile Manager (the source of
+      truth for the Expert tier). This section summarises what's currently
+      in the Recipe and offers a one-click handoff to the Profile Manager.
+    </p>
+  </header>
+
+  {#if expertOpen}
+    <div class="expert-body" id="expert-tier-body" data-testid="expert-tier-body">
+      <table class="expert-summary" aria-label="Recipe stages summary">
+        <thead>
+          <tr>
+            <th class="font-label" scope="col">Stage</th>
+            <th class="font-label" scope="col">Enabled</th>
+            <th class="font-label" scope="col">AI override</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#if stageIds.length === 0}
+            <tr>
+              <td colspan="3" class="font-body expert-empty">
+                No stages yet. The Profile Manager is the source of truth
+                for the stage list.
+              </td>
+            </tr>
+          {:else}
+            {#each stageIds as stageId (stageId)}
+              <tr>
+                <td class="font-label expert-stage-id">{stageId}</td>
+                <td>
+                  <span
+                    class="expert-flag"
+                    class:enabled={stageEnabled[stageId] !== false}
+                    class:disabled={stageEnabled[stageId] === false}
+                    data-testid="expert-enabled-{stageId}"
+                  >
+                    {stageEnabled[stageId] === false ? "off" : "on"}
+                  </span>
+                </td>
+                <td class="font-body">
+                  {stageOverrides[stageId] ?? "inherit"}
+                </td>
+              </tr>
+            {/each}
+          {/if}
+        </tbody>
+      </table>
+
+      <button
+        type="button"
+        class="expert-open font-label"
+        disabled={disabled || !onOpenExpert}
+        onclick={() => onOpenExpert?.()}
+        title={onOpenExpert
+          ? "Open this Recipe in the Profile Manager"
+          : "Profile Manager integration is wired but unavailable in this context"}
+        data-testid="expert-open-pm"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+        Open in Profile Manager
+      </button>
+    </div>
+  {/if}
 </section>
 
 <style>
   .beginner-tier,
-  .guided-tier,
-  .tier-future {
+  .guided-tier {
     display: flex;
     flex-direction: column;
     gap: var(--sp-md);
@@ -895,22 +992,90 @@
     outline-offset: 2px;
   }
 
-  .tier-future {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: var(--sp-sm);
+  /* CR-08 §10.4 Expert tier styles. */
+  .expert-tier {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-md);
+    padding: var(--sp-md);
+    background: var(--surface-container-low);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
   }
 
-  .tier-future-cta {
+  .expert-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-md);
+  }
+
+  .expert-summary {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  .expert-summary th,
+  .expert-summary td {
+    padding: var(--sp-xs) var(--sp-sm);
+    text-align: left;
+    border-bottom: 1px solid var(--outline-variant);
+  }
+
+  .expert-summary th {
+    color: var(--on-surface-variant);
+    font-weight: 600;
+  }
+
+  .expert-stage-id {
+    font-family: var(--font-mono, monospace);
+  }
+
+  .expert-empty {
+    color: var(--on-surface-variant);
+    font-style: italic;
+    text-align: center;
+    padding: var(--sp-md);
+  }
+
+  .expert-flag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .expert-flag.enabled {
+    background: var(--primary-container, #d8e3ff);
+    color: var(--on-primary-container, #001257);
+  }
+
+  .expert-flag.disabled {
+    background: var(--surface-container, #ece6f0);
+    color: var(--on-surface-variant, #49454f);
+  }
+
+  .expert-open {
+    align-self: flex-start;
     display: inline-flex;
     align-items: center;
     gap: var(--sp-xs);
-    background: var(--surface-container);
-    border: 1px dashed var(--outline-variant);
-    color: var(--on-surface-variant);
+    background: var(--primary);
+    color: var(--on-primary);
+    border: none;
     border-radius: var(--radius-md);
-    padding: var(--sp-xs) var(--sp-sm);
+    padding: var(--sp-sm) var(--sp-md);
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+
+  .expert-open:disabled {
+    opacity: 0.5;
     cursor: not-allowed;
-    font-size: 0.85rem;
+  }
+
+  .expert-open:hover:not(:disabled) {
+    filter: brightness(0.92);
   }
 </style>

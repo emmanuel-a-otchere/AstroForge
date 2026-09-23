@@ -6274,3 +6274,32 @@ milestone landed; this slice corrects the drift.
 **Out of scope (intentional).** §10 Expert tier integration (ProfileManager into the §10 modal tabbed shell) and §10 Apply round consulting `effective_ai_enhancement_for_stage` land in the next slice; their scope is independent and would push this PR past the time budget.
 
 **Honest flags.** The save error surface is rendered via an `error-container` palette token with a fallback to `#fde8e7` / `#410002` / `#b3261e` so the visual reads as honest failure in dark + light themes even if the token is not defined. The translation `toRustRecipe` defaults `quality_profile` to `natural` even when the caller omits it; if the Rust serde default ever changes, this default needs to change in lockstep.
+
+### Slice §10.4 Expert tier integration + apply round consultation
+
+**Scope.** Closes the 2 remaining §10 close-out items the audit flagged in the §10 "Still partial" call-out: the Expert tier mounts into the §10 modal's tabbed Beginner/Guided/Expert shell, and the apply round consults `effective_ai_enhancement_for_stage` so the returned params carry the resolved per-stage AI Enhancement Level.
+
+**Frontend (TS + Svelte).** `RecipeEditor.svelte` grew a third collapsible section (mirrors the Guided pattern): the Expert tier renders a read-only summary table of the Recipe's stages (per-row enabled pill + AI override preview) plus a "Open in Profile Manager" button. The button is disabled when no `onOpenExpert` callback is wired (forward-compat for contexts where the ProfileManager handle is unavailable). When the callback IS wired, it closes the Beginner modal and opens the existing `ProfileManager` modal so the user edits the Recipe via the source-of-truth surface (no ProfileManager internals duplicated in the editor).
+
+The disabled stub section (`<section class="tier-future">` + button) is removed; the new `.expert-tier` section replaces it 1:1. The `.tier-future` and `.tier-future-cta` CSS selectors are removed too (svelte-check would otherwise flag them as unused).
+
+`src/components/RecipesScreen.svelte` wires the `onOpenExpert` callback: it closes the Beginner modal (preserves the user's draft in component state) and opens the existing ProfileManager modal. No state schema changes — both modals already exist; the §10 modal just hands off control.
+
+**Backend (Rust).** `crates/astroforge-core/src/recipe.rs::apply_recipe` now consults `effective_ai_enhancement_for_stage(stage_id)` for each enabled stage and stamps the resolved AI Enhancement Level into the returned params hash under the `_ai_enhancement_level` key (snake_case string label like "Off" / "Conservative" / "Recommended" / "Advanced"). The helper resolves per-stage override > recipe-level default; unknown stage IDs fall back to recipe-level. The underscore prefix marks the key as metadata (not a pipeline parameter); the IPC serializes it alongside the user-set params so the apply round can drive per-stage AI posture without a second round-trip.
+
+**Tests.** 4 new tests in `crates/astroforge-core/tests/recipe_apply.rs` pin the new contract:
+- recipe-level default surfaces for every enabled stage when no overrides are set
+- per-stage override wins over recipe-level (stretch override = Advanced beats recipe-level Conservative; crop with no override falls back to Conservative)
+- "Off" AI level serializes as "Off" label
+- user-set params are preserved alongside the resolved level (additive, not destructive)
+
+10 apply tests pass total (was 6, +4 new). The pre-existing `round_trip_save_get_apply_preserves_pipeline_shape` test still passes because its assertion only checks that source keys are present in the returned hash (additive keys don't break the contract).
+
+**Audit rows closed.** §10 ❌ Expert tier progressive disclosure + §10 ⚠️ Apply round integration (both still-partial items from refresh 3).
+
+**Out of scope (intentional).** The Expert tier summary table is read-only — full CRUD on stages/params lives in the existing ProfileManager modal. A future slice could fold ProfileManager's left rail + right pane INTO the §10 modal as a true tabbed shell; the current slice picks the smaller "navigate to ProfileManager" handoff to keep the PR focused.
+
+**Honest flags.**
+- The Expert tier summary reads `stageEnabled[stageId] !== false` (not `=== true`) so stages missing from the override map default to enabled — matches the Guided tier's toggle semantics.
+- The `_ai_enhancement_level` key carries a string label, not the enum variant. The string label round-trips cleanly through the JSON wire format; consumers that want the enum can `serde_json::from_value` it against the `AiEnhancementLevel` enum on the TS side.
+- The Expert tier section uses `material-symbols-outlined` for the icon (the existing tier-future CTA used the same icon family).

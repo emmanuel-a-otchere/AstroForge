@@ -1044,6 +1044,38 @@ fn recipe_get_provenance(
     Ok(provenance_fn(&profile_id, &recipe))
 }
 
+/// CR-08 §22 round 2 / Slice A: read-only preview of
+/// a Recipe. The read-only sibling of `recipe_apply`
+/// (which mutates `last_used_at` and filters to
+/// enabled stages); `preview_recipe` returns the full
+/// preview surface (all stages + metadata +
+/// provenance + applicability + warnings) even when
+/// the Recipe is not applicable so the UI can show
+/// WHY without forcing a fix-or-abort loop. The
+/// `available_models` argument is optional; when
+/// empty (the common preview-against-fleet case), the
+/// function still returns the Recipe but the
+/// `applicability` field may flag `MissingModels`.
+/// Returns CommandError if the Recipe is not found.
+#[tauri::command]
+fn recipe_preview(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+    version: u32,
+    available_models: Option<Vec<String>>,
+) -> Result<
+    astroforge_core::recipe::RecipePreviewResponse,
+    CommandError,
+> {
+    use astroforge_core::recipe::preview_recipe as preview_fn;
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe = store.get(&profile_id, version)?;
+    let models_slice: &[String] = available_models
+        .as_deref()
+        .unwrap_or(&[]);
+    Ok(preview_fn(&profile_id, &recipe, models_slice))
+}
+
 /// CR-08 §20: validate a Recipe against the
 /// §20 stage-spec table for the five risk classes
 /// (range, dependency, filesystem, executable,
@@ -1439,6 +1471,7 @@ fn main() {
             recipe_parameter_diff,
             recipe_compare_versions,
             recipe_get_provenance,
+            recipe_preview,
             recipe_security_validate,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,

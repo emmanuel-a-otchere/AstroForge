@@ -706,7 +706,7 @@ The full §20 security-validation pipeline ships via PR #392:
 | `recipe_application` | ⚠️ Partial — `apply_recipe()` function exists |
 | `recipe_adaptation` | ✅ `AdaptiveParameterSet::reason: String` |
 
-## §22 Semantic API — ⚠️ Partial (compare_recipe_versions + get_recipe_provenance shipped refresh 5; 4 ❌ rows remain for round 2)
+## §22 Semantic API — ⚠️ Partial (compare_recipe_versions + get_recipe_provenance shipped refresh 5; preview_recipe shipped refresh 6; 3 ❌ rows remain for round 2 slices B–D)
 
 `src-tauri/src/main.rs` registers the following Recipe IPCs
 (consumed via `src/lib/profile-store.ts`):
@@ -723,7 +723,7 @@ The full §20 security-validation pipeline ships via PR #392:
 | `validate_recipe` | ✅ `recipe_get_for_image_version` + `validate_compatibility` |
 | `check_recipe_applicability` | ❌. Returns `ValidationResult::{Compatible, MissingModels, IncompatibleVersion}`, not the full §12 applicability matrix |
 | `adapt_recipe` | ⚠️ Partial. `derive_adaptive_parameters` is engine-side only; no IPC |
-| `preview_recipe` | ❌ |
+| `preview_recipe` | ✅ `recipe_preview(profileId, version, availableModels?)` (CR-08 §22 round 2 / Slice A); Returns a `RecipePreviewResponse` (metadata + provenance + applicability + resolved_stages + warnings) without the `last_used_at` side effect. Walks ALL stages (enabled + disabled) so the UI can show skipped stages; surfaces human-readable advisories for missing-models / schema-mismatch / disabled stages / Off AI levels |
 | `apply_recipe` | ✅ `recipe_apply(profileId, version, availableModels?)` (CR-08 §22.3). Returns enabled `(stage_id, params)` pairs in Recipe order; runs the schema-version guard + missing-models compatibility check |
 | `save_pipeline_as_recipe` | ✅ `recipe_save_from_pipeline_plan(plan_id, name, targetType?)` (CR-08 §14); Pure-function `recipe_from_pipeline_plan` builds a Recipe from a `PipelinePlan`'s stages + parameters_json, then persists via `RecipeStore::save` |
 | `save_processing_as_recipe` | ❌ |
@@ -743,12 +743,16 @@ to the IPC layer (consumed by the §32 test suite).
 - **`compare_recipe_versions` IPC**: `recipe_compare_versions(profileIdA, versionA, profileIdB, versionB) -> RecipeComparison`. Folds `recipe_ai_diff_summary` + `recipe_parameter_diff` into a single response with a `identical` flag (true iff parameter_diff.identical AND no hash / AI-classification / required-models divergence) + `lineage_summary` header line. The RecipeDiffPanel consumer continues to use the existing two-IPC pattern; the new IPC is additive (a follow-on UI slice can opt in).
 - **`get_recipe_provenance` IPC**: `recipe_get_provenance(profileId, version) -> RecipeProvenance`. Returns the Recipe's identity + lineage_steps + perceptual_models + required_models + quality_profile + pipeline_plan_hash + is_system. Distinct from `ProvenancePanel.svelte` (which walks the image's `recipe_id` chain); this surface is Recipe-only. The IPC computes `profile_id` from `name + target_type` via `RecipeStore::profile_id_for` and forwards it to `recipe_provenance` so the core function stays pure.
 
-**Still partial (round 2 candidates — 4 ❌ rows remain):**
+**Still partial (round 2 candidates — 3 ❌ rows remain after Slice A):**
 
 - `save_processing_as_recipe`: needs a `StageRunRecord` query against a `PipelineRun` ID + Recipe assembly logic. Pure-Rust + IPC; not a thin wrapper.
-- `preview_recipe`: distinct from `recipe_apply`; needs a separate response shape that surfaces metadata + resolved pipeline.
 - `check_recipe_applicability`: full §12 6-variant matrix (current `validate_compatibility` returns the 3-variant enum).
 - `get_reproducibility_report`: needs `ReproducibilityRecord` aggregator (CR-06 §6 work).
+
+**Shipped this tranche (refresh 6 — §22 round 2 / Slice A):**
+
+- **`preview_recipe` IPC**: `recipe_preview(profileId, version, availableModels?) -> RecipePreviewResponse`. The read-only sibling of `recipe_apply` (no `mark_last_used_at` side effect + surfaces ALL stages including disabled ones + returns the full preview surface even when the Recipe is not applicable). Walks each stage's `effective_ai_enhancement_for_stage` to lift the resolved level to a dedicated `resolved_ai_enhancement_level` field; surfaces human-readable advisories for missing-models / schema-mismatch / disabled stages / Off AI levels.
+- `ValidationResult` now derives `Serialize` + `Deserialize` so the preview can carry the applicability result through the IPC layer without a separate tag struct.
 
 ## §23 Events — ⚠️ Partial
 

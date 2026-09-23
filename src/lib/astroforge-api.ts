@@ -636,6 +636,57 @@ export const recipeGetProvenance = (
     version,
   }) as Promise<RecipeProvenanceFromRust>;
 
+// CR-08 §22 round 2 / Slice A: read-only preview of
+// a Recipe. Returns the full preview surface
+// (all stages + metadata + provenance +
+// applicability + warnings) so the UI can render
+// "Recipe X requires models [m-1, m-2] which are
+// not installed" without forcing a fix-or-abort
+// loop. Mirrors the Rust `RecipePreviewResponse`
+// struct.
+export interface RecipePreviewMetadataFromRust {
+  name: string;
+  description: string;
+  target_type: string;
+  quality_profile: "natural" | "detail" | "clean" | "publication";
+  ai_enhancement_level: "Off" | "Conservative" | "Recommended" | "Advanced";
+  is_system: boolean;
+}
+
+export interface ResolvedStagePreviewFromRust {
+  stage_id: string;
+  enabled: boolean;
+  params: Record<string, unknown>;
+  resolved_ai_enhancement_level: string;
+}
+
+export type ApplicabilityFromRust =
+  | "Compatible"
+  | { MissingModels: string[] }
+  | { IncompatibleVersion: string };
+
+export interface RecipePreviewResponseFromRust {
+  profile_id: string;
+  version: number;
+  branch: string;
+  metadata: RecipePreviewMetadataFromRust;
+  provenance: RecipeProvenanceFromRust;
+  applicability: ApplicabilityFromRust;
+  resolved_stages: ResolvedStagePreviewFromRust[];
+  warnings: string[];
+}
+
+export const recipePreview = (
+  profileId: string,
+  version: number,
+  availableModels?: string[],
+): Promise<RecipePreviewResponseFromRust> =>
+  invoke("recipe_preview", {
+    profileId,
+    version,
+    availableModels: availableModels ?? null,
+  }) as Promise<RecipePreviewResponseFromRust>;
+
 /**
  * CR-08 §20: Recipe security validation report.
  * Mirrors the Rust

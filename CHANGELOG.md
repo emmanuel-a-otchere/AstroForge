@@ -6358,4 +6358,58 @@ All 8 pass. The full workspace test suite (recipe_apply, recipe_security_validat
 - `cargo test --workspace` ✅ (all suites; 8 new tests added)
 - `npm run check` ✅ (0 new errors / warnings vs main baseline)
 - `npm run build` ✅
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session` ✅### Slice §22 round 2 / Slice A — `preview_recipe`
+
+**Scope.** Closes the `preview_recipe` ❌ row in the §22 audit table. The `recipe_preview` IPC is the read-only sibling of `recipe_apply`: same Recipe + same available-models check, but **no `mark_last_used_at` side effect** + returns the full preview surface (all stages including disabled ones, metadata, provenance, applicability, warnings) even when the Recipe is not applicable so the UI can show WHY without forcing a fix-or-abort loop.
+
+**Core (Rust).** `crates/astroforge-core/src/recipe.rs` gained:
+
+- `RecipePreviewMetadata` struct — name + description + target_type + quality_profile + ai_enhancement_level + is_system. Lets the UI render a Recipe header without a separate `recipe_get` round-trip.
+- `ResolvedStagePreview` struct — one row in the `resolved_stages` list. Mirrors `apply_recipe`'s `_ai_enhancement_level` stamping convention but lifts the resolved level to a dedicated `resolved_ai_enhancement_level` field (the preview is human-facing; a dedicated field is easier to render).
+- `RecipePreviewResponse` struct — the full response surface: profile_id + version + branch + metadata + provenance (re-uses round 1 surface) + applicability (existing 3-variant `ValidationResult`; full §12 6-variant matrix lands in Slice C) + resolved_stages + warnings.
+- `preview_recipe(profile_id, recipe, available_models) -> RecipePreviewResponse` — pure function. Walks ALL stages regardless of enabled flag (apply filters to enabled only), collects per-stage warnings (`"disabled via §10.2"` + `"Off" advisory`), mirrors the applicability result as a human-readable warning.
+- `ValidationResult` now derives `Serialize` + `Deserialize` so the preview can carry it through the IPC layer without a separate tag struct.
+
+**IPC (Tauri).** `src-tauri/src/main.rs` registers the new command (and adds it to the `invoke_handler` list):
+
+- `recipe_preview(profileId, version, availableModels?) -> RecipePreviewResponse` — loads the Recipe, delegates to `preview_recipe`. Optional `availableModels` (defaults to empty slice). Returns `CommandError` if the Recipe is not found.
+
+**TS wrapper (frontend).** `src/lib/astroforge-api.ts` exposes:
+
+- `recipePreview(profileId, version, availableModels?)`: Promise<`RecipePreviewResponseFromRust`>
+- The matching `RecipePreviewMetadataFromRust` + `ResolvedStagePreviewFromRust` + `ApplicabilityFromRust` (discriminated union for the 3-variant result) + `RecipePreviewResponseFromRust` interfaces.
+
+**Tests.** 7 new tests in `crates/astroforge-core/tests/recipe_preview.rs`:
+
+- Compatible Recipe returns Compatibility + no warnings
+- MissingModels produces `ValidationResult::MissingModels(["m-2"])` + advisory warning listing "m-2"
+- Schema mismatch produces `ValidationResult::IncompatibleVersion("9.9")` + re-save advisory
+- Disabled stage appears in `resolved_stages` with `enabled: false` + per-stage "disabled via §10.2" warning
+- Resolved AI level mirrors recipe-level default (Conservative surfaces "Conservative")
+- AI = Off surfaces per-stage "Off" advisory
+- Function is pure: no last_used_at side effect; recipe.version / recipe.branch unchanged after preview
+
+All 7 pass. Full workspace test suite passes with no regressions.
+
+**Audit rows closed.** §22 ❌ `preview_recipe` → ✅. §22 ❌ row count drops from 4 to 3.
+
+**Out of scope (intentional).**
+
+- Full §12 6-variant applicability matrix — Slice C. The current preview re-uses the existing 3-variant `ValidationResult`. The 6-variant expansion is its own scope (new variants: MissingRequired, Disabled, SchemaMismatch) and pairs naturally with a `check_recipe_applicability` IPC that returns the same shape (the ❌ row in §22).
+- Per-stage required_models — Recipe-level `required_models` exists; per-stage is not modeled. The slice picks recipe-level warnings (informational) rather than expanding the Recipe schema.
+- UI consumer — the existing `RecipeDiffPanel` + `CompareWorkspace` already use the round-1 IPCs. A follow-on UI slice can opt into `recipe_preview` when the §22 preview UX is revisited.
+
+**Honest flags.**
+
+- `preview_recipe` walks ALL stages including disabled ones. `apply_recipe` filters to enabled only. This divergence is intentional: the preview surfaces the full Recipe so the UI can render a "skipped" pill on disabled stages; apply skips them silently.
+- The `applicability` enum is intentionally the existing 3-variant `ValidationResult`. Slice C will expand it to the full §12 matrix; the TS-side `ApplicabilityFromRust` discriminated union is forward-compat (just add new variants).
+- `RecipePreviewResponse` includes a duplicate copy of `name` + `target_type` + `quality_profile` (in `metadata`) AND `profile_id` + `name` + `target_type` (in `provenance`). The duplication is intentional: `metadata` is the user-facing display surface (system recipes carry the same identity); `provenance` is the audit/lineage surface. A future slice could fold them, but the round-2 contract pins the separation so consumers can wire to either.
+
+**Verification.**
+
+- `cargo fmt --all` ✅
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅
+- `cargo test --workspace` ✅ (7 new tests added, no regressions)
+- `npm run check` ✅ (0 new errors / warnings vs main baseline)
+- `npm run build` ✅
 - `bash scripts/mvp_smoke.sh tests/fixtures/sample-session` ✅

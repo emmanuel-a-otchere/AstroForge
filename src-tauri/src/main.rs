@@ -989,6 +989,61 @@ fn recipe_parameter_diff(
     Ok(param_diff_fn(&recipe_a, &recipe_b))
 }
 
+/// CR-08 §22 round 1: combined comparison of two
+/// Recipes. Thin wrapper that loads both Recipes and
+/// delegates to `recipe_compare_versions` (which folds
+/// `recipe_ai_diff_summary` + `recipe_parameter_diff`
+/// into a single `RecipeComparison` response so the
+/// `RecipeDiffPanel.svelte` consumer can fetch both
+/// halves in one IPC round-trip). Pure function on the
+/// core side; the wrapper's only job is to load the two
+/// Recipes from the store + convert `RecipeStoreError`
+/// into `CommandError`. Returns CommandError if either
+/// Recipe is not found.
+#[tauri::command]
+fn recipe_compare_versions(
+    state: State<'_, RecipeState>,
+    profile_id_a: String,
+    version_a: u32,
+    profile_id_b: String,
+    version_b: u32,
+) -> Result<
+    astroforge_core::recipe::RecipeComparison,
+    CommandError,
+> {
+    use astroforge_core::recipe::recipe_compare_versions as compare_fn;
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe_a = store.get(&profile_id_a, version_a)?;
+    let recipe_b = store.get(&profile_id_b, version_b)?;
+    Ok(compare_fn(&recipe_a, &recipe_b))
+}
+
+/// CR-08 §22 round 1: Recipe provenance. Returns a
+/// `RecipeProvenance` describing the Recipe itself
+/// (identity, lineage_steps, perceptual_models,
+/// required_models, etc). Distinct from the image-
+/// version provenance rendered by `ProvenancePanel.svelte`
+/// which walks the image's `recipe_id` chain; this
+/// surface is Recipe-only. The IPC computes `profile_id`
+/// from `name + target_type` via `RecipeStore::profile_id_for`
+/// and forwards it to `recipe_provenance` so the core
+/// function stays pure. Returns CommandError if the
+/// Recipe is not found.
+#[tauri::command]
+fn recipe_get_provenance(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+    version: u32,
+) -> Result<
+    astroforge_core::recipe::RecipeProvenance,
+    CommandError,
+> {
+    use astroforge_core::recipe::recipe_provenance as provenance_fn;
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe = store.get(&profile_id, version)?;
+    Ok(provenance_fn(&profile_id, &recipe))
+}
+
 /// CR-08 §20: validate a Recipe against the
 /// §20 stage-spec table for the five risk classes
 /// (range, dependency, filesystem, executable,
@@ -1382,6 +1437,8 @@ fn main() {
             recipe_save_from_pipeline_plan,
             recipe_ai_diff_summary,
             recipe_parameter_diff,
+            recipe_compare_versions,
+            recipe_get_provenance,
             recipe_security_validate,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,

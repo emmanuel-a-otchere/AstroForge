@@ -575,6 +575,67 @@ export const recipeParameterDiff = (
     versionB,
   }) as Promise<RecipeParameterDiffFromRust>;
 
+// CR-08 §22 round 1: combined comparison of two
+// Recipes in a single IPC round-trip. Folds
+// `recipe_ai_diff_summary` + `recipe_parameter_diff`
+// into a single response shape (with a folded
+// `identical` flag + a `lineage_summary` header line)
+// so the CompareWorkspace + RecipeDiffPanel consumers
+// can fetch both halves in one IPC call. Mirrors the
+// Rust `RecipeComparison` struct.
+export interface RecipeComparisonFromRust {
+  ai: RecipeAiDiffSummaryFromRust;
+  parameter_diff: RecipeParameterDiffFromRust;
+  identical: boolean;
+  lineage_summary: string;
+}
+
+export const recipeCompareVersions = (
+  profileIdA: string,
+  versionA: number,
+  profileIdB: string,
+  versionB: number,
+): Promise<RecipeComparisonFromRust> =>
+  invoke("recipe_compare_versions", {
+    profileIdA,
+    versionA,
+    profileIdB,
+    versionB,
+  }) as Promise<RecipeComparisonFromRust>;
+
+// CR-08 §22 round 1: Recipe provenance surface.
+// Returns a `RecipeProvenance` describing the Recipe
+// itself (identity, lineage_steps, perceptual_models,
+// required_models, etc). Mirrors the Rust
+// `RecipeProvenance` struct. Distinct from the image-
+// version provenance in `ProvenancePanel.svelte` which
+// walks the image's `recipe_id` chain; this surface is
+// Recipe-only.
+export interface RecipeProvenanceFromRust {
+  profile_id: string;
+  version: number;
+  parent_version: number | null;
+  schema_version: string;
+  name: string;
+  target_type: string;
+  quality_profile: "natural" | "detail" | "clean" | "publication";
+  pipeline_plan_hash: string;
+  ai_used: boolean;
+  perceptual_models: string[];
+  required_models: string[];
+  is_system: boolean;
+  lineage_steps: string[];
+}
+
+export const recipeGetProvenance = (
+  profileId: string,
+  version: number,
+): Promise<RecipeProvenanceFromRust> =>
+  invoke("recipe_get_provenance", {
+    profileId,
+    version,
+  }) as Promise<RecipeProvenanceFromRust>;
+
 /**
  * CR-08 §20: Recipe security validation report.
  * Mirrors the Rust

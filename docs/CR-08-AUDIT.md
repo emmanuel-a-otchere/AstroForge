@@ -706,7 +706,7 @@ The full §20 security-validation pipeline ships via PR #392:
 | `recipe_application` | ⚠️ Partial — `apply_recipe()` function exists |
 | `recipe_adaptation` | ✅ `AdaptiveParameterSet::reason: String` |
 
-## §22 Semantic API — ⚠️ Partial
+## §22 Semantic API — ⚠️ Partial (compare_recipe_versions + get_recipe_provenance shipped refresh 5; 4 ❌ rows remain for round 2)
 
 `src-tauri/src/main.rs` registers the following Recipe IPCs
 (consumed via `src/lib/profile-store.ts`):
@@ -729,14 +729,26 @@ The full §20 security-validation pipeline ships via PR #392:
 | `save_processing_as_recipe` | ❌ |
 | `import_recipe` | ✅ `recipe_import(json)` (CR-08 §19) |
 | `export_recipe` | ✅ `recipe_export(profileId, version?)` (CR-08 §19) |
-| `get_recipe_provenance` | ❌. `recipe_get_for_image_version` returns the Recipe but not its PipelineRun lineage |
+| `get_recipe_provenance` | ✅ `recipe_get_provenance(profileId, version)` (CR-08 §22 round 1); Returns a `RecipeProvenance` describing the Recipe itself (identity + lineage_steps + perceptual_models + required_models + quality_profile + pipeline_plan_hash + is_system). Distinct from the image-version provenance rendered by `ProvenancePanel.svelte` |
 | `get_image_provenance` | ⚠️ Partial. `ProvenancePanel.svelte` + `provenanceStore` render the Recipe chain; `import_get_target_provenance` covers the target-classification half |
 | `get_reproducibility_report` | ❌. No `ReproducibilityRecord` aggregation (see §6) |
 | `get_execution_environment` | ✅ `HardwareProbe::detect()` |
-| `compare_recipe_versions` | ❌. Only `recipe_ai_diff_summary` is exposed; no full §13 table |
+| `compare_recipe_versions` | ✅ `recipe_compare_versions(profileIdA, versionA, profileIdB, versionB)` (CR-08 §22 round 1); Folds `recipe_ai_diff_summary` + `recipe_parameter_diff` into a single `RecipeComparison` response (with a folded `identical` flag + `lineage_summary` header line) so the UI can fetch both halves in one IPC round-trip |
 
 Plus CR-07 §32.6 wires `recipe_pipeline_plan_hash` + `recipe_ai_diff_summary`
 to the IPC layer (consumed by the §32 test suite).
+
+**Shipped this tranche (refresh 5 — §22 round 1):**
+
+- **`compare_recipe_versions` IPC**: `recipe_compare_versions(profileIdA, versionA, profileIdB, versionB) -> RecipeComparison`. Folds `recipe_ai_diff_summary` + `recipe_parameter_diff` into a single response with a `identical` flag (true iff parameter_diff.identical AND no hash / AI-classification / required-models divergence) + `lineage_summary` header line. The RecipeDiffPanel consumer continues to use the existing two-IPC pattern; the new IPC is additive (a follow-on UI slice can opt in).
+- **`get_recipe_provenance` IPC**: `recipe_get_provenance(profileId, version) -> RecipeProvenance`. Returns the Recipe's identity + lineage_steps + perceptual_models + required_models + quality_profile + pipeline_plan_hash + is_system. Distinct from `ProvenancePanel.svelte` (which walks the image's `recipe_id` chain); this surface is Recipe-only. The IPC computes `profile_id` from `name + target_type` via `RecipeStore::profile_id_for` and forwards it to `recipe_provenance` so the core function stays pure.
+
+**Still partial (round 2 candidates — 4 ❌ rows remain):**
+
+- `save_processing_as_recipe`: needs a `StageRunRecord` query against a `PipelineRun` ID + Recipe assembly logic. Pure-Rust + IPC; not a thin wrapper.
+- `preview_recipe`: distinct from `recipe_apply`; needs a separate response shape that surfaces metadata + resolved pipeline.
+- `check_recipe_applicability`: full §12 6-variant matrix (current `validate_compatibility` returns the 3-variant enum).
+- `get_reproducibility_report`: needs `ReproducibilityRecord` aggregator (CR-06 §6 work).
 
 ## §23 Events — ⚠️ Partial
 

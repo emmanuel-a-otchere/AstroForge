@@ -1698,3 +1698,149 @@ pub fn recipe_parameter_diff(a: &Recipe, b: &Recipe) -> RecipeParameterDiff {
         identical,
     }
 }
+// ─── CR-08 §22 round 1: Recipe comparison + provenance ───
+//
+// The §22 table in docs/CR-08-AUDIT.md flags six ❌ rows;
+// round 1 ships the two thin wrappers. The remaining
+// four (`save_processing_as_recipe`, `preview_recipe`,
+// `check_recipe_applicability`, `get_reproducibility_report`)
+// need new core logic and are deferred to §22 round 2.
+
+/// CR-08 §22 round 1: combined view of two Recipes.
+///
+/// Wraps the existing `recipe_ai_diff_summary` +
+/// `recipe_parameter_diff` into a single response shape
+/// so the UI can fetch both halves in one IPC round-trip.
+/// The `identical` flag folds the two halves together:
+/// it is `true` iff `parameter_diff.identical == true`
+/// AND `ai_diff.hash_differs == false` AND
+/// `ai_diff.ai_classification_differs == false` AND
+/// `ai_diff.required_models_differ == false`.
+///
+/// `lineage_summary` is a small human-readable block the
+/// CompareWorkspace header can render (e.g.
+/// "Recipe A v3 (Conservative, Detail) vs Recipe B v5
+/// (Conservative, Publication)"); format mirrors the
+/// `provenance` field on `RecipeAiDiffSummary` but is
+/// duplicated here so consumers don't have to reach
+/// into the nested `ai` struct just to render a label.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecipeComparison {
+    pub ai: RecipeAiDiffSummary,
+    pub parameter_diff: RecipeParameterDiff,
+    /// True iff `parameter_diff.identical == true` AND no
+    /// AI-classification / hash / required-models flag
+    /// diverges between the two Recipes.
+    pub identical: bool,
+    /// Human-readable summary line (same format as
+    /// `RecipeAiDiffSummary::provenance`).
+    pub lineage_summary: String,
+}
+
+/// CR-08 §22 round 1: combine the existing §13 diff
+/// primitives into a single response. Pure function;
+/// no I/O. Reads only the two Recipes; the IPC wrapper
+/// loads them from the `RecipeStore`.
+pub fn recipe_compare_versions(a: &Recipe, b: &Recipe) -> RecipeComparison {
+    let ai = recipe_ai_diff_summary(a, b);
+    let parameter_diff = recipe_parameter_diff(a, b);
+    let identical = parameter_diff.identical
+        && !ai.hash_differs
+        && !ai.ai_classification_differs
+        && !ai.required_models_differ;
+    RecipeComparison {
+        lineage_summary: ai.provenance.clone(),
+        ai,
+        parameter_diff,
+        identical,
+    }
+}
+
+/// CR-08 §22 round 1: a Recipe's full provenance line.
+///
+/// Distinct from `RecipeAiDiffSummary::provenance` (which
+/// describes a comparison) and from the image-version
+/// provenance rendered by `ProvenancePanel.svelte` (which
+/// walks the image's `recipe_id` chain). This struct
+/// describes the Recipe itself: who built it, what
+/// perceptual models it touches, how it classifies on the
+/// AI/natural axis, and how it fits in the system /
+/// project lineage.
+///
+/// `lineage_steps` is an ordered list of human-readable
+/// steps describing how the Recipe came to be. The first
+/// entry is always the Recipe's own creation event;
+/// subsequent entries may chain to parent versions
+/// (`"Adapted from v{N}"`) or system-recipe provenance
+/// (`"System recipe"`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecipeProvenance {
+    pub profile_id: String,
+    pub version: u32,
+    pub parent_version: Option<u32>,
+    pub schema_version: String,
+    pub name: String,
+    pub target_type: String,
+    pub quality_profile: QualityProfile,
+    pub pipeline_plan_hash: String,
+    pub ai_used: bool,
+    pub perceptual_models: Vec<String>,
+    pub required_models: Vec<String>,
+    pub is_system: bool,
+    pub lineage_steps: Vec<String>,
+}
+
+/// CR-08 §22 round 1: build the provenance surface for a
+/// Recipe. Pure function (plus the derived `profile_id`
+/// argument, which is computed from `name + target_type`
+/// via `RecipeStore::profile_id_for` and supplied by the
+/// IPC wrapper so this function stays pure). Walks the
+/// Recipe's metadata + the parent-version chain (when
+/// present) to assemble `lineage_steps`. Does NOT walk
+/// image-version consumers (that's the existing
+/// `ProvenancePanel` surface); this surface is Recipe-only.
+pub fn recipe_provenance(profile_id: &str, recipe: &Recipe) -> RecipeProvenance {
+    // Collect perceptual models in sorted order so the
+    // output is deterministic (mirrors the convention in
+    // `recipe_ai_diff_summary`).
+    let mut perceptual_models: Vec<String> = recipe
+        .integrity
+        .models
+        .iter()
+        .filter(|m| m.model_type == ModelType::Perceptual)
+        .map(|m| m.model_name.clone())
+        .collect();
+    perceptual_models.sort();
+
+    let mut required_models = recipe.required_models.clone();
+    required_models.sort();
+
+    let mut steps = Vec::new();
+    if recipe.is_system {
+        steps.push("System recipe".to_string());
+    } else {
+        steps.push(format!(
+            "Created as v{} on {} target_type",
+            recipe.version, recipe.target_type
+        ));
+    }
+    if let Some(parent) = recipe.parent_version {
+        steps.push(format!("Adapted from v{parent}"));
+    }
+
+    RecipeProvenance {
+        profile_id: profile_id.to_string(),
+        version: recipe.version,
+        parent_version: recipe.parent_version,
+        schema_version: recipe.schema_version.clone(),
+        name: recipe.name.clone(),
+        target_type: recipe.target_type.clone(),
+        quality_profile: recipe.quality_profile,
+        pipeline_plan_hash: recipe.pipeline_plan_hash(),
+        ai_used: recipe.integrity.perceptual_models_used,
+        perceptual_models,
+        required_models,
+        is_system: recipe.is_system,
+        lineage_steps: steps,
+    }
+}

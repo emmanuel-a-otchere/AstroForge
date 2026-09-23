@@ -6303,3 +6303,59 @@ The disabled stub section (`<section class="tier-future">` + button) is removed;
 - The Expert tier summary reads `stageEnabled[stageId] !== false` (not `=== true`) so stages missing from the override map default to enabled — matches the Guided tier's toggle semantics.
 - The `_ai_enhancement_level` key carries a string label, not the enum variant. The string label round-trips cleanly through the JSON wire format; consumers that want the enum can `serde_json::from_value` it against the `AiEnhancementLevel` enum on the TS side.
 - The Expert tier section uses `material-symbols-outlined` for the icon (the existing tier-future CTA used the same icon family).
+### Slice §22 round 1 — `compare_recipe_versions` + `get_recipe_provenance`
+
+**Scope.** Closes 2 of the 6 ❌ rows in the §22 audit table: the combined-comparison IPC and the Recipe provenance IPC. The remaining 4 (`save_processing_as_recipe`, `preview_recipe`, `check_recipe_applicability` full matrix, `get_reproducibility_report`) need new core logic and are deferred to §22 round 2.
+
+**Core (Rust).** `crates/astroforge-core/src/recipe.rs` gained two new public surfaces:
+
+- `RecipeComparison` struct + `recipe_compare_versions(a: &Recipe, b: &Recipe) -> RecipeComparison` — wraps the existing `recipe_ai_diff_summary` + `recipe_parameter_diff` primitives into a single response shape with a folded `identical` flag (`true` iff parameter_diff.identical AND no hash / AI-classification / required-models divergence) and a `lineage_summary` header line (mirrors `RecipeAiDiffSummary::provenance`).
+- `RecipeProvenance` struct + `recipe_provenance(profile_id: &str, recipe: &Recipe) -> RecipeProvenance` — describes the Recipe itself (identity, lineage_steps, perceptual_models, required_models, quality_profile, pipeline_plan_hash, is_system). `profile_id` is supplied by the IPC wrapper (computed via `RecipeStore::profile_id_for`) so the core function stays pure. Walks the parent-version chain for `lineage_steps`; deterministic sort on perceptual_models + required_models for stable output.
+
+**IPC (Tauri).** `src-tauri/src/main.rs` registers two new commands:
+
+- `recipe_compare_versions(profile_id_a, version_a, profile_id_b, version_b) -> RecipeComparison` — loads both Recipes, delegates to the core function. Returns `CommandError` if either Recipe is not found.
+- `recipe_get_provenance(profile_id, version) -> RecipeProvenance` — loads the Recipe, forwards the profile_id to `recipe_provenance`. Returns `CommandError` if the Recipe is not found.
+
+**TS wrapper (frontend).** `src/lib/astroforge-api.ts` exposes:
+
+- `recipeCompareVersions(profileIdA, versionA, profileIdB, versionB): Promise<RecipeComparisonFromRust>`
+- `recipeGetProvenance(profileId, version): Promise<RecipeProvenanceFromRust>`
+- The matching `RecipeComparisonFromRust` + `RecipeProvenanceFromRust` interfaces.
+
+**Tests.** 8 new tests in `crates/astroforge-core/tests/recipe_compare_round1.rs`:
+
+- identical Recipes fold to `identical: true`
+- quality_profile divergence folds to `identical: false` even when parameter_diff reports identical
+- stage-diff (enabled flag flip) folds to `identical: false`
+- lineage_summary equals ai.provenance byte-for-byte
+- provenance basic fields round-trip (profile_id, version, parent_version, name, target_type, perceptual_models, required_models, lineage_steps)
+- provenance walks parent_version chain (added as second lineage_steps entry)
+- system recipe marks lineage as "System recipe" (single-step)
+- perceptual_models sorted for stable output (alpha < zeta)
+
+All 8 pass. The full workspace test suite (recipe_apply, recipe_security_validation, recipe_compare_round1, recipe_compare, recipe_diff, pipeline_run, + ~10 other test files) passes with no regressions.
+
+**Audit rows closed.** §22 ❌ `compare_recipe_versions` (now ✅) + §22 ❌ `get_recipe_provenance` (now ✅ via `recipe_get_provenance`). §22 ❌ row count drops from 6 to 4.
+
+**Out of scope (intentional).**
+
+- `save_processing_as_recipe` — needs a `StageRunRecord` query against a `PipelineRun` ID + Recipe assembly. Round 2.
+- `preview_recipe` — distinct from `recipe_apply`; needs a separate shape that surfaces metadata + resolved pipeline. Round 2.
+- `check_recipe_applicability` full matrix — current `validate_compatibility` returns the 3-variant enum, not the §12 6-variant matrix. Round 2.
+- `get_reproducibility_report` — needs a `ReproducibilityRecord` aggregator (CR-06 §6 work). Round 2 or later.
+
+**Honest flags.**
+
+- The RecipeDiffPanel.svelte consumer does NOT switch to `recipeCompareVersions` in this slice — the existing two-IPC pattern (`recipe_ai_diff_summary` + `recipe_parameter_diff`) still works. The new combined IPC is additive; a follow-on UI slice can opt into it when the panel is revisited.
+- `recipe_provenance` takes `profile_id` as an argument (not derived internally) because the `Recipe` struct doesn't carry `recipe_id` directly — `profile_id` is derived from `name + target_type` via `RecipeStore::profile_id_for`. The IPC wrapper handles the derivation so the core function stays pure and side-effect-free.
+- `RecipeProvenance` includes `name` + `target_type` + `profile_id` (not just `profile_id`) so consumers can render the Recipe header without re-fetching via `recipe_get`. Forward-compat: if the UI later wants to render a `RecipeProvenance` block from just the profile_id, no extra IPC is needed.
+
+**Verification.**
+
+- `cargo fmt --all` ✅
+- `cargo clippy --workspace --all-targets -- -D warnings` ✅
+- `cargo test --workspace` ✅ (all suites; 8 new tests added)
+- `npm run check` ✅ (0 new errors / warnings vs main baseline)
+- `npm run build` ✅
+- `bash scripts/mvp_smoke.sh tests/fixtures/sample-session` ✅

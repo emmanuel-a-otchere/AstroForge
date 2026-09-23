@@ -26,6 +26,16 @@ export interface RecipeStage {
   stageId: string;
   enabled: boolean;
   params: Record<string, unknown>;
+  // CR-08 §10.2 Guided tier: per-stage AI
+  // Enhancement Level override. Optional so
+  // legacy callers + browser-mode fixtures
+  // that predate §10.2 still type-check.
+  aiEnhancementOverride?:
+    | "off"
+    | "conservative"
+    | "recommended"
+    | "advanced"
+    | null;
 }
 
 export interface IntegrityBadge {
@@ -53,6 +63,49 @@ export interface Recipe {
   branch: string;
   createdAt: string;
   flags: string[];
+  // CR-08 §15: Quality Profile axis. Defaults to
+  // "natural" for legacy Recipes that did not
+  // carry this field. The §15 Recipe Detail
+  // surface reads this field to render the
+  // "Style" meta-row. Variants mirror
+  // `astroforge-api.ts::QUALITY_PROFILES` so the
+  // TS contract stays in sync with the Rust enum.
+  qualityProfile?:
+    | "natural"
+    | "detail"
+    | "clean"
+    | "publication";
+  // CR-08 §10: Beginner-tier pick. Optional for
+  // forward-compat with legacy Recipes; absent
+  // means Recommended (the Rust serde default).
+  aiEnhancementLevel?:
+    | "off"
+    | "conservative"
+    | "recommended"
+    | "advanced";
+  // CR-08 §10.2 Guided tier: high-level
+  // processing objectives the Recipe is designed
+  // to honour.
+  processingObjectives?: Array<
+    | "preserve_star_colors"
+    | "maximize_detail"
+    | "maximize_smoothness"
+    | "maximize_dynamic_range"
+    | "maximize_reproducibility"
+  >;
+  // CR-08 §10.2 Guided tier: measurable quality
+  // criteria the Recipe targets. Each field is
+  // optional; absent fields don't constrain the
+  // Recipe. Validated by §20 ranges.
+  qualityTargets?: {
+    target_snr_db?: number | null;
+    target_sharpness?: number | null;
+    target_background_smoothness?: number | null;
+  };
+  // CR-08 §10.2 Guided tier: optional stage IDs
+  // the user elected to enable beyond the
+  // §10.1 Beginner defaults.
+  optionalOperations?: string[];
 }
 
 export interface RecipeSummary {
@@ -100,12 +153,55 @@ interface RustRecipe {
   branch: string;
   created_at: string;
   flags: string[];
+  // CR-08 §15: Quality Profile axis. Snake-case
+  // mirror of the Rust enum so the IPC wire shape
+  // matches the Rust struct 1:1. Variants mirror
+  // `astroforge-api.ts::QUALITY_PROFILES`.
+  quality_profile?:
+    | "natural"
+    | "detail"
+    | "clean"
+    | "publication";
+  // CR-08 §10: Beginner-tier pick.
+  ai_enhancement_level?:
+    | "off"
+    | "conservative"
+    | "recommended"
+    | "advanced";
+  // CR-08 §10.2 Guided tier: high-level
+  // processing objectives.
+  processing_objectives?: Array<
+    | "preserve_star_colors"
+    | "maximize_detail"
+    | "maximize_smoothness"
+    | "maximize_dynamic_range"
+    | "maximize_reproducibility"
+  >;
+  // CR-08 §10.2 Guided tier: measurable quality
+  // criteria.
+  quality_targets?: {
+    target_snr_db?: number | null;
+    target_sharpness?: number | null;
+    target_background_smoothness?: number | null;
+  };
+  // CR-08 §10.2 Guided tier: optional stage IDs.
+  optional_operations?: string[];
 }
 
 interface RustRecipeStage {
   stage_id: string;
   enabled: boolean;
   params: Record<string, unknown>;
+  // CR-08 §10.2 Guided tier: per-stage AI
+  // Enhancement Level override. Optional so
+  // legacy callers + browser-mode fixtures
+  // that predate §10.2 still type-check.
+  ai_enhancement_override?:
+    | "off"
+    | "conservative"
+    | "recommended"
+    | "advanced"
+    | null;
 }
 
 interface RustIntegrityBadge {
@@ -189,6 +285,12 @@ function toRustRecipe(r: Recipe): RustRecipe {
       stage_id: s.stageId,
       enabled: s.enabled,
       params: s.params,
+      // CR-08 §10.2 Guided tier: per-stage AI
+      // Enhancement Level override. The TS field
+      // is optional so legacy Recipes (and the
+      // existing Phase 1.5 fixtures) ship without
+      // it; the Rust side defaults to `None`.
+      ai_enhancement_override: s.aiEnhancementOverride ?? null,
     })),
     required_models: r.requiredModels,
     integrity: {
@@ -205,6 +307,32 @@ function toRustRecipe(r: Recipe): RustRecipe {
     branch: r.branch,
     created_at: r.createdAt,
     flags: r.flags,
+    // CR-08 §15 / §10 / §10.2: forward the new
+    // schema-version 2 fields. All four are
+    // optional on the Rust side (`#[serde(default)]`
+    // or skip_serializing_if), so omitting a field
+    // round-trips to the Rust default (Natural /
+    // Recommended / empty vec / None).
+    quality_profile: r.qualityProfile ?? "natural",
+    ai_enhancement_level:
+      r.aiEnhancementLevel ?? "recommended",
+    processing_objectives: r.processingObjectives ?? [],
+    quality_targets: r.qualityTargets
+      ? {
+          target_snr_db:
+            r.qualityTargets.target_snr_db ?? null,
+          target_sharpness:
+            r.qualityTargets.target_sharpness ?? null,
+          target_background_smoothness:
+            r.qualityTargets.target_background_smoothness ??
+            null,
+        }
+      : {
+          target_snr_db: null,
+          target_sharpness: null,
+          target_background_smoothness: null,
+        },
+    optional_operations: r.optionalOperations ?? [],
   };
 }
 

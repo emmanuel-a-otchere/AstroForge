@@ -40,10 +40,10 @@
 //!   every violation in a single pass
 //! - serde round-trip on the report
 
-use astroforge_core::recipe::{Recipe, RecipeStage};
+use astroforge_core::recipe::{QualityTargets, Recipe, RecipeStage};
 use astroforge_core::validation::{
-    validate_recipe_security, ParamRange, SecurityValidationReport, SecurityViolation, StageSpec,
-    MAX_RESOURCE_UNITS,
+    recipe_level_targets_ranges, validate_recipe_security, ParamRange, SecurityValidationReport,
+    SecurityViolation, StageSpec, MAX_RESOURCE_UNITS, RECIPE_LEVEL_STAGE_ID,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -545,4 +545,196 @@ fn param_range_contains_handles_half_infinite() {
     assert!(r.contains(10.0));
     assert!(!r.contains(-0.01));
     assert!(!r.contains(10.01));
+}
+
+// ─── CR-08 §10.2 / §20: Recipe-level range tests ───
+//
+// The Guided tier's QualityTargets fields are
+// enforced separately from the per-(stage, param)
+// range check. The kind tag is `"recipe_level"` and
+// the stage_id is the sentinel `RECIPE_LEVEL_STAGE_ID`
+// so the UI panel can group the violations under a
+// dedicated "Recipe" header.
+
+#[test]
+fn recipe_level_targets_ranges_define_three_fields() {
+    let r = recipe_level_targets_ranges();
+    // SNR in dB; sharpness + background smoothness
+    // are normalised 0-1.
+    assert!(r.contains_key("target_snr_db"));
+    assert!(r.contains_key("target_sharpness"));
+    assert!(r.contains_key("target_background_smoothness"));
+    assert_eq!(r.len(), 3);
+    // Spot-check the bounds.
+    let snr = r.get("target_snr_db").unwrap();
+    assert_eq!(snr.min, Some(20.0));
+    assert_eq!(snr.max, Some(60.0));
+    let sharp = r.get("target_sharpness").unwrap();
+    assert_eq!(sharp.min, Some(0.0));
+    assert_eq!(sharp.max, Some(1.0));
+}
+
+#[test]
+fn safe_recipe_with_targets_passes_validation() {
+    // All three QualityTargets fields set within
+    // their declared ranges: no recipe_level
+    // violations.
+    let mut recipe = recipe_with_stages(vec![(
+        "stretch",
+        true,
+        HashMap::from([("radius".into(), json!(3.0))]),
+    )]);
+    recipe.quality_targets = QualityTargets {
+        target_snr_db: Some(40.0),
+        target_sharpness: Some(0.7),
+        target_background_smoothness: Some(0.85),
+    };
+    let mut specs = HashMap::new();
+    specs.insert(
+        "stretch".into(),
+        spec_with_range("stretch", "radius", ParamRange::bounded(0.0, 10.0), 50),
+    );
+    let report = validate_recipe_security(&recipe, &specs);
+    assert!(
+        report.is_safe(),
+        "Recipe with in-range targets must pass: {:?}",
+        report.violations
+    );
+}
+
+#[test]
+fn recipe_level_snr_below_minimum_produces_violation() {
+    let mut recipe = recipe_with_stages(vec![(
+        "stretch",
+        true,
+        HashMap::from([("radius".into(), json!(3.0))]),
+    )]);
+    recipe.quality_targets = QualityTargets {
+        target_snr_db: Some(15.0), // below 20 dB minimum
+        target_sharpness: None,
+        target_background_smoothness: None,
+    };
+    let mut specs = HashMap::new();
+    specs.insert(
+        "stretch".into(),
+        spec_with_range("stretch", "radius", ParamRange::bounded(0.0, 10.0), 50),
+    );
+    let report = validate_recipe_security(&recipe, &specs);
+    assert!(!report.is_safe());
+    let rls = find_kind(&report, "recipe_level");
+    assert_eq!(
+        rls.len(),
+        1,
+        "expected one recipe_level violation: {:?}",
+        report.violations
+    );
+    let v = rls[0];
+    assert_eq!(v.stage_id.as_deref(), Some(RECIPE_LEVEL_STAGE_ID));
+    assert_eq!(v.param_key.as_deref(), Some("target_snr_db"));
+    assert!(v.message.contains("below the minimum 20"));
+}
+
+#[test]
+fn recipe_level_sharpness_above_maximum_produces_violation() {
+    let mut recipe = recipe_with_stages(vec![(
+        "stretch",
+        true,
+        HashMap::from([("radius".into(), json!(3.0))]),
+    )]);
+    recipe.quality_targets = QualityTargets {
+        target_snr_db: None,
+        target_sharpness: Some(1.5), // above 1.0 maximum
+        target_background_smoothness: None,
+    };
+    let mut specs = HashMap::new();
+    specs.insert(
+        "stretch".into(),
+        spec_with_range("stretch", "radius", ParamRange::bounded(0.0, 10.0), 50),
+    );
+    let report = validate_recipe_security(&recipe, &specs);
+    assert!(!report.is_safe());
+    let rls = find_kind(&report, "recipe_level");
+    assert_eq!(rls.len(), 1);
+    let v = rls[0];
+    assert_eq!(v.param_key.as_deref(), Some("target_sharpness"));
+    assert!(v.message.contains("exceeds the maximum 1"));
+}
+
+#[test]
+fn recipe_level_background_smoothness_out_of_range_produces_violation() {
+    let mut recipe = recipe_with_stages(vec![(
+        "stretch",
+        true,
+        HashMap::from([("radius".into(), json!(3.0))]),
+    )]);
+    recipe.quality_targets = QualityTargets {
+        target_snr_db: None,
+        target_sharpness: None,
+        target_background_smoothness: Some(-0.1), // below 0.0 minimum
+    };
+    let mut specs = HashMap::new();
+    specs.insert(
+        "stretch".into(),
+        spec_with_range("stretch", "radius", ParamRange::bounded(0.0, 10.0), 50),
+    );
+    let report = validate_recipe_security(&recipe, &specs);
+    assert!(!report.is_safe());
+    let rls = find_kind(&report, "recipe_level");
+    assert_eq!(rls.len(), 1);
+    let v = rls[0];
+    assert_eq!(v.param_key.as_deref(), Some("target_background_smoothness"));
+}
+
+#[test]
+fn recipe_level_none_fields_produce_no_violations() {
+    // A Recipe with all three QualityTargets fields
+    // unset (the default) must not produce a
+    // recipe_level violation. This is the safe
+    // path for legacy Recipes that predate §10.2.
+    let recipe = recipe_with_stages(vec![(
+        "stretch",
+        true,
+        HashMap::from([("radius".into(), json!(3.0))]),
+    )]);
+    let mut specs = HashMap::new();
+    specs.insert(
+        "stretch".into(),
+        spec_with_range("stretch", "radius", ParamRange::bounded(0.0, 10.0), 50),
+    );
+    let report = validate_recipe_security(&recipe, &specs);
+    assert!(
+        find_kind(&report, "recipe_level").is_empty(),
+        "None fields must pass: {:?}",
+        report.violations
+    );
+}
+
+#[test]
+fn recipe_level_all_three_out_of_range_produces_three_violations() {
+    // Composition: all three fields out of range
+    // surfaces three separate recipe_level
+    // violations in a single pass.
+    let mut recipe = recipe_with_stages(vec![(
+        "stretch",
+        true,
+        HashMap::from([("radius".into(), json!(3.0))]),
+    )]);
+    recipe.quality_targets = QualityTargets {
+        target_snr_db: Some(100.0),               // exceeds 60 dB
+        target_sharpness: Some(2.0),              // exceeds 1.0
+        target_background_smoothness: Some(-0.5), // below 0.0
+    };
+    let mut specs = HashMap::new();
+    specs.insert(
+        "stretch".into(),
+        spec_with_range("stretch", "radius", ParamRange::bounded(0.0, 10.0), 50),
+    );
+    let report = validate_recipe_security(&recipe, &specs);
+    let rls = find_kind(&report, "recipe_level");
+    assert_eq!(rls.len(), 3);
+    // Every violation is anchored on the sentinel
+    // stage_id so the UI panel can group them.
+    for v in rls {
+        assert_eq!(v.stage_id.as_deref(), Some(RECIPE_LEVEL_STAGE_ID));
+    }
 }

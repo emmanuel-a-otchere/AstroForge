@@ -1,5 +1,5 @@
 //! CR-08 §20: Recipe security validation. Pure functions
-//! that scan a [`Recipe`] for five classes of risk:
+//! that scan a [`Recipe`] for six classes of risk:
 //!
 //! 1. **Parameter range**: per-(stage, param) numeric
 //!    bounds (min/max) declared in the spec table
@@ -22,14 +22,23 @@
 //!    `resource_units` cost; the Recipe's sum is
 //!    rejected when it exceeds the
 //!    [`MAX_RESOURCE_UNITS`] ceiling.
+//! 6. **Recipe-level range** (CR-08 §10.2 Guided
+//!    tier): the `QualityTargets` fields
+//!    (`target_snr_db` ∈ 20-60 dB,
+//!    `target_sharpness` ∈ 0-1,
+//!    `target_background_smoothness` ∈ 0-1) are
+//!    enforced. Violations use
+//!    [`RECIPE_LEVEL_STAGE_ID`] as the
+//!    `stage_id` so the UI panel can group them
+//!    under a separate "Recipe" header.
 //!
-//! The five checks compose into a single
+//! The six checks compose into a single
 //! `SecurityValidationReport` so the apply round can
 //! render all violations in one pass (rather than
 //! surfacing them one at a time). All functions are
 //! pure: no IO, no side effects.
 
-use crate::recipe::{Recipe, RecipeStage};
+use crate::recipe::{QualityTargets, Recipe, RecipeStage};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -39,6 +48,46 @@ use std::collections::{HashMap, HashSet};
 /// catalog already exercises at ~150 resource
 /// units) plus a 2x safety margin.
 pub const MAX_RESOURCE_UNITS: u32 = 300;
+
+/// CR-08 §20: sentinel stage_id used on
+/// `SecurityViolation` rows produced by the
+/// Recipe-level (Guided tier QualityTargets)
+/// range check. Lets the UI panel distinguish
+/// per-Recipe violations from per-stage ones in
+/// its grouping logic.
+pub const RECIPE_LEVEL_STAGE_ID: &str = "$recipe";
+
+/// CR-08 §10.2 / §20: per-Recipe numeric bounds
+/// for the Guided tier's `QualityTargets` fields.
+/// The recipe-level axis is separate from the
+/// per-(stage, param) `StageSpec::params` because
+/// the targets live on `Recipe.quality_targets`,
+/// not on any individual `RecipeStage`. Out-of-range
+/// values reject the Recipe so the apply round
+/// never sees them.
+///
+/// The bounds match the slice's documented ranges:
+/// - `target_snr_db`: 20-60 dB (typical natural-night
+///   pipelines aim 30-45 dB; publication-grade 40+ dB)
+/// - `target_sharpness`: 0.0-1.0 (the pipeline's
+///   edge-sharpness score is normalised to that unit
+///   interval)
+/// - `target_background_smoothness`: 0.0-1.0
+///   (the pipeline's low-frequency-noise score is
+///   normalised to that unit interval)
+///
+/// `None` fields are passed through (the field is
+/// optional; absent means "no constraint").
+pub fn recipe_level_targets_ranges() -> HashMap<String, ParamRange> {
+    let mut m = HashMap::new();
+    m.insert("target_snr_db".into(), ParamRange::bounded(20.0, 60.0));
+    m.insert("target_sharpness".into(), ParamRange::bounded(0.0, 1.0));
+    m.insert(
+        "target_background_smoothness".into(),
+        ParamRange::bounded(0.0, 1.0),
+    );
+    m
+}
 
 /// CR-08 §20: numeric bound for a single
 /// per-(stage, param) range check. The lower /
@@ -248,9 +297,57 @@ pub fn validate_recipe_security(
         }
     }
 
+    // Pass 4: Recipe-level range check (CR-08 §10.2
+    // Guided tier QualityTargets). The fields are
+    // anchored on `RECIPE_LEVEL_STAGE_ID` so the UI
+    // panel can group them under a dedicated header.
+    check_recipe_level_ranges(&recipe.quality_targets, &mut violations);
+
     SecurityValidationReport {
         total_resource_units,
         violations,
+    }
+}
+
+/// CR-08 §10.2 / §20: Recipe-level numeric range
+/// check for the Guided tier's `QualityTargets`.
+/// Walks every `(field, value)` pair on the
+/// `QualityTargets` struct and enforces the bounds
+/// returned by [`recipe_level_targets_ranges`].
+///
+/// `None` values are passed through (absent fields
+/// don't constrain). Out-of-range values produce a
+/// `recipe_level` violation with
+/// [`RECIPE_LEVEL_STAGE_ID`] as the `stage_id` and
+/// the field name as the `param_key`.
+fn check_recipe_level_ranges(targets: &QualityTargets, out: &mut Vec<SecurityViolation>) {
+    let ranges = recipe_level_targets_ranges();
+    let pairs: [(&str, Option<f64>); 3] = [
+        ("target_snr_db", targets.target_snr_db),
+        ("target_sharpness", targets.target_sharpness),
+        (
+            "target_background_smoothness",
+            targets.target_background_smoothness,
+        ),
+    ];
+    for (key, value) in pairs {
+        let (Some(n), Some(range)) = (value, ranges.get(key)) else {
+            continue;
+        };
+        if range.contains(n) {
+            continue;
+        }
+        let reason = match (range.min, range.max) {
+            (Some(m), _) if n < m => format!("below the minimum {}", m),
+            (_, Some(m)) if n > m => format!("exceeds the maximum {}", m),
+            _ => "out of range".into(),
+        };
+        out.push(SecurityViolation {
+            kind: "recipe_level".into(),
+            stage_id: Some(RECIPE_LEVEL_STAGE_ID.into()),
+            param_key: Some(key.into()),
+            message: format!("Quality target '{}' = {} {}.", key, n, reason),
+        });
     }
 }
 

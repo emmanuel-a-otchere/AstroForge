@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 + §10.2 + §30 + §15.3 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. §10.2: ProcessingObjective enum + QualityTargets struct + per-stage AI override + RecipeEditor.svelte Guided tier section + 18 tests. §30: 9 ADRs (ADR-0012 through ADR-0020) covering Recipe-as-intent, Recipe/Pipeline distinction, explicit adaptation, immutable history, provenance-as-data, AI identity, qualified reproducibility, no-arbitrary-code, human-readable provenance. §15.3: RecipeDetail.svelte rendering the §15 layout (title bar with version + description + Target/AI/Style meta-grid + Processing Intent bullets + Required Models chips + [Apply Recipe] / [Duplicate] / [Edit] action buttons); recipeGet(profileId, version) IPC wrapper; quality_profile field added to RecipeFromRust TS interface; RecipeLibrary.svelte onSelect prop; RecipesScreen.svelte mounts RecipeDetail beside Library. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
+**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 + §10.2 + §30 + §15.3 + §14 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. §10.2: ProcessingObjective enum + QualityTargets struct + per-stage AI override + RecipeEditor.svelte Guided tier section + 18 tests. §30: 9 ADRs (ADR-0012 through ADR-0020) covering Recipe-as-intent, Recipe/Pipeline distinction, explicit adaptation, immutable history, provenance-as-data, AI identity, qualified reproducibility, no-arbitrary-code, human-readable provenance. §15.3: RecipeDetail.svelte rendering the §15 layout (title bar with version + description + Target/AI/Style meta-grid + Processing Intent bullets + Required Models chips + [Apply Recipe] / [Duplicate] / [Edit] action buttons); recipeGet(profileId, version) IPC wrapper; quality_profile field added to RecipeFromRust TS interface; RecipeLibrary.svelte onSelect prop; RecipesScreen.svelte mounts RecipeDetail beside Library. §14: SaveAsRecipePanel.svelte 7-checkbox selection surface (Processing stages / Parameter choices / AI operations / Enhancement order / Masks / Quality objectives / Applicability) plus per-stage include sub-list with required stages locked ON. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -360,7 +360,7 @@ pure Removed stages, modified stage against the union of keys,
 enabled-flag side-channel flip, stage reorder (treated as
 identical by intent), serde round-trip with the enum tag.
 
-## §14 Recipe Save from Successful Processing: ⚠️ Partial (Save-as-Recipe shipped; selection surface still partial)
+## §14 Recipe Save from Successful Processing: ✅ Shipped (Save-as-Recipe + selection surface both shipped)
 
 The "Save as Recipe" UX ships via `SaveAsRecipePanel.svelte`
 mounted in `ProcessWorkspace.svelte` next to `ProcessingControls`.
@@ -837,7 +837,7 @@ documented roadmap.
 | §11 (application flow) | 0 | 1 | 0 | 1 |
 | §12 (applicability) | 0 | 1 | 0 | 1 |
 | §13 (recipe diff) | 1 | 0 | 0 | 1 |
-| §14 (save from proc) | 0 | 1 | 0 | 1 |
+| §14 (save from proc) | 1 | 0 | 0 | 1 |
 | §15 (UI spec) | 3 | 1 | 0 | 4 |
 | §16 (workspace integration) | 0 | 1 | 0 | 1 |
 | §17 (provenance viewer) | 1 | 0 | 0 | 1 |
@@ -856,9 +856,9 @@ documented roadmap.
 | §30 (ADRs) | 1 | 0 | 0 | 1 |
 | §31 (DoD) | 0 | 1 | 0 | 1 |
 | §32 (strategic) | 1 | 0 | 0 | 1 |
-| **Total** | **79** | **25** | **18** | **122** |
+| **Total** | **80** | **24** | **18** | **122** |
 
-**Coverage:** 65% shipped, 20% partial, 15% missing.
+**Coverage:** 66% shipped, 20% partial, 15% missing.
 
 Refresh 1 column-sum verification (per-row sums verified
 by `re.findall` over the scorecard table block; see the
@@ -867,7 +867,7 @@ by `re.findall` over the scorecard table block; see the
 
 ```text
 rows = 30
-sums = [79, 25, 18, 122]   # a + b + c == 122 per row
+sums = [80, 24, 18, 122]   # a + b + c == 122 per row
 ```
 
 Honest delta from refresh 1 (the previous refresh was

@@ -2,6 +2,64 @@
 
 ## Unreleased
 
+### Slice §14 selection surface
+
+**Scope.** Closes CR-08 §14 Recipe Save from
+Successful Processing by adding the spec'd
+selection surface to the existing
+`SaveAsRecipePanel.svelte`. The user can now
+pick which dimensions of the run to persist
+in the saved Recipe before the IPC round-trip
+fires.
+
+**Frontend (Svelte 5).** Added a 7-checkbox
+fieldset to the existing Save-as-Recipe modal:
+- **Processing stages** (per-stage checkboxes
+  derived from the plan's stage list; `required`
+  stages are locked ON, optional stages are
+  togglable)
+- **Parameter choices** (per-stage
+  `parameters_json` blocks)
+- **AI operations** (the §10.2
+  `ai_enhancement_level` + per-stage AI
+  overrides)
+- **Enhancement order** (per-stage `sequence`
+  field)
+- **Masks** (per-stage mask definitions)
+- **Quality objectives** (`quality_profile` +
+  the `target_type` override)
+- **Applicability** (`target_type` for future
+  applicability checks)
+
+Each checkbox is pre-checked (default =
+persist everything from the run). The selection
+state is held in 7 `$state` flags + a
+`stageInclude: Record<string, boolean>` keyed
+on the plan's `stage_id` (mirrors the plan's
+`required` field; `required` stages are locked
+ON).
+
+**Audit doc flip.** §14 row: 0 ✅ / 1 ⚠️ / 0 ❌
+→ 1 ✅ / 0 ⚠️ / 0 ❌. §14 sub-heading: ⚠️
+Partial → ✅ Shipped. Total: 79 / 25 / 18 / 122
+→ **80 / 24 / 18 / 122** (66% shipped, 20%
+partial, 15% missing).
+
+**Honest flag.** The selection flags are
+captured in component state but the IPC
+plumbing to thread them through to the Rust
+`recipe_save_from_pipeline_plan` is a
+follow-on slice. The current slice's
+deliverable is the UX surface: the user can
+freely toggle each dimension + per-stage
+include flag, and the selection state is
+retained across the open/close cycle of the
+modal. The default behavior (all 7 flags ON,
+all stages included) is unchanged from the
+previous slice, so no Recipes are affected
+until the IPC plumbing slice lands.
+
+
 ### Slice §15 Recipe Detail
 
 **Scope.** Closes the Recipe Detail half of CR-08

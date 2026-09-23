@@ -471,7 +471,8 @@
   {/if}
 
   <!--
-    CR-08 §10 Beginner tier editor modal. The
+    CR-08 §10 Beginner + §10.2 Guided tier editor
+    modal + §10.4 Expert tier integration. The
     Beginner tier's four fields (name + target_type +
     quality_profile + ai_enhancement_level) collect
     via `onChange`; the modal's "Save Recipe"
@@ -483,6 +484,12 @@
     "Saved as vN" status banner on the screen
     behind. Failure surfaces inline in the modal
     footer.
+
+    The Expert tier section summarises the
+    Recipe's stages (read-only) + per-stage AI
+    overrides + a one-click handoff to the
+    existing ProfileManager modal via the
+    `onOpenExpert` callback.
   -->
   {#if beginnerEditorOpen}
     <div
@@ -530,6 +537,17 @@
               stageOverrides: next.stageOverrides,
               stageEnabled: next.stageEnabled,
             };
+          }}
+          onOpenExpert={() => {
+            // CR-08 §10.4: hand off to the Profile
+            // Manager. Close the Beginner modal
+            // (the user's draft is preserved in
+            // state) and open the existing
+            // ProfileManager so they can edit the
+            // Recipe's stages + params via the
+            // source-of-truth surface.
+            beginnerEditorOpen = false;
+            managerOpen = true;
           }}
         />
         <footer class="modal-footer">

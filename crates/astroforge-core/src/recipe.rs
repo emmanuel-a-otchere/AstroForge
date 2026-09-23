@@ -682,7 +682,27 @@ pub fn apply_recipe(
     let mut stage_params = Vec::new();
     for stage in &recipe.stages {
         if stage.enabled {
-            stage_params.push((stage.stage_id.clone(), stage.params.clone()));
+            // CR-08 §10.4 apply round: consult
+            // `effective_ai_enhancement_for_stage` so
+            // the returned params hash carries the
+            // resolved AI Enhancement Level for each
+            // stage. The helper resolves per-stage
+            // override > recipe-level default;
+            // unknown stage IDs fall back to the
+            // recipe-level default. The underscore
+            // prefix marks the key as metadata (not
+            // a pipeline parameter); the IPC
+            // serializes it alongside the user-set
+            // params so the apply round can drive
+            // per-stage AI posture without a second
+            // round-trip.
+            let mut params = stage.params.clone();
+            let resolved = recipe.effective_ai_enhancement_for_stage(&stage.stage_id);
+            params.insert(
+                "_ai_enhancement_level".to_string(),
+                serde_json::Value::String(resolved.label().to_string()),
+            );
+            stage_params.push((stage.stage_id.clone(), params));
         }
     }
 

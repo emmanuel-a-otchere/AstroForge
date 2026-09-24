@@ -863,6 +863,77 @@ fn recipe_save_from_pipeline_plan(
     store.save(&recipe).map_err(Into::into)
 }
 
+/// CR-08 §22 round 2 / Slice B: "Save Processing as
+/// Recipe" UX. Loads the `StageRunRecord`s for a
+/// pipeline run, builds a [`Recipe`] from the terminal
+/// attempt per stage, and persists it via
+/// `RecipeStore::save`. Mirrors the
+/// `recipe_save_from_pipeline_plan` IPC pattern (§14),
+/// but reads from the **execution history** instead of
+/// the planned `PipelinePlan`.
+///
+/// - `run_id`: the `PipelineRun.id` whose stage runs
+///   will be folded into the Recipe.
+/// - `name`: the new Recipe's name.
+/// - `target_type`: optional override; when `None`,
+///   `recipe_from_stage_runs` falls back to
+///   `"unknown"` (the stage records don't carry a
+///   target_type; callers should pass one when they
+///   know it — typically the ImageVersion's
+///   target_type).
+///
+/// Returns the `RecipeSummary` of the saved v1 Recipe
+/// (a freshly-saved user Recipe is never flagged as a
+/// system Recipe — callers use `recipe_mark_as_system`
+/// to flip that if desired).
+#[tauri::command]
+fn recipe_save_from_stage_runs(
+    recipe_state: State<'_, RecipeState>,
+    project_state: State<'_, commands_project::ProjectState>,
+    run_id: String,
+    name: String,
+    target_type: Option<String>,
+) -> Result<RecipeSummary, CommandError> {
+    // Load the stage runs (clone-then-release pattern so
+    // we don't hold the project lock while we hold the
+    // recipe lock).
+    let stage_runs = {
+        let store = project_state
+            .store
+            .lock()
+            .map_err(|_| "project store mutex poisoned".to_string())?;
+        store
+            .list_stage_runs(&run_id)
+            .map_err(|e| format!("failed to list stage runs for {run_id}: {e}"))?
+    };
+    // Build the Recipe from the loaded stage runs
+    // (pure function).
+    let mut recipe = astroforge_core::recipe::recipe_from_stage_runs(
+        &stage_runs,
+        &run_id,
+        &name,
+        target_type.as_deref(),
+    );
+    // Assign the next version BEFORE save (mirrors the
+    // recipe_save IPC + §14 sibling pattern).
+    let profile_id = astroforge_core::recipe_store::RecipeStore::profile_id_for(
+        &recipe.name,
+        &recipe.target_type,
+    );
+    let version = {
+        let store = recipe_state
+            .0
+            .lock()
+            .expect("recipe store mutex poisoned");
+        store
+            .next_version_for(&profile_id)
+            .map_err(|e| format!("failed to compute next version: {e}"))?
+    };
+    recipe.version = version;
+    let store = recipe_state.0.lock().expect("recipe store mutex poisoned");
+    store.save(&recipe).map_err(Into::into)
+}
+
 /// CR-08 §3.1: mark a Recipe profile as a system Recipe.
 /// All existing versions of the profile get `is_system = 1`
 /// in the on-disk column, after which `recipe_save` and
@@ -1467,6 +1538,7 @@ fn main() {
             recipe_pipeline_plan_hash,
             recipe_apply,
             recipe_save_from_pipeline_plan,
+            recipe_save_from_stage_runs,
             recipe_ai_diff_summary,
             recipe_parameter_diff,
             recipe_compare_versions,

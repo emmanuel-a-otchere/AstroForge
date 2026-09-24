@@ -934,6 +934,66 @@ export async function savePipelinePlanAsRecipe(
 }
 
 /**
+ * CR-08 §22 round 2 / Slice B: "Save Processing as
+ * Recipe" UX. Loads the `StageRunRecord`s for a
+ * pipeline run via the Rust `recipe_save_from_stage_runs`
+ * IPC, builds a Recipe from the terminal attempt per
+ * stage, and persists it via `RecipeStore::save`.
+ * Returns the `RecipeSummary` of the saved v1 Recipe.
+ *
+ * This is the execution-history sibling of
+ * `savePipelinePlanAsRecipe` (§14): where §14 reads
+ * from the planned `PipelinePlan`, Slice B reads from
+ * the actual `StageRunRecord`s the engine produced
+ * (so the saved Recipe captures what the engine really
+ * did, including any per-stage overrides that diverged
+ * from the plan).
+ *
+ * @param runId  The `PipelineRun.id` whose stage runs
+ *   will be folded into the Recipe.
+ * @param name  The new Recipe's name (UI-side input).
+ * @param targetType  Optional override; when omitted,
+ *   the Rust side falls back to `"unknown"` (the
+ *   stage records don't carry a target_type; callers
+ *   should pass one when they know it — typically the
+ *   ImageVersion's target_type).
+ */
+export async function saveProcessingAsRecipe(
+  runId: string,
+  name: string,
+  targetType?: string,
+): Promise<RecipeSummary> {
+  if (!isTauri()) {
+    // Browser-mode placeholder: build a synthetic summary
+    // so the UI flow exercises end-to-end.
+    const profileId = profileIdFor(name, targetType ?? "unknown");
+    const summary: RecipeSummary = {
+      id: Math.floor(Date.now()),
+      profileId,
+      schemaVersion: "2.0",
+      name,
+      description: `Saved from processing run ${runId}`,
+      targetType: targetType ?? "unknown",
+      version: 1,
+      parentVersion: null,
+      branch: "main",
+      createdAt: new Date().toISOString(),
+      isSystem: false,
+      isArchived: false,
+      isImported: false,
+      lastUsedAt: null,
+    };
+    return summary;
+  }
+  const rust = (await invoke("recipe_save_from_stage_runs", {
+    runId,
+    name,
+    targetType: targetType ?? null,
+  })) as RustRecipeSummary;
+  return fromRustSummary(rust);
+}
+
+/**
  * Compute the deterministic profile_id for a (name, targetType) pair,
  * mirroring `RecipeStore::profile_id_for` in Rust. Useful for lookups
  * that don't have the summary in hand.

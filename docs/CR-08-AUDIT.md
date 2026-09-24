@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-22 (refresh 2: §13 + §15 + §10 + §20 + §10.2 + §30 + §15.3 + §14 shipped. §13: recipe_parameter_diff pure fn + IPC + RecipeDiffPanel.svelte + 7 tests. §15: RecipeSummary folds is_system/is_archived/is_imported/last_used_at; mark_last_used + mark_imported helpers; RecipeLibrary.svelte mounts inside RecipesScreen. §10: AiEnhancementLevel enum + ai_enhancement_level field on Recipe + RecipeEditor.svelte Beginner tier modal + 9 tests. §20: validation module + 5-check pipeline (range/dependency/filesystem/executable/resource) + SecurityValidationPanel.svelte + 21 tests. §10.2: ProcessingObjective enum + QualityTargets struct + per-stage AI override + RecipeEditor.svelte Guided tier section + 18 tests. §30: 9 ADRs (ADR-0012 through ADR-0020) covering Recipe-as-intent, Recipe/Pipeline distinction, explicit adaptation, immutable history, provenance-as-data, AI identity, qualified reproducibility, no-arbitrary-code, human-readable provenance. §15.3: RecipeDetail.svelte rendering the §15 layout (title bar with version + description + Target/AI/Style meta-grid + Processing Intent bullets + Required Models chips + [Apply Recipe] / [Duplicate] / [Edit] action buttons); recipeGet(profileId, version) IPC wrapper; quality_profile field added to RecipeFromRust TS interface; RecipeLibrary.svelte onSelect prop; RecipesScreen.svelte mounts RecipeDetail beside Library. §14: SaveAsRecipePanel.svelte 7-checkbox selection surface (Processing stages / Parameter choices / AI operations / Enhancement order / Masks / Quality objectives / Applicability) plus per-stage include sub-list with required stages locked ON. Refresh 1 stale-audit reconciliation already covered §5 / §17 / §18.)
+**Last refresh:** 2026-09-24 (refresh 3: §22 round 2 Slice B `save_processing_as_recipe` shipped. §22 ❌ row count: 3 → 2 (Slices C + D remain).)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -706,7 +706,7 @@ The full §20 security-validation pipeline ships via PR #392:
 | `recipe_application` | ⚠️ Partial — `apply_recipe()` function exists |
 | `recipe_adaptation` | ✅ `AdaptiveParameterSet::reason: String` |
 
-## §22 Semantic API — ⚠️ Partial (compare_recipe_versions + get_recipe_provenance shipped refresh 5; preview_recipe shipped refresh 6; 3 ❌ rows remain for round 2 slices B–D)
+## §22 Semantic API — ⚠️ Partial (compare_recipe_versions + get_recipe_provenance shipped refresh 5; preview_recipe shipped refresh 6; save_processing_as_recipe shipped refresh 7; 2 ❌ rows remain for round 2 slices C–D)
 
 `src-tauri/src/main.rs` registers the following Recipe IPCs
 (consumed via `src/lib/profile-store.ts`):
@@ -726,7 +726,7 @@ The full §20 security-validation pipeline ships via PR #392:
 | `preview_recipe` | ✅ `recipe_preview(profileId, version, availableModels?)` (CR-08 §22 round 2 / Slice A); Returns a `RecipePreviewResponse` (metadata + provenance + applicability + resolved_stages + warnings) without the `last_used_at` side effect. Walks ALL stages (enabled + disabled) so the UI can show skipped stages; surfaces human-readable advisories for missing-models / schema-mismatch / disabled stages / Off AI levels |
 | `apply_recipe` | ✅ `recipe_apply(profileId, version, availableModels?)` (CR-08 §22.3). Returns enabled `(stage_id, params)` pairs in Recipe order; runs the schema-version guard + missing-models compatibility check |
 | `save_pipeline_as_recipe` | ✅ `recipe_save_from_pipeline_plan(plan_id, name, targetType?)` (CR-08 §14); Pure-function `recipe_from_pipeline_plan` builds a Recipe from a `PipelinePlan`'s stages + parameters_json, then persists via `RecipeStore::save` |
-| `save_processing_as_recipe` | ❌ |
+| `save_processing_as_recipe` | ✅ `recipe_save_from_stage_runs(run_id, name, targetType?)` (CR-08 §22 round 2 / Slice B); Pure-function `recipe_from_stage_runs` picks the terminal attempt per stage from the execution-history `StageRunRecord`s (highest `attempt`), folds them into a Recipe preserving the user's actual params (any per-stage overrides that diverged from the plan), then persists via `RecipeStore::save`. Failed terminal attempts surface with `enabled = false` so the Recipe captures the user's exact history; RecipeEditor can re-enable them |
 | `import_recipe` | ✅ `recipe_import(json)` (CR-08 §19) |
 | `export_recipe` | ✅ `recipe_export(profileId, version?)` (CR-08 §19) |
 | `get_recipe_provenance` | ✅ `recipe_get_provenance(profileId, version)` (CR-08 §22 round 1); Returns a `RecipeProvenance` describing the Recipe itself (identity + lineage_steps + perceptual_models + required_models + quality_profile + pipeline_plan_hash + is_system). Distinct from the image-version provenance rendered by `ProvenancePanel.svelte` |

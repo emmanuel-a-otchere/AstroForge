@@ -790,6 +790,154 @@ pub fn recipe_from_pipeline_plan(
     recipe
 }
 
+/// CR-08 §22 round 2 / Slice B: convert a terminal
+/// processing run's stage records into a new
+/// [`Recipe`] for "Save Processing as Recipe" UX.
+/// Pure function — no IO, no side effects. The caller
+/// is responsible for persisting via `RecipeStore::save`.
+///
+/// This is the **execution-history sibling** of
+/// `recipe_from_pipeline_plan` (§14):
+/// - §14 builds a Recipe from the *intended* plan (what
+///   the engine was told to do).
+/// - Slice B builds a Recipe from the *actual* stage
+///   runs that executed (what the engine really did,
+///   including any per-stage parameter overrides that
+///   diverged from the plan).
+///
+/// Input: an unordered slice of [`StageRunRecord`]s
+/// keyed by `run_id` + `stage_id`. Reruns add multiple
+/// rows per stage (per CR-02 §12, `attempt` is 1-based).
+/// We pick the **terminal attempt per stage** (highest
+/// `attempt`) and ignore earlier attempts entirely.
+///
+/// Per-stage Recipe behaviour:
+/// - `enabled` mirrors the terminal attempt's status:
+///   `enabled = (terminal.status == "completed")`.
+///   A `failed` stage is recorded with `enabled = false`
+///   so the Recipe captures the user's exact history
+///   (the user can re-enable it later via RecipeEditor).
+///   This mirrors how `preview_recipe` surfaces ALL
+///   stages even when disabled.
+/// - `params` is parsed from the terminal attempt's
+///   `params_json`. Malformed or missing JSON falls
+///   back to an empty HashMap (no panic).
+/// - Stages are emitted in **first-attempt-first order**
+///   (i.e. the order they were originally recorded),
+///   not in the order the slice happened to arrive in.
+///
+/// Recipe defaults match the §14 sibling:
+/// - `version = 1`, `parent_version = None`,
+///   `branch = "main"`.
+/// - `quality_profile = Natural` (the actual runs
+///   don't encode a quality profile; the user can
+///   promote it in RecipeEditor).
+/// - `required_models` is empty (the stage records
+///   don't enumerate model requirements; the user can
+///   add them in RecipeEditor).
+/// - `flags` is empty.
+/// - `is_system = false` (the `mark_as_system` IPC
+///   flips it later if needed).
+/// - `processing_objectives`, `quality_targets`,
+///   `optional_operations` are all empty (the user's
+///   intent at the time of the run was implicit; the
+///   RecipeEditor surfaces them later).
+///
+/// `description` is auto-populated as
+/// `"Saved from processing run {run_id} ({n} stages, {m} completed)"`
+/// so the Recipe's provenance line is honest about its
+/// origin without the user having to type it.
+///
+/// `run_id` is taken from the first record's `run_id`
+/// field (all records in the slice share the same
+/// `run_id` per the schema). The IPC wrapper passes
+/// `run_id` explicitly so callers don't have to rely
+/// on the slice being non-empty.
+pub fn recipe_from_stage_runs(
+    stage_runs: &[crate::domain::StageRunRecord],
+    run_id: &str,
+    name: &str,
+    target_type: Option<&str>,
+) -> Recipe {
+    use std::collections::HashMap;
+
+    // Resolve target_type: explicit override wins, else
+    // "unknown". Unlike §14 we don't have a plan-level
+    // target_type to fall back on — the stage records
+    // don't carry one. Callers should pass an explicit
+    // target_type when they know it (the typical case:
+    // the ImageVersion row carries it).
+    let resolved_target_type: String = match target_type {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => "unknown".to_string(),
+    };
+
+    // Pick the terminal attempt per stage_id. Reruns add
+    // multiple rows; we keep the highest-`attempt` row
+    // for each stage.
+    use std::collections::BTreeMap;
+    let mut terminal_per_stage: BTreeMap<String, &crate::domain::StageRunRecord> = BTreeMap::new();
+    for sr in stage_runs {
+        let entry = terminal_per_stage.entry(sr.stage_id.clone()).or_insert(sr);
+        if sr.attempt > entry.attempt {
+            *entry = sr;
+        }
+    }
+
+    // Emit stages in first-attempt-first order. The
+    // canonical ordering is captured by the earliest
+    // `attempt == 1` row's position among the records.
+    let mut first_seen_order: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for sr in stage_runs {
+        if sr.attempt == 1 && seen.insert(sr.stage_id.clone()) {
+            first_seen_order.push(sr.stage_id.clone());
+        }
+    }
+
+    let total_stages = terminal_per_stage.len();
+    let completed_stages = terminal_per_stage
+        .values()
+        .filter(|sr| sr.status == "completed")
+        .count();
+
+    let mut recipe = Recipe::new(name, &resolved_target_type);
+    recipe.description = format!(
+        "Saved from processing run {} ({} stages, {} completed)",
+        run_id, total_stages, completed_stages
+    );
+    recipe.version = 1;
+    recipe.parent_version = None;
+    recipe.branch = "main".into();
+    recipe.quality_profile = QualityProfile::Natural;
+    recipe.is_system = false;
+    recipe.required_models.clear();
+    recipe.flags.clear();
+    recipe.processing_objectives.clear();
+    recipe.quality_targets = QualityTargets::default();
+    recipe.optional_operations.clear();
+
+    for stage_id in &first_seen_order {
+        let Some(terminal) = terminal_per_stage.get(stage_id) else {
+            continue;
+        };
+        let params: HashMap<String, serde_json::Value> = terminal
+            .params_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        recipe.add_stage(stage_id, params);
+        // add_stage always pushes enabled=true; mirror
+        // the terminal attempt's status so a failed
+        // stage doesn't sneak back on as enabled.
+        if let Some(last) = recipe.stages.last_mut() {
+            last.enabled = terminal.status == "completed";
+        }
+    }
+
+    recipe
+}
+
 pub fn integrity_label(badge: &IntegrityBadge) -> String {
     if badge.perceptual_models_used {
         "Perceptual AI used".into()

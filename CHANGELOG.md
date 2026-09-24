@@ -2,6 +2,113 @@
 
 ## Unreleased
 
+### Slice B — `save_processing_as_recipe`
+
+**Scope.** Closes the §22 round 2 Slice B
+audit row by adding the execution-history
+sibling of `save_pipeline_as_recipe` (§14).
+Where §14 reads from the *intended*
+`PipelinePlan`, Slice B reads from the
+*actual* `StageRunRecord`s the engine
+produced, so the saved Recipe captures what
+the engine really did (including any
+per-stage parameter overrides that diverged
+from the plan).
+
+**Rust core.** New pure function
+`astroforge_core::recipe::recipe_from_stage_runs(stage_runs, run_id, name, target_type)`
+in `crates/astroforge-core/src/recipe.rs`:
+- Picks the **terminal attempt per stage**
+  (highest `attempt`) so reruns don't smuggle
+  stale params into the saved Recipe.
+- Emits stages in **first-attempt-first
+  order**, not in the order the slice
+  happened to arrive in.
+- Maps the terminal attempt's status to the
+  RecipeStage's `enabled` flag: a `failed`
+  terminal attempt surfaces with
+  `enabled = false` so the Recipe captures
+  the user's exact history (RecipeEditor
+  can re-enable later).
+- Falls back to an empty HashMap when
+  `params_json` is missing or malformed (no
+  panic).
+- Auto-populates `description` as
+  `"Saved from processing run {run_id} ({n} stages, {m} completed)"`
+  for honest provenance.
+
+**IPC.** New `recipe_save_from_stage_runs`
+Tauri command in
+`src-tauri/src/main.rs`:
+- Loads `StageRunRecord`s via the existing
+  `DomainStore::list_stage_runs(run_id)`.
+- Builds the Recipe via the pure function.
+- Saves via `RecipeStore::save` (same
+  `next_version_for` + `save` pattern as
+  §14).
+- Returns the saved v1 `RecipeSummary`.
+Registered alongside `recipe_save_from_pipeline_plan`
+in the `invoke_handler!`.
+
+**TS bridge.** New
+`saveProcessingAsRecipe(runId, name, targetType?)`
+in `src/lib/profile-store.ts`. Mirrors
+`savePipelinePlanAsRecipe`: Tauri-invoke +
+browser-mode placeholder returning a
+synthetic summary so the UI flow exercises
+end-to-end.
+
+**Tests.** 5 new pure-function tests in
+`crates/astroforge-core/tests/recipe_from_stage_runs.rs`
+pin the contract:
+1. Empty stage-runs list → Recipe with zero
+   stages but the §14-shaped defaults.
+2. 3-stage completed run → 3 enabled
+   RecipeStages with parsed params.
+3. Mixed run (2 completed + 1 failed) → 3
+   stages; failed stage has
+   `enabled = false`.
+4. Rerun scenario (attempts 1 + 2 for one
+   stage) → terminal attempt's params win.
+5. Malformed `params_json` (None / "" /
+   invalid JSON) → empty HashMap, no panic.
+
+All 5 pass. Full workspace test suite
+passes with no regressions.
+
+**Audit doc flip.** §22 `save_processing_as_recipe`:
+❌ → ✅. §22 ❌ row count: 3 → 2 (Slices
+C `check_recipe_applicability` full §12
+matrix + D `get_reproducibility_report`
+remain). §22 sub-heading refresh line + Last
+refresh timestamp updated.
+
+**Honest flags.**
+- The Recipe built from a pipeline run
+  captures the *engine-side* params as
+  observed, including any overrides that
+  diverged from the source plan. Users who
+  want plan-faithful Recipes should use
+  `save_pipeline_as_recipe` (§14) instead.
+- `target_type` defaults to `"unknown"`
+  when not supplied (the stage records don't
+  carry one). Callers with a known
+  target_type (e.g. the parent ImageVersion)
+  should pass it explicitly.
+- The Recipe's `quality_profile` is fixed
+  at `Natural` on save; users can promote
+  it in RecipeEditor. Same for
+  `processing_objectives`, `quality_targets`,
+  `optional_operations`, and
+  `required_models` — all start empty.
+- The new IPC composes the
+  `ProjectState` + `RecipeState` Tauris
+  State guards; lock acquisition order is
+  project-first-then-recipe (the
+  clone-then-release pattern at the top of
+  the IPC keeps both locks from being held
+  simultaneously).
+
 ### Slice §14 selection surface
 
 **Scope.** Closes CR-08 §14 Recipe Save from

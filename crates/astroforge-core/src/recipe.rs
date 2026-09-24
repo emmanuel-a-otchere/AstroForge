@@ -658,7 +658,7 @@ pub fn validate_compatibility(recipe: &Recipe, available_models: &[String]) -> V
     ValidationResult::Compatible
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ValidationResult {
     Compatible,
     MissingModels(Vec<String>),
@@ -1842,5 +1842,187 @@ pub fn recipe_provenance(profile_id: &str, recipe: &Recipe) -> RecipeProvenance 
         required_models,
         is_system: recipe.is_system,
         lineage_steps: steps,
+    }
+}
+// ─── CR-08 §22 round 2 — Slice A: preview_recipe ───
+//
+// `preview_recipe` is the read-only sibling of
+// `recipe_apply`. Where `apply_recipe` runs the
+// compatibility check + filters to enabled stages +
+// stamps `last_used_at`, `preview_recipe` returns
+// the full preview surface even when the Recipe is
+// not applicable so the UI can show the user WHY
+// (missing models, schema mismatch, disabled
+// stages) without forcing them into a fix-or-abort
+// loop.
+//
+// The response surface is intentionally larger than
+// `RecipeApplyResponse`:
+// - `metadata` lets the UI render a Recipe header
+//   without a separate `recipe_get` round-trip.
+// - `provenance` is the round-1 surface — the
+//   preview is the natural place to surface
+//   Recipe-level lineage (system marker, parent
+//   chain, perceptual-models list).
+// - `applicability` echoes the existing
+//   `ValidationResult` 3-variant enum. The full
+//   §12 6-variant matrix lands in Slice C.
+// - `resolved_stages` walks ALL stages (enabled +
+//   disabled) so the UI can show disabled stages
+//   in the preview even though `apply_recipe`
+//   filters them out.
+// - `warnings` is a list of human-readable
+//   advisories derived from the applicability
+//   result + the per-stage enabled state.
+
+/// CR-08 §22 round 2 / Slice A: the preview metadata
+/// block surfaced alongside the resolved stages.
+/// Lets the UI render a Recipe header (with name,
+/// description, target_type, quality_profile,
+/// ai_enhancement_level, is_system) without a
+/// separate `recipe_get` round-trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecipePreviewMetadata {
+    pub name: String,
+    pub description: String,
+    pub target_type: String,
+    pub quality_profile: QualityProfile,
+    pub ai_enhancement_level: AiEnhancementLevel,
+    pub is_system: bool,
+}
+
+/// CR-08 §22 round 2 / Slice A: one row in the
+/// `resolved_stages` list. Mirrors `apply_recipe`'s
+/// `_ai_enhancement_level` stamping convention but
+/// extracts the resolved level to a dedicated field
+/// instead of nesting it inside `params` (the preview
+/// is human-facing; a dedicated field is easier to
+/// render).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedStagePreview {
+    pub stage_id: String,
+    pub enabled: bool,
+    pub params: HashMap<String, serde_json::Value>,
+    /// Resolved per-stage AI Enhancement Level label
+    /// (`Off` / `Conservative` / `Recommended` /
+    /// `Advanced`). Mirrors `apply_recipe`'s
+    /// `_ai_enhancement_level` stamp but lifted to a
+    /// dedicated field.
+    pub resolved_ai_enhancement_level: String,
+}
+
+/// CR-08 §22 round 2 / Slice A: full preview response.
+/// Distinct from `RecipeApplyResponse` (the existing
+/// `recipe_apply` IPC's response) on three axes:
+/// - No `last_used_at` side effect (preview is pure).
+/// - Surfaces ALL stages, including disabled ones
+///   (apply filters to enabled only).
+/// - Carries metadata + provenance in the response so
+///   the UI does not need a separate `recipe_get`
+///   round-trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecipePreviewResponse {
+    pub profile_id: String,
+    pub version: u32,
+    pub branch: String,
+    pub metadata: RecipePreviewMetadata,
+    pub provenance: RecipeProvenance,
+    /// Existing 3-variant `ValidationResult`. The
+    /// full §12 6-variant matrix lands in Slice C
+    /// (`check_recipe_applicability` round 2).
+    pub applicability: ValidationResult,
+    pub resolved_stages: Vec<ResolvedStagePreview>,
+    /// Human-readable advisories. Always present
+    /// (empty Vec when no advisories apply). When
+    /// `applicability != Compatible`, the
+    /// applicability result is also surfaced as a
+    /// warning so the UI does not have to render the
+    /// enum to make the cause visible.
+    pub warnings: Vec<String>,
+}
+
+/// CR-08 §22 round 2 / Slice A: build the preview
+/// surface for a Recipe. Pure function (plus the
+/// derived `profile_id` argument, mirroring the
+/// round-1 `recipe_provenance` convention). The
+/// `available_models` slice is optional; when empty
+/// (the common preview-against-fleet case), the
+/// function still surfaces the Recipe but the
+/// `applicability` may flag `MissingModels`.
+///
+/// `warnings` is populated from:
+/// - the `ValidationResult` outcome (missing models
+///   list, schema version mismatch),
+/// - any disabled stages (informational),
+/// - the `_ai_enhancement_level = "Off"` flag
+///   (informational, helps the user spot a fully
+///   disabled AI posture).
+pub fn preview_recipe(
+    profile_id: &str,
+    recipe: &Recipe,
+    available_models: &[String],
+) -> RecipePreviewResponse {
+    let applicability = validate_compatibility(recipe, available_models);
+
+    let mut resolved_stages: Vec<ResolvedStagePreview> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    for stage in &recipe.stages {
+        let resolved_level = recipe.effective_ai_enhancement_for_stage(&stage.stage_id);
+        let label = resolved_level.label().to_string();
+        if !stage.enabled {
+            warnings.push(format!(
+                "Stage \"{}\" is disabled via §10.2 Guided tier override; apply will skip it",
+                stage.stage_id
+            ));
+        }
+        if label == "Off" {
+            warnings.push(format!(
+                "Stage \"{}\" resolves AI Enhancement Level to Off; AI models will not be used",
+                stage.stage_id
+            ));
+        }
+        resolved_stages.push(ResolvedStagePreview {
+            stage_id: stage.stage_id.clone(),
+            enabled: stage.enabled,
+            params: stage.params.clone(),
+            resolved_ai_enhancement_level: label,
+        });
+    }
+
+    // Mirror the applicability result as a human-
+    // readable advisory so the UI does not have to
+    // render the enum to make the cause visible.
+    match &applicability {
+        ValidationResult::Compatible => {}
+        ValidationResult::MissingModels(missing) => {
+            warnings.push(format!(
+                "Missing required models: {} (Recipe lists these as required; install them or remove from the Recipe before applying)",
+                missing.join(", ")
+            ));
+        }
+        ValidationResult::IncompatibleVersion(v) => {
+            warnings.push(format!(
+                "Schema version mismatch: this binary expects {v}; the Recipe was authored against a different version. Re-save the Recipe against the current schema or downgrade the binary"
+            ));
+        }
+    }
+
+    RecipePreviewResponse {
+        profile_id: profile_id.to_string(),
+        version: recipe.version,
+        branch: recipe.branch.clone(),
+        metadata: RecipePreviewMetadata {
+            name: recipe.name.clone(),
+            description: recipe.description.clone(),
+            target_type: recipe.target_type.clone(),
+            quality_profile: recipe.quality_profile,
+            ai_enhancement_level: recipe.ai_enhancement_level,
+            is_system: recipe.is_system,
+        },
+        provenance: recipe_provenance(profile_id, recipe),
+        applicability,
+        resolved_stages,
+        warnings,
     }
 }

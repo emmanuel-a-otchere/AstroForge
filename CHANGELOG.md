@@ -2,6 +2,229 @@
 
 ## Unreleased
 
+### Slice C — `check_recipe_applicability` (full §12 6-variant matrix)
+
+**Scope.** Closes the §22 round 2 Slice C
+audit row by adding the full §12 applicability
+matrix the audit doc tracks as the "6-variant
+matrix". Where `recipe_preview` carries the
+existing 3-variant `ValidationResult` (the
+apply-time gate: schema version + missing
+models only), Slice C adds the pre-flight §12
+verdict the UI uses to decide whether to show
+the user an adaptation prompt before they
+apply a Recipe.
+
+**Rust core.** New pure function
+`astroforge_core::recipe::check_recipe_applicability(recipe, matrix) -> ApplicabilityReport`
+in `crates/astroforge-core/src/recipe.rs`,
+plus the supporting types:
+
+- `ApplicabilityOutcome` 6-variant enum:
+  `Compatible` / `Adaptable` /
+  `PartiallyCompatible` / `Incompatible` /
+  `MissingModels(Vec<String>)` /
+  `SchemaMismatch(String)` (carries the full
+  human-readable note describing the gap, with
+  the version string + the binary's current
+  version embedded as substrings; matches the
+  `ValidationResult::IncompatibleVersion(String)`
+  convention of carrying the mismatch detail).
+  Carries `label()` (one-line UI label) +
+  `is_applicable()` helpers.
+- `DimensionOutcome` per-dimension verdict:
+  `Match` / `Adaptable(String)` /
+  `PartialSkip(String)` / `Mismatch(String)` /
+  `NotEvaluated`. New dimensions are additive
+  (old UIs render unknown ids as "Unknown
+  dimension" and the verdict still works).
+- `ApplicabilityMatrix` session-side criteria
+  input. Every field is optional so callers
+  supply only the dimensions they know; unset
+  dimensions surface as `NotEvaluated`.
+- `ApplicabilityReport` summary:
+  `verdict` + `dimensions` (per-dimension list)
+  + `warnings` (human-readable advisories).
+
+The matrix evaluates 5 §12 dimensions:
+
+1. `schema_version` (Recipe vs binary's
+   `SCHEMA_VERSION_CURRENT`; binary constant,
+   not a matrix field).
+2. `available_models` (Recipe's
+   `required_models` vs the optional
+   `available_models` slice the caller passes).
+3. `target_type` (Recipe's `target_type` vs
+   session target; `Adaptable` when Recipe
+   target is unset / `"unknown"`,
+   `Incompatible` when the targets disagree).
+4. `image_dimensions` (session's
+   `image_width` / `image_height`; `Adaptable`
+   because the Recipe does not yet encode a
+   dimension preference: the engine can scale
+   per-stage params within reason).
+5. `dataset_quality` (session's quality proxy;
+   `Adaptable` for the same reason).
+
+Verdict folding priority (top to bottom):
+
+1. Schema mismatch (any non-`Match` for
+   `schema_version`) → `SchemaMismatch`.
+2. Required models not in the available-models
+   slice → `MissingModels(list)`.
+3. Any `DimensionOutcome::Mismatch` →
+   `Incompatible`.
+4. Any `DimensionOutcome::PartialSkip` →
+   `PartiallyCompatible`.
+5. Any `DimensionOutcome::Adaptable` →
+   `Adaptable`.
+6. All `Match` or `NotEvaluated` →
+   `Compatible`.
+
+`warnings` is populated from every non-`Match`
+dimension's note so the UI does not have to
+render the enum tags to make the cause visible.
+Empty when every dimension is `Match` (and the
+verdict is therefore `Compatible`).
+
+**IPC.** New `recipe_check_applicability`
+Tauri command in `src-tauri/src/main.rs`:
+reads the Recipe via `RecipeStore::get`,
+evaluates against the passed
+`ApplicabilityMatrix`, returns the full
+`ApplicabilityReport`. Registered alongside
+`recipe_preview` in the `invoke_handler!`.
+
+**TS bridge.** New
+`recipeCheckApplicability(profileId, version, matrix)`
+in `src/lib/astroforge-api.ts` (Tauri invoke +
+type definitions for the verdict enum, the
+dimension outcome enum, the matrix input, and
+the report output) + a high-level wrapper
+`checkRecipeApplicability(profileId, version, matrix)`
+in `src/lib/profile-store.ts` (mirrors
+`recipePreview`'s browser-mode placeholder
+pattern: returns a synthetic `Compatible`
+verdict + 5 `NotEvaluated` dimensions when not
+running under Tauri).
+
+**Tests.** 19 new pure-function tests in
+`crates/astroforge-core/tests/recipe_applicability.rs`
+pin the contract:
+
+1. Empty matrix + current-schema Recipe + no
+   required models → Compatible verdict, all 5
+   dimensions `NotEvaluated`, no warnings.
+2. Empty matrix + mismatched schema version →
+   SchemaMismatch, schema_version dimension
+   `Mismatch`, warning carries the version
+   string, `is_applicable() == false`.
+3. Available-models supplied + missing
+   required model → MissingModels verdict
+   listing the missing model id.
+4. Present required model is Match.
+5. Matching target type is Match.
+6. Mismatched target type is Incompatible
+   (target-type mismatches are hard blockers
+   per the §12 spec).
+7. Recipe target_type `"unknown"` but session
+   target_type supplied → Adaptable.
+8. Image dimensions supplied → Adaptable.
+9. Dataset quality supplied → Adaptable.
+10. All dimensions Adaptable (no Match, no
+    Mismatch) → verdict folds to Adaptable.
+11. Mixed Match + MissingModels yields
+    MissingModels (the missing-models fold
+    precedes the Incompatible fold).
+12. Mixed SchemaMismatch + missing models
+    yields SchemaMismatch (top of the priority
+    ladder).
+13. `is_applicable()` matches the documented
+    fold: Compatible / Adaptable /
+    PartiallyCompatible are applicable;
+    Incompatible / MissingModels /
+    SchemaMismatch are not.
+14. `label()` returns the documented stable
+    label per variant.
+15. `NotEvaluated` does NOT produce a warning.
+16. Per-dimension rows are returned in stable
+    order: `schema_version`,
+    `available_models`, `target_type`,
+    `image_dimensions`, `dataset_quality`.
+17. Serde round-trip via JSON preserves the
+    verdict enum tag + per-dimension list.
+18. Empty `required_models` +
+    `available_models` supplied → Match.
+19. Recipe target_type empty string is
+    Adaptable when session target supplied.
+
+Plus a `partial_only_dimension_yields_partially_compatible`
+test pins the `PartialSkip` fold (no
+dimension emits `PartialSkip` today; the test
+constructs the outcome directly to verify the
+verdict fold) + a `stages_present_in_recipe_do_not_affect_verdict`
+test confirms stage contents do not influence
+the §12 verdict (stage-level applicability is
+the apply round's responsibility).
+
+All 19 pass locally (CI). Full workspace test
+suite passes with no regressions.
+
+**Audit doc flip.** §22
+`check_recipe_applicability`: ❌ → ✅. §22 ❌
+row count: 2 → 1 (Slice D `get_reproducibility_report`
+remains). §22 sub-heading refresh line + Last
+refresh timestamp updated.
+
+**Honest flags.**
+
+- The `image_dimensions` + `dataset_quality`
+  dimensions always surface as `Adaptable`
+  today because the Recipe struct does not yet
+  encode the §4 applicability-block fields
+  (`author`, `applicability.target_types[]`,
+  `applicability.acquisition`,
+  `applicability.camera`,
+  `applicability.filter`, dimension
+  preferences, quality preferences). Once the
+  R1 schema-completion slice lands (the §4
+  audit row), these dimensions will narrow to
+  true Match / Mismatch verdicts. The current
+  Adaptable fold is the documented
+  "engine-can-scale" semantic.
+- The Recipe's `target_type` is the only
+  target-type field today. When the R1
+  schema-completion slice lands and
+  `applicability.target_types[]` is a `Vec`,
+  the matrix will switch to the multi-target
+  list and the per-target match check will
+  become a set-inclusion fold.
+- The `PartialSkip` verdict is wired through the
+  fold + `is_applicable()` but no dimension
+  emits it today (no current dimension has a
+  fallback / substitution path). The
+  `partial_only_dimension_yields_partially_compatible`
+  test pins the verdict so a future dimension
+  can opt into it without re-cutting the fold.
+- The matrix evaluator is intentionally pure:
+  it does NOT call the AI model registry, the
+  filesystem, or the hardware probe. Callers
+  assemble the matrix client-side and pass it
+  in. The pre-flight verdict therefore depends
+  on the caller knowing what to supply; UIs
+  that want a "fully automatic" pre-flight can
+  supply every matrix field from
+  `model_registry.list()` + the current
+  pipeline run's metadata.
+- Distinct from `recipe_preview`'s
+  `applicability` field (the 3-variant apply-
+  time gate). The two surfaces are
+  intentionally separate so the UI can show
+  the user WHY a Recipe is partially
+  applicable (Slice C matrix) without
+  confusing the apply-time refusal gate
+  (Slice A preview).
+
 ### Slice B — `save_processing_as_recipe`
 
 **Scope.** Closes the §22 round 2 Slice B

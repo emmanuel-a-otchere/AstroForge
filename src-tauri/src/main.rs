@@ -1147,6 +1147,39 @@ fn recipe_preview(
     Ok(preview_fn(&profile_id, &recipe, models_slice))
 }
 
+/// CR-08 §22 round 2 / Slice C: full §12 6-variant
+/// applicability matrix. Reads a Recipe via the
+/// existing `RecipeStore::get`, evaluates it
+/// against the session-side `ApplicabilityMatrix`
+/// passed in by the caller, and returns the
+/// complete `ApplicabilityReport` (top-level
+/// verdict + per-dimension list + human-readable
+/// warnings). Distinct from the 3-variant
+/// `ValidationResult` carried by `recipe_preview`:
+/// that surface is the apply-time gate (schema +
+/// missing-models only); the §12 matrix is the
+/// pre-flight compatibility verdict the UI uses to
+/// decide whether to show the user an adaptation
+/// prompt before they apply.
+///
+/// All `ApplicabilityMatrix` fields are optional;
+/// unset dimensions surface as `NotEvaluated` in
+/// the per-dimension list and do not block the
+/// verdict. Returns CommandError if the Recipe is
+/// not found.
+#[tauri::command]
+fn recipe_check_applicability(
+    state: State<'_, RecipeState>,
+    profile_id: String,
+    version: u32,
+    matrix: astroforge_core::recipe::ApplicabilityMatrix,
+) -> Result<astroforge_core::recipe::ApplicabilityReport, CommandError> {
+    use astroforge_core::recipe::check_recipe_applicability;
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let recipe = store.get(&profile_id, version)?;
+    Ok(check_recipe_applicability(&recipe, &matrix))
+}
+
 /// CR-08 §20: validate a Recipe against the
 /// §20 stage-spec table for the five risk classes
 /// (range, dependency, filesystem, executable,
@@ -1544,6 +1577,7 @@ fn main() {
             recipe_compare_versions,
             recipe_get_provenance,
             recipe_preview,
+            recipe_check_applicability,
             recipe_security_validate,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,

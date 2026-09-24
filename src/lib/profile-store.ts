@@ -1006,3 +1006,63 @@ export function profileIdFor(name: string, targetType: string): string {
       .replace(/^-+|-+$/g, "");
   return `prof_${sanitize(name)}_${sanitize(targetType)}`;
 }
+
+/**
+ * CR-08 §22 round 2 / Slice C: full §12 6-variant
+ * applicability matrix. Wraps the
+ * `recipe_check_applicability` Tauri command.
+ * Returns the Rust-side `ApplicabilityReport`
+ * verbatim (verdict + per-dimension list +
+ * human-readable warnings). Browser-mode
+ * placeholder returns a synthetic
+ * `Compatible` verdict so the UI flow exercises
+ * end-to-end during development.
+ *
+ * Distinct from `recipePreview` (which carries
+ * the 3-variant `ValidationResult` apply-time
+ * gate): this surface is the pre-flight §12
+ * matrix verdict the UI uses to decide whether
+ * to show the user an adaptation prompt before
+ * they apply a Recipe.
+ *
+ * @param profileId  The Recipe's `profile_id`.
+ * @param version  The Recipe's `version` (1-based
+ *   linear counter).
+ * @param matrix  Session-side criteria. Pass an
+ *   empty object to evaluate the Recipe against
+ *   no known criteria (every dimension surfaces
+ *   as `NotEvaluated`; verdict folds to
+ *   `Compatible`).
+ */
+export async function checkRecipeApplicability(
+  profileId: string,
+  version: number,
+  matrix: {
+    target_type?: string | null;
+    image_width?: number | null;
+    image_height?: number | null;
+    available_models?: string[] | null;
+    dataset_quality?: number | null;
+  } = {},
+): Promise<
+  import("./astroforge-api").ApplicabilityReportFromRust
+> {
+  if (!isTauri()) {
+    // Browser-mode placeholder: return a synthetic
+    // Compatible verdict so the UI flow exercises
+    // end-to-end during development.
+    return {
+      verdict: "Compatible",
+      dimensions: [
+        { dimension: "schema_version", outcome: "NotEvaluated" },
+        { dimension: "available_models", outcome: "NotEvaluated" },
+        { dimension: "target_type", outcome: "NotEvaluated" },
+        { dimension: "image_dimensions", outcome: "NotEvaluated" },
+        { dimension: "dataset_quality", outcome: "NotEvaluated" },
+      ],
+      warnings: [],
+    };
+  }
+  const { recipeCheckApplicability } = await import("./astroforge-api");
+  return recipeCheckApplicability(profileId, version, matrix);
+}

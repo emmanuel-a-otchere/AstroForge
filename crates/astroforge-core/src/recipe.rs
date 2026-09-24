@@ -2174,3 +2174,424 @@ pub fn preview_recipe(
         warnings,
     }
 }
+
+// ─── CR-08 §22 round 2 / Slice C ─────────────────────────────────────────────
+//
+// Full §12 6-variant applicability matrix. Distinct from the
+// existing 3-variant `ValidationResult` (which is the apply-time
+// gate: schema-version + missing-models only). The §12 matrix
+// surfaces the 4 §12 outcomes (`Compatible` / `Adaptable` /
+// `PartiallyCompatible` / `Incompatible`) PLUS the 2 missing-data
+// failure modes (`MissingModels` / `SchemaMismatch`), giving a
+// 6-variant enum the audit doc tracks as the "6-variant matrix".
+//
+// Per-dimension outcomes are returned so the UI can show the user
+// WHICH dimension caused the verdict (target type mismatch vs
+// image dimensions vs available resources vs AI models vs schema
+// version) rather than forcing them to guess from a flat enum tag.
+
+/// CR-08 §22 round 2 / Slice C: 6-variant §12
+/// applicability outcome. The first 4 variants mirror
+/// the §12 spec verbatim (Compatible / Adaptable /
+/// PartiallyCompatible / Incompatible). The last 2
+/// (`MissingModels` / `SchemaMismatch`) are the
+/// failure modes the apply-time gate already checks
+/// separately: surfaced here so the UI can render a
+/// single matrix verdict without a second round-trip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApplicabilityOutcome {
+    /// Recipe matches every §12 dimension exactly.
+    /// No adaptation or substitution required.
+    Compatible,
+    /// Recipe diverges on one or more dimensions that
+    /// can be auto-adapted at apply time (e.g. target
+    /// type suffix, image-dimension scaling). User
+    /// should be shown the adaptation in the preview.
+    Adaptable,
+    /// Recipe matches the overall intent but some
+    /// stages must be skipped or substituted (e.g. an
+    /// AI model is unavailable but the stage has a
+    /// non-AI fallback). Apply will still succeed with
+    /// a documented caveat.
+    PartiallyCompatible,
+    /// Recipe cannot safely be applied (e.g. an
+    /// enabled stage requires a resource that does
+    /// not exist in this build). Apply must refuse.
+    Incompatible,
+    /// One or more `required_models` are not in the
+    /// available-models slice. Distinct from
+    /// `PartiallyCompatible` because the gap is a
+    /// model-install problem, not a recipe-design
+    /// problem.
+    MissingModels(Vec<String>),
+    /// Recipe's `schema_version` differs from this
+    /// binary's `SCHEMA_VERSION_CURRENT`. Distinct
+    /// from `Incompatible` because the fix is a
+    /// re-save or schema migration, not a recipe edit.
+    SchemaMismatch(String),
+}
+
+impl ApplicabilityOutcome {
+    /// One-line human-readable verdict label the UI
+    /// can render directly. Stable across the enum's
+    /// serde tag so the panel can switch on it.
+    pub fn label(&self) -> &'static str {
+        match self {
+            ApplicabilityOutcome::Compatible => "Compatible",
+            ApplicabilityOutcome::Adaptable => "Adaptable",
+            ApplicabilityOutcome::PartiallyCompatible => "Partially compatible",
+            ApplicabilityOutcome::Incompatible => "Incompatible",
+            ApplicabilityOutcome::MissingModels(_) => "Missing models",
+            ApplicabilityOutcome::SchemaMismatch(_) => "Schema mismatch",
+        }
+    }
+
+    /// Returns `true` when the outcome allows the
+    /// Recipe to be applied (Compatible / Adaptable /
+    /// PartiallyCompatible). False for the two
+    /// hard-blocker variants (Incompatible /
+    /// MissingModels / SchemaMismatch).
+    pub fn is_applicable(&self) -> bool {
+        matches!(
+            self,
+            ApplicabilityOutcome::Compatible
+                | ApplicabilityOutcome::Adaptable
+                | ApplicabilityOutcome::PartiallyCompatible
+        )
+    }
+}
+
+/// CR-08 §22 round 2 / Slice C: per-dimension outcome.
+/// Every §12 dimension the matrix evaluates gets one
+/// row in the report so the UI can render a checklist
+/// ("✓ Target type / ✓ Image dimensions / ✗ Available
+/// models / ✗ Schema version") without re-running the
+/// evaluator.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DimensionOutcome {
+    /// Dimension matches the Recipe's expectation
+    /// exactly. No note required.
+    Match,
+    /// Dimension matches within an auto-adaptable
+    /// margin (e.g. target type suffix difference,
+    /// image-dimension ratio within scaling range).
+    /// `note` explains the adaptation the apply round
+    /// will perform.
+    Adaptable(String),
+    /// Dimension requires a stage skip or substitution
+    /// at apply time. `note` explains which stage(s)
+    /// are affected.
+    PartialSkip(String),
+    /// Dimension cannot be satisfied. `note`
+    /// describes the gap.
+    Mismatch(String),
+    /// Dimension was not supplied in the matrix
+    /// (caller did not pass a value for this
+    /// dimension). The matrix treats the missing
+    /// dimension as `NotEvaluated` rather than
+    /// failing the verdict: the verdict still
+    /// reflects the dimensions the caller supplied.
+    NotEvaluated,
+}
+
+/// CR-08 §22 round 2 / Slice C: per-dimension verdict
+/// tuple (id + outcome) carried in the report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApplicabilityDimension {
+    /// Stable dimension id the UI can switch on
+    /// (`"target_type"` / `"image_dimensions"` /
+    /// `"available_models"` / `"schema_version"` /
+    /// `"dataset_quality"`). New dimensions are
+    /// additive: old UIs render the new id as
+    /// "Unknown dimension" and the verdict still
+    /// works.
+    pub dimension: String,
+    pub outcome: DimensionOutcome,
+}
+
+/// CR-08 §22 round 2 / Slice C: session-side criteria
+/// the matrix evaluates the Recipe against. Every
+/// field is optional so callers can supply only the
+/// dimensions they know. Unknown / unset dimensions
+/// surface as `DimensionOutcome::NotEvaluated` in the
+/// report (the verdict does not fail on missing
+/// dimensions: it just reports a less-complete
+/// picture).
+///
+/// The matrix is intentionally pure: it does not call
+/// out to the AI model registry, filesystem, or
+/// hardware probe. Callers assemble the matrix
+/// client-side and pass it in.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ApplicabilityMatrix {
+    /// The session's target type (e.g. `"deep_sky"`,
+    /// `"planetary"`). When `None`, the target-type
+    /// dimension is `NotEvaluated`.
+    pub target_type: Option<String>,
+    /// Session image dimensions in pixels (width,
+    /// height). When `None`, the image-dimensions
+    /// dimension is `NotEvaluated`.
+    pub image_width: Option<u32>,
+    pub image_height: Option<u32>,
+    /// Sorted list of model identifiers the session
+    /// can reach (typically populated from the AI
+    /// model registry). When `None`, the available-
+    /// models dimension is `NotEvaluated`.
+    pub available_models: Option<Vec<String>>,
+    /// Numeric dataset quality proxy (higher is
+    /// better; the engine reports this from the
+    /// SNR / FWHM / noise triplet). When `None`,
+    /// the dataset-quality dimension is
+    /// `NotEvaluated`.
+    pub dataset_quality: Option<f32>,
+}
+
+/// CR-08 §22 round 2 / Slice C: full applicability
+/// report returned to the UI. The verdict is the
+/// single 6-variant enum the audit doc tracks; the
+/// per-dimension list lets the UI render a
+/// per-dimension checklist; the warnings list
+/// surfaces human-readable advisories for each
+/// non-`Match` outcome so the UI does not have to
+/// render the enum tags to make the cause visible.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApplicabilityReport {
+    /// Top-level 6-variant verdict.
+    pub verdict: ApplicabilityOutcome,
+    /// Per-dimension outcome list (one row per
+    /// evaluated dimension; unset dimensions are
+    /// absent).
+    pub dimensions: Vec<ApplicabilityDimension>,
+    /// Human-readable advisories. Always present
+    /// (empty Vec when every dimension is `Match`).
+    pub warnings: Vec<String>,
+}
+
+/// CR-08 §22 round 2 / Slice C: evaluate the full
+/// §12 applicability matrix. Pure function. Walks
+/// each dimension, classifies the outcome, and folds
+/// the per-dimension verdicts into the 6-variant
+/// top-level outcome.
+///
+/// Verdict folding rules (in priority order):
+/// 1. Schema version mismatch (any non-`Match` for
+///    `schema_version`) → `SchemaMismatch`.
+/// 2. Required models not in the available-models
+///    slice (any non-`Match` for `available_models`)
+///    → `MissingModels(list)`.
+/// 3. Any `DimensionOutcome::Mismatch` →
+///    `Incompatible`.
+/// 4. Any `DimensionOutcome::PartialSkip` →
+///    `PartiallyCompatible`.
+/// 5. Any `DimensionOutcome::Adaptable` →
+///    `Adaptable`.
+/// 6. All dimensions `Match` or `NotEvaluated` →
+///    `Compatible`.
+///
+/// `warnings` is populated from every non-`Match`
+/// dimension's note so the UI does not have to render
+/// the enum tags to make the cause visible. Empty
+/// when every dimension is `Match` (and the verdict
+/// is therefore `Compatible`).
+pub fn check_recipe_applicability(
+    recipe: &Recipe,
+    matrix: &ApplicabilityMatrix,
+) -> ApplicabilityReport {
+    let mut dimensions: Vec<ApplicabilityDimension> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    // Dimension: schema_version. This dimension is
+    // evaluated from the Recipe alone (no matrix
+    // input) because the binary's
+    // `SCHEMA_VERSION_CURRENT` is a constant. The
+    // matrix does not need a separate field for it.
+    {
+        let outcome = if recipe.schema_version == SCHEMA_VERSION_CURRENT {
+            DimensionOutcome::Match
+        } else {
+            DimensionOutcome::Mismatch(format!(
+                "Recipe schema_version '{}' does not match binary current '{}'; re-save the Recipe or run schema migration",
+                recipe.schema_version, SCHEMA_VERSION_CURRENT
+            ))
+        };
+        if let DimensionOutcome::Mismatch(note) = &outcome {
+            warnings.push(note.clone());
+        }
+        dimensions.push(ApplicabilityDimension {
+            dimension: "schema_version".to_string(),
+            outcome,
+        });
+    }
+
+    // Dimension: available_models. When the caller
+    // dimension is `NotEvaluated` and the verdict
+    // does not block: the UI is presumed to be
+    // rendering the matrix against an unknown fleet
+    // (the preview path).
+    let mut missing: Vec<String> = Vec::new();
+    {
+        let outcome = match &matrix.available_models {
+            None => DimensionOutcome::NotEvaluated,
+            Some(available) => {
+                let missing_local: Vec<String> = recipe
+                    .required_models
+                    .iter()
+                    .filter(|m| !available.contains(m))
+                    .cloned()
+                    .collect();
+                if missing_local.is_empty() {
+                    DimensionOutcome::Match
+                } else {
+                    let note = format!(
+                        "Recipe requires {} model(s) not in available fleet: {}",
+                        missing_local.len(),
+                        missing_local.join(", ")
+                    );
+                    warnings.push(note.clone());
+                    missing = missing_local;
+                    DimensionOutcome::Mismatch(note)
+                }
+            }
+        };
+        dimensions.push(ApplicabilityDimension {
+            dimension: "available_models".to_string(),
+            outcome,
+        });
+    }
+
+    // Dimension: target_type. When the caller
+    // supplies `target_type`, compare against the
+    // Recipe's `target_type`. Empty Recipe
+    // `target_type` (the default for Recipes that
+    // did not bother to set one) is treated as
+    // `Adaptable` with a "Re-save to set target type"
+    // note; an exact match is `Match`; any other
+    // difference is `Mismatch` (a target-type
+    // mismatch is a hard blocker: the Recipe was
+    // authored for a different imaging target).
+    {
+        let outcome = match &matrix.target_type {
+            None => DimensionOutcome::NotEvaluated,
+            Some(session_target) => {
+                if recipe.target_type.is_empty() || recipe.target_type == "unknown" {
+                    DimensionOutcome::Adaptable(format!(
+                        "Recipe target_type is '{}' (unset / unknown); the session is '{}'. Re-save the Recipe against '{}' to lock the target type",
+                        recipe.target_type, session_target, session_target
+                    ))
+                } else if recipe.target_type == *session_target {
+                    DimensionOutcome::Match
+                } else {
+                    DimensionOutcome::Mismatch(format!(
+                        "Recipe target_type '{}' does not match session target_type '{}'",
+                        recipe.target_type, session_target
+                    ))
+                }
+            }
+        };
+        if let DimensionOutcome::Adaptable(note) | DimensionOutcome::Mismatch(note) = &outcome {
+            warnings.push(note.clone());
+        }
+        dimensions.push(ApplicabilityDimension {
+            dimension: "target_type".to_string(),
+            outcome,
+        });
+    }
+
+    // Dimension: image_dimensions. The Recipe does
+    // not currently carry an explicit pixel-dimension
+    // preference (per the §4 audit, the
+    // applicability-block fields are not implemented
+    // yet). When the caller supplies
+    // `image_width` / `image_height`, the dimension
+    // surfaces as `Adaptable` (the engine can scale
+    // per-stage params within reason) and the
+    // verdict reflects that with an Adaptable fold.
+    // When the caller does NOT supply the
+    // dimensions, the dimension is `NotEvaluated`.
+    {
+        let outcome = match (matrix.image_width, matrix.image_height) {
+            (None, None) => DimensionOutcome::NotEvaluated,
+            (Some(w), Some(h)) => {
+                // The Recipe does not yet encode a
+                // dimension preference; surface as
+                // Adaptable so the verdict reflects
+                // "the engine can scale" rather than
+                // hard-failing. A future R1 slice
+                // (applicability-block fields) will
+                // narrow this to a true Match /
+                // Mismatch.
+                DimensionOutcome::Adaptable(format!(
+                    "Session image is {w}x{h}; the Recipe does not declare a dimension preference, so the engine will scale per-stage params within reason"
+                ))
+            }
+            _ => DimensionOutcome::NotEvaluated,
+        };
+        if let DimensionOutcome::Adaptable(note) = &outcome {
+            warnings.push(note.clone());
+        }
+        dimensions.push(ApplicabilityDimension {
+            dimension: "image_dimensions".to_string(),
+            outcome,
+        });
+    }
+
+    // Dimension: dataset_quality. Same shape as
+    // image_dimensions: the Recipe does not yet
+    // encode a quality preference, so any supplied
+    // value surfaces as `Adaptable` (the engine can
+    // adapt noise / sharpening within reason).
+    {
+        let outcome = match matrix.dataset_quality {
+            None => DimensionOutcome::NotEvaluated,
+            Some(q) => DimensionOutcome::Adaptable(format!(
+                "Session dataset quality proxy is {q:.3}; the Recipe does not declare a quality preference, so adaptive engine will tune noise / sharpening accordingly"
+            )),
+        };
+        if let DimensionOutcome::Adaptable(note) = &outcome {
+            warnings.push(note.clone());
+        }
+        dimensions.push(ApplicabilityDimension {
+            dimension: "dataset_quality".to_string(),
+            outcome,
+        });
+    }
+
+    // Fold per-dimension outcomes into the 6-variant
+    // top-level verdict. Priority order matters:
+    // schema mismatch and missing-models are
+    // hard-blockers and take precedence over the
+    // softer target-type / dimension / quality
+    // dimensions.
+    let verdict = if let Some(ApplicabilityDimension {
+        outcome: DimensionOutcome::Mismatch(note),
+        ..
+    }) = dimensions.iter().find(|d| d.dimension == "schema_version")
+    {
+        ApplicabilityOutcome::SchemaMismatch(note.clone())
+    } else if !missing.is_empty() {
+        ApplicabilityOutcome::MissingModels(missing)
+    } else if dimensions
+        .iter()
+        .any(|d| matches!(d.outcome, DimensionOutcome::Mismatch(_)))
+    {
+        ApplicabilityOutcome::Incompatible
+    } else if dimensions
+        .iter()
+        .any(|d| matches!(d.outcome, DimensionOutcome::PartialSkip(_)))
+    {
+        ApplicabilityOutcome::PartiallyCompatible
+    } else if dimensions
+        .iter()
+        .any(|d| matches!(d.outcome, DimensionOutcome::Adaptable(_)))
+    {
+        ApplicabilityOutcome::Adaptable
+    } else {
+        ApplicabilityOutcome::Compatible
+    };
+
+    ApplicabilityReport {
+        verdict,
+        dimensions,
+        warnings,
+    }
+}

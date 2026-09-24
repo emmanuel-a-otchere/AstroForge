@@ -730,6 +730,86 @@ export const recipeSecurityValidate = (
     SecurityValidationReportFromRust
   >;
 
+/**
+ * CR-08 §22 round 2 / Slice C: full §12 6-variant
+ * applicability matrix. Mirrors the Rust
+ * `astroforge_core::recipe::ApplicabilityReport`
+ * + the inner enums + the `ApplicabilityMatrix`
+ * session-side input. The 6-variant verdict
+ * (`Compatible` / `Adaptable` /
+ * `PartiallyCompatible` / `Incompatible` /
+ * `MissingModels(missing: string[])` /
+ * `SchemaMismatch(version: string)`) is the
+ * pre-flight verdict the UI uses to decide
+ * whether to show the user an adaptation prompt
+ * before they apply a Recipe. Distinct from
+ * `recipePreview`'s 3-variant `applicability`
+ * field: that one is the apply-time gate (schema
+ * + missing-models only); this one walks every
+ * §12 dimension with per-dimension outcomes so
+ * the UI can render a per-dimension checklist
+ * without re-running the evaluator.
+ */
+export type ApplicabilityVerdictFromRust =
+  | "Compatible"
+  | "Adaptable"
+  | "PartiallyCompatible"
+  | "Incompatible"
+  | { MissingModels: string[] }
+  | { SchemaMismatch: string };
+
+export type DimensionOutcomeFromRust =
+  | "Match"
+  | { Adaptable: string }
+  | { PartialSkip: string }
+  | { Mismatch: string }
+  | "NotEvaluated";
+
+export interface ApplicabilityDimensionFromRust {
+  /** Stable dimension id the UI can switch on
+   * (`"target_type"` / `"image_dimensions"` /
+   * `"available_models"` / `"schema_version"` /
+   * `"dataset_quality"`). New dimensions are
+   * additive: old UIs render the new id as
+   * "Unknown dimension" and the verdict still
+   * works. */
+  dimension: string;
+  outcome: DimensionOutcomeFromRust;
+}
+
+/** Session-side criteria the matrix evaluates the
+ * Recipe against. Every field is optional so
+ * callers can supply only the dimensions they
+ * know. Unknown / unset dimensions surface as
+ * `NotEvaluated` in the report. */
+export interface ApplicabilityMatrixFromRust {
+  target_type?: string | null;
+  image_width?: number | null;
+  image_height?: number | null;
+  available_models?: string[] | null;
+  dataset_quality?: number | null;
+}
+
+export interface ApplicabilityReportFromRust {
+  /** Top-level 6-variant verdict. */
+  verdict: ApplicabilityVerdictFromRust;
+  /** Per-dimension outcome list. */
+  dimensions: ApplicabilityDimensionFromRust[];
+  /** Human-readable advisories. */
+  warnings: string[];
+}
+
+export const recipeCheckApplicability = (
+  profileId: string,
+  version: number,
+  matrix: ApplicabilityMatrixFromRust,
+): Promise<ApplicabilityReportFromRust> =>
+  invoke("recipe_check_applicability", {
+    profileId,
+    version,
+    matrix,
+  }) as Promise<ApplicabilityReportFromRust>;
+
 // CR-07 §29.2a: server-side diff cache IPC surface.
 // `DiffCache` is a Rust-only in-memory cache. The
 // following 5 commands expose the cache to the JS layer.

@@ -45,7 +45,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// SQLite schema for the `recipe_events` table
-/// + the supporting indexes. Append-only; rows
+/// plus the supporting indexes. Append-only; rows
 /// are never updated or deleted.
 pub const RECIPE_EVENTS_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS recipe_events (
@@ -499,7 +499,7 @@ struct CivilDate {
 fn civil_from_days(z: i64) -> Option<CivilDate> {
     let z = z + 719_468;
     let era = z.div_euclid(400);
-    let doe = z.rem_euclid(400) as i64;
+    let doe = z.rem_euclid(400);
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
@@ -507,7 +507,7 @@ fn civil_from_days(z: i64) -> Option<CivilDate> {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let y = if m <= 2 { y + 1 } else { y };
-    if y < 1 || y > 9999 {
+    if !(1..=9999).contains(&y) {
         return None;
     }
     Some(CivilDate {

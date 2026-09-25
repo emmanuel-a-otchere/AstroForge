@@ -277,7 +277,7 @@ fn list_events_filter_by_limit() {
                 RecipeEventKind::RecipeCreated,
                 Some("prof_a"),
                 Some(i + 1),
-                payload_recipe_created("A", "deep_sky", (i + 1) as u32),
+                payload_recipe_created("A", "deep_sky", i + 1),
                 &format!("2026-09-25T00:0{i}:00Z"),
             )
             .unwrap();
@@ -324,7 +324,7 @@ fn list_events_empty_filter_default_limit() {
                 RecipeEventKind::RecipeCreated,
                 Some("prof_a"),
                 Some(i + 1),
-                payload_recipe_created("A", "deep_sky", (i + 1) as u32),
+                payload_recipe_created("A", "deep_sky", i + 1),
                 &format!("2026-09-25T00:0{i}:00Z"),
             )
             .unwrap();

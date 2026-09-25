@@ -408,6 +408,32 @@ pub struct ImageVersion {
     /// in that case. B13b will populate this from the apply round.
     #[serde(default)]
     pub recipe_id: Option<String>,
+    /// CR-08 §21 follow-on / Slice E: the Recipe version
+    /// that produced this ImageVersion. Combined with
+    /// `recipe_id` + `recipe_hash`, this forms the
+    /// complete Recipe identity so the §6
+    /// reproducibility aggregator can flip the
+    /// `recipe` dimension from `Unknown` to `Met`.
+    /// NULL for legacy rows written before this
+    /// column shipped + for ImageVersions not
+    /// created from a Recipe (manual edits,
+    /// imports, tests).
+    #[serde(default)]
+    pub recipe_version: Option<u32>,
+    /// CR-08 §21 follow-on / Slice E: the Recipe
+    /// content hash (`Recipe::pipeline_plan_hash`)
+    /// at the moment the ImageVersion was
+    /// produced. The aggregator uses this to verify
+    /// the persisted Recipe (if the RecipeStore can
+    /// still resolve it) actually matches the
+    /// hash the ImageVersion was created against:
+    /// if the Recipe was edited post-apply, the
+    /// dimension flips from `Met` to `Deviation`
+    /// ("Recipe was edited after the ImageVersion
+    /// was produced: stored hash {a} != current
+    /// hash {b}").
+    #[serde(default)]
+    pub recipe_hash: Option<String>,
 }
 
 /// CR-02 §11 — one execution of a processing recipe. Distinct from Recipe:

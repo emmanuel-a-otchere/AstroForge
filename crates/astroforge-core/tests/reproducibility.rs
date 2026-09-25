@@ -65,6 +65,8 @@ fn base_image_version() -> ImageVersion {
         created_at: "2026-09-24T00:00:00Z".to_string(),
         hidden: false,
         recipe_id: Some("prof_test_deep_sky".to_string()),
+        recipe_version: None,
+        recipe_hash: None,
     }
 }
 
@@ -621,4 +623,215 @@ fn hardware_summary_from_snapshot() {
     assert_eq!(hw.gpu_models, vec!["NVIDIA RTX 4090".to_string()]);
     assert_eq!(hw.available_memory_bytes, 64 * 1024 * 1024 * 1024);
     assert_eq!(hw.recommended_backend, "cuda");
+}
+
+// ─── CR-08 §21 follow-on / Slice E tests ────────────────────────────────
+//
+// These tests pin the Slice E behavior of the
+// `recipe` dimension in `summarize_reproducibility`.
+// Pre-Slice E, the dimension was `Met` whenever
+// the caller passed a non-empty Recipe (legacy
+// behavior). Slice E extends the dimension so it
+// also reads the persisted `recipe_id` +
+// `recipe_version` + `recipe_hash` from the
+// ImageVersion and compares the persisted hash
+// against the current Recipe hash.
+
+/// Build an ImageVersion with the Slice E
+/// Recipe identity fields populated.
+fn iv_with_recipe_identity() -> ImageVersion {
+    let mut iv = base_image_version();
+    iv.recipe_version = Some(1);
+    iv.recipe_hash = Some("slice_e_test_hash".to_string());
+    iv
+}
+
+/// Slice E: when the persisted `recipe_hash`
+/// matches the current Recipe hash, the `recipe`
+/// dimension is `Met`.
+#[test]
+fn slice_e_matching_recipe_hash_yields_met() {
+    let mut iv = iv_with_recipe_identity();
+    let recipe = base_recipe();
+    // Mirror what the apply round would do: write
+    // the Recipe's current hash to the ImageVersion.
+    iv.recipe_hash = Some(recipe.pipeline_plan_hash());
+
+    let record = summarize_reproducibility(
+        &iv,
+        Some(&base_run()),
+        Some(&recipe),
+        &[base_ai_op()],
+        Some(&base_hardware()),
+    );
+
+    let recipe_dim = record
+        .dimensions
+        .iter()
+        .find(|d| d.dimension == "recipe")
+        .unwrap();
+    assert!(
+        matches!(recipe_dim.outcome, ReproducibilityCondition::Met),
+        "expected Met, got {:?}",
+        recipe_dim.outcome
+    );
+    // No deviation for the recipe dimension when Met.
+    assert!(
+        !record
+            .deviations
+            .iter()
+            .any(|d| d.contains("Recipe was edited")),
+        "no Recipe-edited deviation should appear: {:?}",
+        record.deviations
+    );
+}
+
+/// Slice E: when the persisted `recipe_hash`
+/// differs from the current Recipe hash, the
+/// dimension flips to `Deviation` with the
+/// "Recipe was edited after the ImageVersion was
+/// produced" note.
+#[test]
+fn slice_e_modified_recipe_hash_yields_deviation() {
+    let iv = iv_with_recipe_identity();
+    let recipe = base_recipe();
+    // ImageVersion carries a stale hash.
+    assert_ne!(
+        iv.recipe_hash.as_deref(),
+        Some(recipe.pipeline_plan_hash().as_str())
+    );
+
+    let record = summarize_reproducibility(
+        &iv,
+        Some(&base_run()),
+        Some(&recipe),
+        &[base_ai_op()],
+        Some(&base_hardware()),
+    );
+
+    let recipe_dim = record
+        .dimensions
+        .iter()
+        .find(|d| d.dimension == "recipe")
+        .unwrap();
+    assert!(
+        matches!(recipe_dim.outcome, ReproducibilityCondition::Deviation(_)),
+        "expected Deviation, got {:?}",
+        recipe_dim.outcome
+    );
+    assert!(
+        record
+            .deviations
+            .iter()
+            .any(|d| d.contains("Recipe was edited after")),
+        "expected Recipe-edited deviation, got {:?}",
+        record.deviations
+    );
+}
+
+/// Slice E: when the ImageVersion carries all
+/// three identity fields but the RecipeStore can
+/// no longer resolve the Recipe (recipe: None),
+/// the dimension is `Unknown` with the sharper
+/// "Recipe was deleted from the store" note.
+#[test]
+fn slice_e_deleted_recipe_yields_unknown_with_sharper_note() {
+    let iv = iv_with_recipe_identity();
+    // Recipe: None simulates "RecipeStore can no
+    // longer resolve this profile".
+    let record = summarize_reproducibility(
+        &iv,
+        Some(&base_run()),
+        None,
+        &[base_ai_op()],
+        Some(&base_hardware()),
+    );
+
+    let recipe_dim = record
+        .dimensions
+        .iter()
+        .find(|d| d.dimension == "recipe")
+        .unwrap();
+    assert!(
+        matches!(recipe_dim.outcome, ReproducibilityCondition::Unknown(_)),
+        "expected Unknown, got {:?}",
+        recipe_dim.outcome
+    );
+    assert!(
+        record
+            .deviations
+            .iter()
+            .any(|d| d.contains("Recipe was deleted from the store")),
+        "expected deleted-from-store deviation, got {:?}",
+        record.deviations
+    );
+}
+
+/// Slice E: the `recipe` dimension still surfaces
+/// `Unknown` for legacy ImageVersions (no
+/// `recipe_id` + `recipe_version` + `recipe_hash`)
+/// - the honest pre-Slice E surface.
+#[test]
+fn slice_e_legacy_image_version_yields_unknown_with_legacy_note() {
+    let iv = base_image_version();
+    assert!(iv.recipe_id.is_some());
+    assert!(iv.recipe_version.is_none());
+    assert!(iv.recipe_hash.is_none());
+
+    let record = summarize_reproducibility(
+        &iv,
+        Some(&base_run()),
+        None,
+        &[base_ai_op()],
+        Some(&base_hardware()),
+    );
+
+    let recipe_dim = record
+        .dimensions
+        .iter()
+        .find(|d| d.dimension == "recipe")
+        .unwrap();
+    assert!(
+        matches!(recipe_dim.outcome, ReproducibilityCondition::Unknown(_)),
+        "expected Unknown, got {:?}",
+        recipe_dim.outcome
+    );
+    assert!(
+        record
+            .deviations
+            .iter()
+            .any(|d| d.contains("Recipe is not recorded")),
+        "expected legacy-note deviation, got {:?}",
+        record.deviations
+    );
+}
+
+/// Slice E: when the Recipe was already passed
+/// in but the ImageVersion has no Recipe identity
+/// fields (legacy apply round + Recipe exists),
+/// the dimension is still `Met` because the
+/// aggregator falls back to the legacy behavior.
+#[test]
+fn slice_e_legacy_image_version_with_resolved_recipe_yields_met() {
+    let iv = base_image_version();
+    assert!(iv.recipe_version.is_none());
+
+    let record = summarize_reproducibility(
+        &iv,
+        Some(&base_run()),
+        Some(&base_recipe()),
+        &[base_ai_op()],
+        Some(&base_hardware()),
+    );
+
+    let recipe_dim = record
+        .dimensions
+        .iter()
+        .find(|d| d.dimension == "recipe")
+        .unwrap();
+    assert!(
+        matches!(recipe_dim.outcome, ReproducibilityCondition::Met),
+        "expected Met (legacy fallback), got {:?}",
+        recipe_dim.outcome
+    );
 }

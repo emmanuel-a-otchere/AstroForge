@@ -159,6 +159,23 @@ export interface ImageVersion {
   // wires the apply round to populate it. The ProvenancePanel
   // renders "Profile not recorded" in that case.
   recipe_id: string | null;
+  // CR-08 §21 follow-on / Slice E: the Recipe version
+  // that produced this ImageVersion. Combined with
+  // `recipe_id` + `recipe_hash`, this forms the
+  // complete Recipe identity the §6 reproducibility
+  // aggregator needs to flip the `recipe` dimension
+  // from `Unknown` to `Met`. null for legacy rows +
+  // AI-applied versions written before Slice E
+  // shipped.
+  recipe_version: number | null;
+  // CR-08 §21 follow-on / Slice E: the Recipe content
+  // hash at the moment this ImageVersion was produced.
+  // The aggregator compares this against the current
+  // Recipe hash to detect post-apply edits: `Met` if
+  // the persisted Recipe still matches, `Deviation`
+  // if the Recipe was edited after this ImageVersion
+  // was produced.
+  recipe_hash: string | null;
 }
 
 export interface ImageVersionListResponse {
@@ -408,6 +425,18 @@ export interface ApplyAiOperationRequest {
   // anchor (today: all of them, since EnhancementStudio
   // doesn't surface a profile picker yet).
   recipe_id?: string | null;
+  // CR-08 §21 follow-on / Slice E: the Recipe version
+  // that produced this ImageVersion. Combined with
+  // `recipe_id` + `recipe_hash`, this forms the
+  // complete Recipe identity the §6 reproducibility
+  // aggregator needs to flip the `recipe` dimension
+  // from `Unknown` to `Met`.
+  recipe_version?: number | null;
+  // CR-08 §21 follow-on / Slice E: the Recipe content
+  // hash at the moment the apply round fires. The
+  // aggregator compares this against the current
+  // Recipe hash to detect post-apply edits.
+  recipe_hash?: string | null;
 }
 
 export interface ApplyAiOperationResponse {
@@ -435,6 +464,12 @@ export interface ImageVersionJson {
   // CR-07 B13a: profile that produced this image version.
   // See the matching note on the `ImageVersion` interface.
   recipe_id: string | null;
+  // CR-08 §21 follow-on / Slice E: see the matching
+  // note on the `ImageVersion` interface. The apply
+  // round populates these once a profile picker
+  // ships; null for legacy ImageVersions.
+  recipe_version: number | null;
+  recipe_hash: string | null;
 }
 
 export const imageVersionListForProject = (

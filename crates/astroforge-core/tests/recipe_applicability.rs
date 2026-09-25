@@ -87,6 +87,10 @@ fn base_recipe() -> Recipe {
         processing_objectives: Vec::new(),
         quality_targets: Default::default(),
         optional_operations: Vec::new(),
+        // CR-08 §21 / Slice G: empty constraints +
+        // no resource policy for legacy tests.
+        constraints: Vec::new(),
+        resource_policy: None,
     }
 }
 

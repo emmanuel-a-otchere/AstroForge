@@ -1133,3 +1133,20 @@ export async function getReproducibilityReport(
   const { recipeGetReproducibilityReport } = await import("./astroforge-api");
   return recipeGetReproducibilityReport(versionId);
 }
+
+// CR-08 §23 / Slice F: list Recipe lifecycle events.
+// Mirrors the browser-mode placeholder pattern used
+// by `recipePreview` + `checkRecipeApplicability` +
+// `getReproducibilityReport`: returns an empty array
+// when not running under Tauri (the SQLite-backed
+// event log lives in the Tauri runtime; the browser
+// has no analogue).
+export async function listRecipeEvents(
+  filter: import("./astroforge-api").RecipeEventFilter = {},
+): Promise<import("./astroforge-api").RecipeEvent[]> {
+  if (!isTauri()) {
+    return [];
+  }
+  const { recipeListEvents } = await import("./astroforge-api");
+  return recipeListEvents(filter);
+}

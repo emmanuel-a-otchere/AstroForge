@@ -13,6 +13,7 @@ use astroforge_core::mvp_pipeline::{self, PipelineConfig, PipelineResult, Verbos
 use astroforge_core::project::ProjectManager;
 use astroforge_core::recipe::{apply_recipe, QualityProfile, Recipe, RecipeAiDiffSummary};
 use astroforge_core::recipe_store::{RecipeStore, RecipeSummary, RecipeVersion};
+use astroforge_core::recipe_events::{RecipeEvent, RecipeEventFilter, RecipeEventKind, RecipeEventStore, now_iso as recipe_events_now_iso};
 use astroforge_core::session::SessionStore;
 use astroforge_core::validation::StageSpec;
 use serde::Serialize;
@@ -105,6 +106,12 @@ struct SessionState(Mutex<SessionStore>);
 /// Tauri-managed state: holds the RecipeStore (rusqlite) for pipeline
 /// profile persistence. Same mutex pattern as GalleryState.
 struct RecipeState(Mutex<RecipeStore>);
+
+/// CR-08 §23 / Slice F: Tauri-managed state for
+/// the append-only Recipe event log. The store
+/// shares the same SQLite file as RecipeStore so
+/// the event log + recipes share a DB lifecycle.
+struct RecipeEventState(Mutex<RecipeEventStore>);
 
 /// CR-07 §29.2a: in-memory diff cache for `compute_diff`.
 /// Single-threaded by construction (the cache is wrapped
@@ -453,6 +460,7 @@ fn recipe_get_head(
 #[tauri::command]
 fn recipe_save(
     state: State<'_, RecipeState>,
+    event_state: State<'_, RecipeEventState>,
     recipe: Recipe,
 ) -> Result<RecipeSummary, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
@@ -463,6 +471,7 @@ fn recipe_save(
     let next_version = store
         .next_version_for(&profile_id)
         .map_err(CommandError::from)?;
+    let owned_version = recipe.version;
     let mut owned = recipe;
     if owned.version == 0 {
         owned.version = next_version;
@@ -470,7 +479,39 @@ fn recipe_save(
     if owned.parent_version.is_none() && next_version > 1 {
         owned.parent_version = Some(next_version - 1);
     }
-    store.save(&owned).map_err(Into::into)
+    let summary = store.save(&owned).map_err(Into::into)?;
+
+    // CR-08 §23 / Slice F: emit the Recipe lifecycle
+    // event. The event kind branches on whether the
+    // save created a fresh profile (version 1) or a
+    // new version of an existing profile.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    let (kind, payload) = if owned_version == 0 && next_version == 1 {
+        (
+            RecipeEventKind::RecipeCreated,
+            astroforge_core::recipe_events::payload_recipe_created(
+                &owned.name, &owned.target_type, owned.version,
+            ),
+        )
+    } else {
+        (
+            RecipeEventKind::RecipeVersionCreated,
+            astroforge_core::recipe_events::payload_recipe_version_created(owned.parent_version),
+        )
+    };
+    if let Err(e) = event_store.record_event(
+        kind,
+        Some(&profile_id),
+        Some(owned.version),
+        payload,
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_save: failed to record event for {profile_id:?} v{owned_version}: {e}"
+        );
+    }
+
+    Ok(summary)
 }
 
 /// CR-07 B13c: look up the live `Recipe` that produced a
@@ -587,6 +628,7 @@ fn recipe_pipeline_plan_hash(
 #[tauri::command]
 fn recipe_apply(
     state: State<'_, RecipeState>,
+    event_state: State<'_, RecipeEventState>,
     profile_id: String,
     version: u32,
     available_models: Option<Vec<String>>,
@@ -612,6 +654,32 @@ fn recipe_apply(
             "recipe_apply: failed to stamp last_used_at for {profile_id:?}: {e}"
         );
     }
+
+    // CR-08 §23 / Slice F: emit the RecipeApplied event.
+    // The event carries the Recipe identity (profile_id +
+    // version) + the `available_models` slice the apply
+    // round used. No `image_version_id` here because the
+    // §22 round 2 `recipe_apply` IPC returns the stages
+    // payload; the consumer that materializes the
+    // ImageVersion emits the §21 ImageVersion-side event
+    // (or, today, none — Slice F covers the Recipe-side
+    // events).
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    let model_refs: Vec<&str> = models_slice.iter().map(|s| s.as_str()).collect();
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::RecipeApplied,
+        Some(&profile_id),
+        Some(version),
+        astroforge_core::recipe_events::payload_recipe_applied(
+            "", &model_refs,
+        ),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_apply: failed to record event for {profile_id:?} v{version}: {e}"
+        );
+    }
+
     Ok(RecipeApplyResponse {
         profile_id,
         version: recipe.version,
@@ -731,6 +799,7 @@ fn profile_exists(
 #[tauri::command]
 fn recipe_export(
     state: State<'_, RecipeState>,
+    event_state: State<'_, RecipeEventState>,
     profile_id: String,
     version: Option<u32>,
 ) -> Result<String, CommandError> {
@@ -739,7 +808,32 @@ fn recipe_export(
         Some(v) => store.get(&profile_id, v)?,
         None => store.get_head(&profile_id)?,
     };
-    recipe.to_json().map_err(CommandError::from)
+    let json = recipe.to_json().map_err(CommandError::from)?;
+    let bytes = json.len() as u64;
+
+    // CR-08 §23 / Slice F: emit the RecipeExported
+    // event. The destination is unknown to the IPC
+    // (the file dialog lives in the UI follow-on),
+    // so the payload carries "tauri://recipe_export"
+    // as a stand-in destination. The bytes field is
+    // the canonical payload size so consumers can
+    // track export volume.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::RecipeExported,
+        Some(&profile_id),
+        Some(recipe.version),
+        astroforge_core::recipe_events::payload_recipe_exported(
+            "tauri://recipe_export", bytes,
+        ),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_export: failed to record event for {profile_id:?}: {e}"
+        );
+    }
+
+    Ok(json)
 }
 
 /// CR-08 §19: import a Recipe from its canonical JSON
@@ -759,8 +853,24 @@ fn recipe_export(
 #[tauri::command]
 fn recipe_import(
     state: State<'_, RecipeState>,
+    event_state: State<'_, RecipeEventState>,
     json: String,
 ) -> Result<RecipeSummary, CommandError> {
+    // CR-08 §23 / Slice F: emit RecipeImportStarted
+    // before parsing so consumers see the attempt
+    // even if the parse fails.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::RecipeImportStarted,
+        None,
+        None,
+        astroforge_core::recipe_events::payload_recipe_import_started("tauri://recipe_import"),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!("recipe_import: failed to record ImportStarted: {e}");
+    }
+    drop(event_store);
+
     let mut recipe =
         Recipe::from_json_migrated(&json).map_err(CommandError::from)?;
     if recipe.name.trim().is_empty() {
@@ -787,7 +897,23 @@ fn recipe_import(
         Ok(head) => Some(head.version),
         Err(_) => None,
     };
-    let summary = store.save(&recipe).map_err(Into::into)?;
+    let summary = match store.save(&recipe) {
+        Ok(s) => s,
+        Err(e) => {
+            // CR-08 §23 / Slice F: emit RecipeImportFailed
+            // when the persist step fails. The error
+            // message travels in the payload.
+            let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+            let _ = event_store.record_event(
+                RecipeEventKind::RecipeImportFailed,
+                Some(&profile_id),
+                Some(recipe.version),
+                astroforge_core::recipe_events::payload_recipe_import_failed(&e.to_string()),
+                &recipe_events_now_iso(),
+            );
+            return Err(e.into());
+        }
+    };
     // CR-08 §15: flag the just-saved head row as imported so
     // the Imported tab can classify it. The flag lives on
     // every row of the profile, so a subsequent `recipe_save`
@@ -798,6 +924,24 @@ fn recipe_import(
             "recipe_import: failed to mark_imported for {profile_id:?}: {e}"
         );
     }
+
+    // CR-08 §23 / Slice F: emit RecipeImportCompleted
+    // after the persist + classification steps succeed.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::RecipeImportCompleted,
+        Some(&profile_id),
+        Some(recipe.version),
+        astroforge_core::recipe_events::payload_recipe_import_completed(
+            &recipe.name, &recipe.target_type, recipe.version,
+        ),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_import: failed to record ImportCompleted for {profile_id:?}: {e}"
+        );
+    }
+
     Ok(summary)
 }
 
@@ -822,6 +966,7 @@ fn recipe_import(
 fn recipe_save_from_pipeline_plan(
     recipe_state: State<'_, RecipeState>,
     pipeline_state: State<'_, commands_pipeline_plan::PipelinePlanState>,
+    event_state: State<'_, RecipeEventState>,
     plan_id: String,
     name: String,
     target_type: Option<String>,
@@ -860,7 +1005,27 @@ fn recipe_save_from_pipeline_plan(
     };
     recipe.version = version;
     let store = recipe_state.0.lock().expect("recipe store mutex poisoned");
-    store.save(&recipe).map_err(Into::into)
+    let summary = store.save(&recipe).map_err(Into::into)?;
+
+    // CR-08 §23 / Slice F: emit the PipelineSavedAsRecipe
+    // event with `source = "plan"` so consumers can
+    // distinguish plan-side saves from stage-run-side saves.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::PipelineSavedAsRecipe,
+        Some(&profile_id),
+        Some(version),
+        astroforge_core::recipe_events::payload_pipeline_saved_as_recipe(
+            "plan", &plan_id, &name,
+        ),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_save_from_pipeline_plan: failed to record event for {profile_id:?}: {e}"
+        );
+    }
+
+    Ok(summary)
 }
 
 /// CR-08 §22 round 2 / Slice B: "Save Processing as
@@ -890,6 +1055,7 @@ fn recipe_save_from_pipeline_plan(
 fn recipe_save_from_stage_runs(
     recipe_state: State<'_, RecipeState>,
     project_state: State<'_, commands_project::ProjectState>,
+    event_state: State<'_, RecipeEventState>,
     run_id: String,
     name: String,
     target_type: Option<String>,
@@ -931,7 +1097,28 @@ fn recipe_save_from_stage_runs(
     };
     recipe.version = version;
     let store = recipe_state.0.lock().expect("recipe store mutex poisoned");
-    store.save(&recipe).map_err(Into::into)
+    let summary = store.save(&recipe).map_err(Into::into)?;
+
+    // CR-08 §23 / Slice F: emit the PipelineSavedAsRecipe
+    // event with `source = "stage_runs"` so consumers can
+    // distinguish execution-history-side saves from plan-side
+    // saves.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::PipelineSavedAsRecipe,
+        Some(&profile_id),
+        Some(version),
+        astroforge_core::recipe_events::payload_pipeline_saved_as_recipe(
+            "stage_runs", &run_id, &name,
+        ),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_save_from_stage_runs: failed to record event for {profile_id:?}: {e}"
+        );
+    }
+
+    Ok(summary)
 }
 
 /// CR-08 §3.1: mark a Recipe profile as a system Recipe.
@@ -1170,6 +1357,7 @@ fn recipe_preview(
 #[tauri::command]
 fn recipe_check_applicability(
     state: State<'_, RecipeState>,
+    event_state: State<'_, RecipeEventState>,
     profile_id: String,
     version: u32,
     matrix: astroforge_core::recipe::ApplicabilityMatrix,
@@ -1177,7 +1365,37 @@ fn recipe_check_applicability(
     use astroforge_core::recipe::check_recipe_applicability;
     let store = state.0.lock().expect("recipe store mutex poisoned");
     let recipe = store.get(&profile_id, version)?;
-    Ok(check_recipe_applicability(&recipe, &matrix))
+    let report = check_recipe_applicability(&recipe, &matrix);
+
+    // CR-08 §23 / Slice F: emit the RecipeApplicabilityEvaluated
+    // event. The payload carries the verdict label (one of
+    // the 6 §12 outcome labels) + the warnings list so the
+    // consumer can reconstruct the per-dimension outcome.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    let verdict_label = match &report.outcome {
+        astroforge_core::recipe::ApplicabilityOutcome::Compatible => "compatible",
+        astroforge_core::recipe::ApplicabilityOutcome::Adaptable => "adaptable",
+        astroforge_core::recipe::ApplicabilityOutcome::PartiallyCompatible => "partially_compatible",
+        astroforge_core::recipe::ApplicabilityOutcome::Incompatible => "incompatible",
+        astroforge_core::recipe::ApplicabilityOutcome::MissingModels(_) => "missing_models",
+        astroforge_core::recipe::ApplicabilityOutcome::SchemaMismatch(_) => "schema_mismatch",
+    };
+    let warn_refs: Vec<&str> = report.warnings.iter().map(|s| s.as_str()).collect();
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::RecipeApplicabilityEvaluated,
+        Some(&profile_id),
+        Some(version),
+        astroforge_core::recipe_events::payload_recipe_applicability_evaluated(
+            verdict_label, &warn_refs,
+        ),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_check_applicability: failed to record event for {profile_id:?}: {e}"
+        );
+    }
+
+    Ok(report)
 }
 
 /// CR-08 §22 round 2 / Slice D: full §6
@@ -1207,6 +1425,7 @@ fn recipe_check_applicability(
 fn recipe_get_reproducibility_report(
     domain_state: State<'_, DomainState>,
     _recipe_state: State<'_, RecipeState>,
+    event_state: State<'_, RecipeEventState>,
     version_id: String,
 ) -> Result<
     astroforge_core::reproducibility::ReproducibilityRecord,
@@ -1278,13 +1497,62 @@ fn recipe_get_reproducibility_report(
     let snap = ResourceSnapshot::detect();
     let hw = HardwareSummary::from_snapshot(&snap);
 
-    Ok(summarize_reproducibility(
+    let record = summarize_reproducibility(
         &image_version,
         pipeline_run.as_ref(),
         None,
         &ai_ops,
         Some(&hw),
-    ))
+    );
+
+    // CR-08 §23 / Slice F: emit the ReproducibilityRecordCreated
+    // event. The payload carries the verdict label (one of
+    // the 3 §6 ReproducibilityVerdict labels) + the version_id.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    let verdict_label = match record.verdict {
+        astroforge_core::reproducibility::ReproducibilityVerdict::Exact => "exact",
+        astroforge_core::reproducibility::ReproducibilityVerdict::Material => "material",
+        astroforge_core::reproducibility::ReproducibilityVerdict::Indeterminate => "indeterminate",
+    };
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::ReproducibilityRecordCreated,
+        None,
+        None,
+        astroforge_core::recipe_events::payload_reproducibility_record_created(
+            &version_id, verdict_label,
+        ),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_get_reproducibility_report: failed to record event for {version_id:?}: {e}"
+        );
+    }
+
+    Ok(record)
+}
+
+/// CR-08 §23 / Slice F: list Recipe lifecycle
+/// events. The list endpoint reads the append-only
+/// `recipe_events` table with optional filters
+/// (profile_id, kind, since timestamp, limit).
+/// Returns rows newest-first (highest event_id
+/// first). The payload field of each row is the
+/// canonical `serde_json::Value` produced by the
+/// event's payload constructor (see
+/// `astroforge_core::recipe_events`).
+///
+/// The IPC is read-only. Emitting events is the
+/// job of the write-side handlers (recipe_save,
+/// recipe_apply, recipe_import, recipe_export,
+/// recipe_save_from_stage_runs, etc.); the
+/// consumer reads them here.
+#[tauri::command]
+fn recipe_list_events(
+    state: State<'_, RecipeEventState>,
+    filter: RecipeEventFilter,
+) -> Result<Vec<RecipeEvent>, CommandError> {
+    let store = state.0.lock().expect("recipe events db mutex poisoned");
+    store.list_events(&filter).map_err(Into::into)
 }
 
 /// CR-08 §20: validate a Recipe against the
@@ -1535,6 +1803,15 @@ fn main() {
                 .map_err(|e| format!("failed to seed recipe store: {e}"))?;
             app.manage(RecipeState(Mutex::new(recipes)));
 
+            // CR-08 §23 / Slice F: open the Recipe event log
+            // alongside RecipeStore (same SQLite file). The
+            // store is append-only; the IPC handlers emit
+            // events after every successful Recipe lifecycle
+            // change (save, apply, import, export, etc.).
+            let recipe_events = RecipeEventStore::new(&recipe_path)
+                .map_err(|e| format!("failed to open recipe event store: {e}"))?;
+            app.manage(RecipeEventState(Mutex::new(recipe_events)));
+
             // CR-07 §29.2a: in-memory diff cache. Global to
             // the app session, lives for the lifetime of
             // the Tauri runtime. No DB backing.
@@ -1687,6 +1964,7 @@ fn main() {
             recipe_check_applicability,
             recipe_get_reproducibility_report,
             recipe_security_validate,
+            recipe_list_events,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,
             diff_cache_clear,

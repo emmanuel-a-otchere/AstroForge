@@ -918,6 +918,37 @@ export const recipeGetReproducibilityReport = (
     versionId,
   }) as Promise<ReproducibilityRecordFromRust>;
 
+// CR-08 §23 / Slice F: list Recipe lifecycle events.
+// The list endpoint reads the append-only
+// `recipe_events` table with optional filters
+// (profileId, kind, since, limit). Returns rows
+// newest-first. The payload field of each row
+// is the canonical `serde_json::Value` produced
+// by the event's payload constructor on the
+// Rust side.
+export interface RecipeEventFilter {
+  profile_id?: string | null;
+  kind?: string | null;
+  since?: string | null;
+  limit?: number | null;
+}
+
+export interface RecipeEvent {
+  event_id: number;
+  occurred_at: string;
+  kind: string;
+  profile_id: string | null;
+  version: number | null;
+  payload: unknown;
+}
+
+export const recipeListEvents = (
+  filter: RecipeEventFilter = {},
+): Promise<RecipeEvent[]> =>
+  invoke("recipe_list_events", {
+    filter,
+  }) as Promise<RecipeEvent[]>;
+
 // CR-07 §29.2a: server-side diff cache IPC surface.
 // `DiffCache` is a Rust-only in-memory cache. The
 // following 5 commands expose the cache to the JS layer.

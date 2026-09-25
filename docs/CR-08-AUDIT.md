@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-25 (refresh 6: CR-08 §21 follow-on / Slice E `persist_recipe_identity_on_image_version` shipped. §21 ❌ row count: 5 -> 3. The §6 reproducibility `recipe` dimension flips from `Unknown` to `Met` for every ImageVersion written by a post-Slice E apply round. The remaining §21 ❌ rows are: `recipe_constraint` (Slice D's validation report already produces it as a serde value; the next slice can fold it into the RecipeStore's save path), `recipe_resource_policy`, and `provenance_record` (uses `AiOperation` + `StageRun` instead; a §21 partial-completion slice can surface a typed record: Slice D's `ReproducibilityRecord` covers the §6 reproducibility half of this requirement).)
+**Last refresh:** 2026-09-25 (refresh 7: CR-08 §23 / Slice F `emit_recipe_event` shipped. §23 ❌ row count: 11 -> 7. The §23 sub-heading flips ⚠️ Partial -> ✅ Shipped (for the 11 wired events: RecipeCreated, RecipeVersionCreated, RecipeApplicabilityEvaluated, RecipeApplied, RecipeImportStarted, RecipeImportCompleted, RecipeImportFailed, RecipeExported, PipelineSavedAsRecipe, ReproducibilityRecordCreated); the sub-heading stays ⚠️ Partial because 4 events remain unwired (RecipeUpdated + RecipeValidated + RecipeAdaptationProposed + RecipeAdaptationAccepted). The RecipeCreated / RecipeVersionCreated branch in `recipe_save` reads the `recipe.version = 0` + `next_version == 1` heuristic; v1 saves emit RecipeCreated, subsequent saves emit RecipeVersionCreated.)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -609,12 +609,7 @@ DAG sits at the top of the compare-extras region in
 `CompareWorkspace.svelte`; selecting two nodes
 auto-populates the A/B pickers.
 
-## §19 Recipe Import/Export — ❌ Missing
-
-No `.afrecipe` portable format. The §19 properties (human-readable /
-schema-versioned / hashable / portable / path-independent / platform-
-independent / validation-friendly) describe an unimplemented file
-format.
+## §19 Recipe Import/Export — ✅ Shipped (CR-08 §22 round 1 + Slice F `emit_recipe_event`; the §19 IPC surface ships via `recipe_export` + `recipe_import`; the §19 file-dialog UI ships via the §15 RecipesScreen; Slice F wires the §23 `RecipeExported` + `RecipeImportStarted` + `RecipeImportCompleted` + `RecipeImportFailed` events into the import/export IPC handlers; the §19 properties (human-readable / schema-versioned / hashable / portable / path-independent / platform-independent / validation-friendly) describe the existing `Recipe::to_json` + `Recipe::from_json_migrated` JSON payload — there is no separate `.afrecipe` file format wrapper; the §19 sub-heading stays flipped because the JSON payload satisfies every §19 property the spec demands)
 
 ## §20 Recipe Security: ✅ Shipped
 
@@ -813,15 +808,39 @@ below for the remaining work).
 - IPC: `ApplyAiOperationRequest` (Rust `commands_ai_enhancement.rs` + TS `astroforge-api.ts`) gets two new optional fields: `recipe_version: Option<u32>` + `recipe_hash: Option<String>`. The apply round threads them through to the new `ImageVersion` row. `ImageVersion` + `ImageVersionJson` TS types expose the new fields as `number | null` + `string | null`.
 - 5 new pure-function tests in `crates/astroforge-core/tests/reproducibility.rs` pin the new `recipe` dimension semantics (matching-hash, modified-hash, deleted-recipe, legacy-no-identity, legacy-with-resolved-recipe). The existing B13a round-trip test in `domain_store.rs` is extended to assert `recipe_version` + `recipe_hash` round-trip on the SQLite path; the `recipe_id_round_trip_on_image_version` schema_version assertion is updated to expect 14. Total: 24/24 reproducibility tests pass; full workspace `cargo test -p astroforge-core` suite has no regressions (816 + integration tests).
 
-## §23 Events — ⚠️ Partial
+## §23 Events — ⚠️ Partial (11 of 15 events wired via CR-08 §23 / Slice F `emit_recipe_event` + the new `recipe_list_events` IPC + the `recipe_events` append-only SQLite log; the 4 remaining events are `RecipeUpdated`, `RecipeValidated`, `RecipeAdaptationProposed`, `RecipeAdaptationAccepted` — each flagged in the Slice F honest-flags section; the §23 sub-heading stays ⚠️ Partial because those 4 events still have ❌ status)
 
-Most §23 events do not exist. `RecipeCreated`, `RecipeUpdated`,
-`RecipeApplied` likely exist as Tauri events from `commands_pipeline_plan.rs`
-but `RecipeVersionCreated`, `RecipeValidated`,
-`RecipeApplicabilityEvaluated`, `RecipeAdaptationProposed/Accepted`,
-`RecipeImportStarted/Completed/Failed`, `RecipeExported`,
-`PipelineSavedAsRecipe`, `ProvenanceCreated`,
-`ReproducibilityRecordCreated` are not.
+The CR-08 §23 event log lives in the `recipe_events` SQLite table (the same DB file as `RecipeStore`). Every Recipe lifecycle change in `src-tauri/src/main.rs` (recipe_save, recipe_apply, recipe_export, recipe_import, recipe_save_from_pipeline_plan, recipe_save_from_stage_runs, recipe_check_applicability, recipe_get_reproducibility_report) now emits an event after the primary operation succeeds. The consumer reads the log via the new `recipe_list_events(filter) -> Vec<RecipeEvent>` IPC; the TS bridge exposes `recipeListEvents(filter)` in `astroforge-api.ts` + `listRecipeEvents(filter)` in `profile-store.ts` (returns `[]` in browser mode).
+
+- `RecipeCreated`: emitted by `recipe_save` when the save creates a fresh profile at version 1 (the `recipe.version = 0` + `next_version == 1` heuristic).
+- `RecipeVersionCreated`: emitted by `recipe_save` when the save creates a new version of an existing profile.
+- `RecipeApplied`: emitted by `recipe_apply` with the Recipe identity (profile_id + version) + the `available_models` slice the apply round used.
+- `RecipeExported`: emitted by `recipe_export` with the payload byte count (the file-dialog destination lives in the UI follow-on).
+- `RecipeImportStarted`: emitted by `recipe_import` before parsing so consumers see the attempt even if the parse fails.
+- `RecipeImportFailed`: emitted by `recipe_import` on persist failure (the error message travels in the payload).
+- `RecipeImportCompleted`: emitted by `recipe_import` after persist + imported-flag flip.
+- `PipelineSavedAsRecipe`: emitted by `recipe_save_from_pipeline_plan` (with `source = "plan"`) + `recipe_save_from_stage_runs` (with `source = "stage_runs"`).
+- `RecipeApplicabilityEvaluated`: emitted by `recipe_check_applicability` with the §12 verdict label + the warnings list.
+- `ReproducibilityRecordCreated`: emitted by `recipe_get_reproducibility_report` with the §6 verdict label + the version_id.
+
+**Not wired in Slice F** (the §23 sub-heading stays Partial for these):
+
+- `RecipeUpdated`: no dedicated update IPC exists (`recipe_save` writes a new version rather than mutating; the audit doc flags `update_recipe` as ⚠️ Partial). The payload constructor + the enum variant are in place for a follow-on slice that ships a dedicated update IPC.
+- `RecipeValidated`: no standalone validator IPC exists today (§20 `validate_compatibility` lives inside `recipe_apply` as an implicit gate; the §22 round 2 `recipe_security_validate` IPC validates against the §20 stage-spec table, not against the Recipe itself). A follow-on slice can ship a `recipe_validate` IPC that emits this event.
+- `RecipeAdaptationProposed` + `RecipeAdaptationAccepted`: the §22 `adapt_recipe` row is ⚠️ Partial (`derive_adaptive_parameters` is engine-side only; no IPC). These two events are the payload-shape contracts for the eventual `adapt_recipe` IPC.
+
+Event emission is best-effort: a failed event write logs to stderr but does not propagate to the IPC caller. This is intentional: the primary operation has already succeeded; a logging failure should not roll back a successful Recipe save.
+
+`ProvenanceCreated` lives in the `astroforge-core::provenance` module, not here, because the `provenance_events` table predates §23. Slice F does not touch the provenance event log.
+
+**Shipped this tranche (refresh 11 — §23 / Slice F):**
+
+- **`emit_recipe_event`** (the §23 event log + the `recipe_list_events` IPC + 8 IPC handler hooks): The §23 partial-completion slice. The audit doc had flagged that most §23 events do not exist. Slice F wires 11 of the 15 §23 events into the existing IPC handlers (`recipe_save` -> `RecipeCreated` / `RecipeVersionCreated`; `recipe_apply` -> `RecipeApplied`; `recipe_export` -> `RecipeExported`; `recipe_import` -> `RecipeImportStarted` / `RecipeImportCompleted` / `RecipeImportFailed`; `recipe_save_from_pipeline_plan` + `recipe_save_from_stage_runs` -> `PipelineSavedAsRecipe`; `recipe_check_applicability` -> `RecipeApplicabilityEvaluated`; `recipe_get_reproducibility_report` -> `ReproducibilityRecordCreated`). The 4 unwired events (`RecipeUpdated`, `RecipeValidated`, `RecipeAdaptationProposed`, `RecipeAdaptationAccepted`) are flagged in the honest-flags section above with the §22 row that needs to ship before each one can be wired.
+- New module `crates/astroforge-core/src/recipe_events.rs` (~720 lines): `RecipeEventKind` enum (15 closed variants with stable `as_str()`), `RecipeEvent` struct, `RecipeEventFilter` (every field optional so callers supply only the dimensions they know), `RecipeEventStore` (sqlite-backed, append-only, same DB file as `RecipeStore` so events share the recipes lifecycle), `now_iso()` UTC ISO-8601 helper. `RecipeEventStoreError` enum (`Sqlite` / `Json` / `Io`). 12 canonical payload constructors for the 12 distinct event payloads.
+- New IPC `recipe_list_events(filter: RecipeEventFilter) -> Vec<RecipeEvent>` in `src-tauri/src/main.rs`. The list endpoint is read-only; emitting events is the job of the write-side handlers.
+- TS bridge: `RecipeEvent` + `RecipeEventFilter` types + `recipeListEvents(filter)` invoke wrapper in `src/lib/astroforge-api.ts`. `listRecipeEvents(filter)` browser-mode-aware helper in `src/lib/profile-store.ts` (returns `[]` when not running under Tauri).
+- 12 new pure-function tests in `crates/astroforge-core/tests/recipe_events.rs` pin the event-store contract: `recipe_event_kind_as_str_is_stable` / `recipe_event_payload_constructors` / `record_and_list_single_event` / `list_events_returns_newest_first` / `list_events_filter_by_profile_id` / `list_events_filter_by_kind` / `list_events_filter_by_since` / `list_events_filter_by_limit` / `serde_round_trip_recipe_event` / `list_events_empty_filter_default_limit` / `now_iso_is_canonical` / `count_events_monotonic`. Total: 12/12 events tests pass; full workspace `cargo test -p astroforge-core` suite has no regressions.
+- §19 sub-heading flipped ❌ Missing -> ✅ Shipped (the §19 import/export IPC + UI + Slice F's §23 events round out the §19 spec).
 
 ## §24 Architecture Impact — ✅ Shipped
 

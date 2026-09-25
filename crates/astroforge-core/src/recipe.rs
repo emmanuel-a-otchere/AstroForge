@@ -99,6 +99,18 @@ pub struct Recipe {
     /// the §10.1 Beginner defaults. Empty by default.
     #[serde(default)]
     pub optional_operations: Vec<String>,
+    /// CR-08 §21 follow-on / Slice E + §28 / Slice H:
+    /// the Recipe's pipeline-plan content hash
+    /// (`Recipe::pipeline_plan_hash()`), persisted
+    /// at save time so the §6 reproducibility
+    /// aggregator can compare the stored hash
+    /// against the current Recipe hash without
+    /// recomputing. `String::new()` for legacy
+    /// Recipes (the field is `#[serde(default)]` so
+    /// deserialization stays backward-compatible);
+    /// `recipe_save` fills this field on every save.
+    #[serde(default = "default_empty_string")]
+    pub content_hash: String,
     /// CR-08 §21 / Slice G: Recipe constraints
     /// surfaced as a first-class type. Each entry
     /// carries a `kind` discriminant + the typed
@@ -415,6 +427,14 @@ impl Recipe {
             processing_objectives: Vec::new(),
             quality_targets: QualityTargets::default(),
             optional_operations: Vec::new(),
+            // CR-08 §21 follow-on / Slice E + §28 / Slice H:
+            // empty content hash for new Recipes; the
+            // `recipe_save` IPC fills this field on every
+            // save (the function recomputes the hash from
+            // the canonical projection so a save always
+            // produces a hash that matches the saved
+            // content).
+            content_hash: String::new(),
             // CR-08 §21 / Slice G: new fields default to
             // empty constraints + no resource policy so
             // legacy Recipes (and unit-test `Recipe::new`
@@ -693,6 +713,17 @@ pub enum ValidationResult {
     Compatible,
     MissingModels(Vec<String>),
     IncompatibleVersion(String),
+}
+
+impl ValidationResult {
+    /// CR-08 §28 / Slice H: `true` when the Recipe
+    /// is applicable (no missing models, no
+    /// incompatible-version flag). The §28 import
+    /// gate uses this helper to decide whether to
+    /// accept or reject an imported Recipe.
+    pub fn is_compatible(&self) -> bool {
+        matches!(self, ValidationResult::Compatible)
+    }
 }
 
 pub fn apply_recipe(

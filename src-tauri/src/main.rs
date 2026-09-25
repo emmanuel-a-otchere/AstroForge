@@ -479,6 +479,14 @@ fn recipe_save(
     if owned.parent_version.is_none() && next_version > 1 {
         owned.parent_version = Some(next_version - 1);
     }
+    // CR-08 §21 follow-on / Slice E + §28 / Slice H:
+    // recompute the content hash on every save so the
+    // stored hash always matches the saved content.
+    // Recomputing (rather than reading the incoming
+    // payload's hash) defends against a stale client
+    // passing a hash that doesn't match the staged
+    // content.
+    owned.content_hash = owned.pipeline_plan_hash();
     let summary = store.save(&owned).map_err(Into::into)?;
 
     // CR-08 §23 / Slice F: emit the Recipe lifecycle
@@ -883,6 +891,83 @@ fn recipe_import(
         return Err(CommandError::new(
             "validation",
             "imported recipe has an empty target_type",
+        ));
+    }
+    // CR-08 §28 / Slice H: strict import validation.
+    // Reject the import (before persist) when the
+    // Recipe fails either the §22 security validator
+    // (any violation is fatal at import time) or the
+    // §20 compatibility validator (the imported Recipe
+    // must be applicable on a vanilla local machine,
+    // not just on the source machine). The two
+    // checks together close the §28 "Imported recipes
+    // are validated" + "Invalid recipes cannot execute"
+    // rows; the §20 check matches the
+    // `recipe_security_validate` IPC + the
+    // `recipe_check_applicability` IPC's §12 verdict
+    // vocabulary.
+    let security_report = astroforge_core::validation::validate_recipe_security(
+        &recipe, &SPEC_CATALOG,
+    );
+    if !security_report.violations.is_empty() {
+        let kinds: Vec<String> = security_report
+            .violations
+            .iter()
+            .map(|v| v.kind.clone())
+            .collect();
+        // CR-08 §23 / Slice F: surface the rejection
+        // through the RecipeImportFailed event so the
+        // audit log captures the reason. The store
+        // does not persist anything (we reject before
+        // `store.save`); the rejection is captured
+        // through the event log only.
+        let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+        let _ = event_store.record_event(
+            RecipeEventKind::RecipeImportFailed,
+            None,
+            None,
+            astroforge_core::recipe_events::payload_recipe_import_failed(
+                &format!(
+                    "imported recipe failed security validation: {}",
+                    kinds.join(", ")
+                ),
+            ),
+            &recipe_events_now_iso(),
+        );
+        return Err(CommandError::new(
+            "validation",
+            format!(
+                "imported recipe failed security validation: {}",
+                kinds.join(", ")
+            ),
+        ));
+    }
+    // §22 round 1 compatibility validator: the
+    // imported Recipe must be applicable against
+    // an empty `available_models` list (i.e. the
+    // imported Recipe must not require any models
+    // the source machine had but a fresh local
+    // machine might not). A Recipe that fails this
+    // gate is rejected at import time.
+    let compat_result = astroforge_core::recipe::validate_compatibility(
+        &recipe, &[],
+    );
+    if !compat_result.is_compatible() {
+        // CR-08 §23 / Slice F: surface the rejection
+        // through the RecipeImportFailed event.
+        let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+        let _ = event_store.record_event(
+            RecipeEventKind::RecipeImportFailed,
+            None,
+            None,
+            astroforge_core::recipe_events::payload_recipe_import_failed(
+                "imported recipe failed compatibility validation",
+            ),
+            &recipe_events_now_iso(),
+        );
+        return Err(CommandError::new(
+            "validation",
+            "imported recipe failed compatibility validation",
         ));
     }
     let store = state.0.lock().expect("recipe store mutex poisoned");

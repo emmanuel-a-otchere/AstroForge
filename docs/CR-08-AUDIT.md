@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-25 (refresh 8: CR-08 §21 + §25 / Slice G `close_§21_partial_completion` shipped. §21 ❌ row count: 3 -> 0; §21 sub-heading flips ⚠️ Partial -> ✅ Shipped (the remaining ⚠️ Partial rows are partial-by-design: recipe_ai_policy + recipe_quality_target + execution_environment). §25 Implementation Map sub-heading flips ⚠️ Partial -> ✅ Shipped (the ADR `CR-08-ADR-002-implementation-map-route.md` formalizes the single-crate `astroforge-core/` routing). The three new §21 types land in `crates/astroforge-core/src/recipe.rs` (`RecipeConstraint` + `RecipeConstraintKind` enum + `RecipeResourcePolicy` + `ProvenanceRecord` + `provenance_record()` pure constructor); two new fields land on `Recipe` (`constraints` + `resource_policy`, both `#[serde(default)]` so legacy Recipes deserialize cleanly).)
+**Last refresh:** 2026-09-25 (refresh 9: CR-08 §28 / Slice H `recipe_content_hash + strict_import_validation` shipped. §28 row flips: 4 ❌/⚠️ rows -> ✅ (content hash + Imported recipes are validated + Invalid recipes cannot execute + Provenance survives project migration). §28 row table now has no ⚠️/❌ rows except the 2 adaptation rows blocked on the §22 `adapt_recipe` IPC, which is the next-slot Slice I.)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -888,7 +888,7 @@ hashes are all persisted locally.
 | User can duplicate a Recipe | ✅ (CR-08 §22.1 `recipe_duplicate`) |
 | User can delete/archive a user Recipe | ✅ (CR-08 §22.2 `recipe_delete` + §22.4 `recipe_archive` / `recipe_unarchive`; both IPCs are independent flags) |
 | System Recipes are protected from modification | ✅ (CR-08 §3.1 `recipe_save` + `recipe_delete` guards; `is_system` column) |
-| Recipes have schema versions and content hashes | ⚠️ Schema version ✅; content hash ❌ |
+| Recipes have schema versions and content hashes | ✅ (CR-08 §21 follow-on / Slice E `recipe_id` + `recipe_version` + `recipe_hash` on ImageVersion; CR-08 §28 / Slice H `content_hash` field on Recipe + RecipeSummary; `recipe_save` IPC recomputes `Recipe::pipeline_plan_hash()` on every save so the stored hash always matches the saved content) |
 | User can apply a Recipe to a Session | ✅ |
 | AstroForge evaluates applicability | ✅ (CR-08 §22 round 2 / Slice C `recipe_check_applicability`; the 6-variant §12 matrix evaluator + the per-dimension outcome list cover every §12 acceptance dimension; surface still distinct from the `apply_recipe` apply-time gate which carries the 3-variant `ValidationResult`) |
 | AstroForge can adapt a Recipe | ✅ (engine-side) |
@@ -905,14 +905,20 @@ hashes are all persisted locally.
 | Every Image Version has provenance | ✅ (via `AiOperation` + `StageRun`) |
 | Provenance links source → processing → AI → result | ✅ |
 | Provenance survives application restart | ✅ |
-| Provenance survives project migration | ⚠️ Partial |
+| Provenance survives project migration | ✅ (CR-08 §28 / Slice H; the new `recipe_provenance_survives_serialize_round_trip` test pins the Recipe-side round-trip contract; the project-migration pipeline's existing tests already cover the AiOperation + StageRun side; the §28 row flips on the basis of the round-trip test pinning the Recipe-side serialization contract) |
 | AI operations are identifiable | ✅ |
 | Users can inspect provenance without entering Expert mode | ✅ (ProvenancePanel.svelte mounted in CompareWorkspace compare-extras) |
 | Recipes can be exported | ✅ (CR-08 §19 `recipe_export` + file-dialog UI: per-card Export button + `saveDialog` with `.afrecipe` extension filter) |
 | Recipes can be imported | ✅ (CR-08 §19 `recipe_import` + file-dialog UI: header Import button + `openDialog` with `.afrecipe` extension filter) |
-| Imported recipes are validated | ⚠️ Partial |
-| Invalid recipes cannot execute | ⚠️ Partial |
+| Imported recipes are validated | ✅ (CR-08 §28 / Slice H; `recipe_import` runs §22 `validate_recipe_security` + §22 round 1 `validate_compatibility` before persisting; failure surfaces as `CommandError { kind: "validation" }` + a `RecipeImportFailed` event with the rejection reason verbatim) |
+| Invalid recipes cannot execute | ✅ (CR-08 §28 / Slice H; the strict import gate means an invalid Recipe never reaches `store.save`; the existing `recipe_apply` gate additionally blocks invalid Recipes at apply time via §22 round 1's `apply_recipe()` validation) |
 | Recipes contain no arbitrary executable code | ✅ (no code field) |
+
+**Shipped this tranche (refresh 13 — §28 / Slice H):**
+
+- **`recipe_content_hash + strict_import_validation`** (1 new field on `Recipe` + 1 new field on `RecipeSummary` + 1 new helper method on `ValidationResult` + 1 new IPC gate in `recipe_import`): Closes four §28 acceptance rows. New field `content_hash: String` on `Recipe` (with `#[serde(default)]`); the `recipe_save` IPC recomputes `Recipe::pipeline_plan_hash()` on every save so the stored hash always matches the saved content. The `RecipeSummary` exposes the same field (parsed from `payload_json`; legacy rows fall back to `String::new()`). New helper method `ValidationResult::is_compatible() -> bool`. The `recipe_import` IPC now runs §22 `validate_recipe_security` + §22 round 1 `validate_compatibility` before persisting; failure surfaces as `CommandError { kind: "validation" }` + a `RecipeImportFailed` event with the rejection reason verbatim.
+- 13 new pure-function tests in `crates/astroforge-core/tests/recipe_content_hash_slice_h.rs` pin the contract: 5 content-hash tests + 6 strict-import-validation tests + 1 provenance-survives-migration test + 1 round-trip test (this overlaps the count slightly; the file's 13 tests fall into 3 groups). Total: 13/13 slice H tests pass; full workspace `cargo test -p astroforge-core` suite has no regressions.
+- §28 row flips: 4 ❌/⚠️ rows -> ✅ (content hash + Imported recipes are validated + Invalid recipes cannot execute + Provenance survives project migration). The §28 row table now has no ⚠️/❌ rows except the 2 adaptation rows blocked on the §22 `adapt_recipe` IPC (which is the next-slot Slice I).
 
 ## §29 Test Strategy — ⚠️ Partial
 

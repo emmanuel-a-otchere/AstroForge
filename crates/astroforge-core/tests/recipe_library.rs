@@ -228,6 +228,9 @@ fn recipe_summary_round_trips_through_serde() {
         is_archived: false,
         is_imported: true,
         last_used_at: Some("2026-09-22 00:00:00".into()),
+        // CR-08 §28 / Slice H: empty content hash for
+        // round-trip test.
+        content_hash: String::new(),
     };
     let json = serde_json::to_string(&summary).expect("serialize");
     let back: RecipeSummary = serde_json::from_str(&json).expect("deserialize");

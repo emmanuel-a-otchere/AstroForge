@@ -125,6 +125,10 @@ fn base_recipe() -> Recipe {
         processing_objectives: vec![],
         quality_targets: Default::default(),
         optional_operations: vec![],
+        // CR-08 §21 follow-on / Slice E + §28 / Slice H:
+        // empty content hash for legacy tests; the
+        // `recipe_save` IPC fills this field on every save.
+        content_hash: String::new(),
         // CR-08 §21 / Slice G: empty constraints +
         // no resource policy for legacy tests.
         constraints: vec![],

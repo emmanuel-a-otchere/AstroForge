@@ -87,6 +87,9 @@ fn base_recipe() -> Recipe {
         processing_objectives: Vec::new(),
         quality_targets: Default::default(),
         optional_operations: Vec::new(),
+        // CR-08 §21 follow-on / Slice E + §28 / Slice H:
+        // empty content hash for legacy tests.
+        content_hash: String::new(),
         // CR-08 §21 / Slice G: empty constraints +
         // no resource policy for legacy tests.
         constraints: Vec::new(),

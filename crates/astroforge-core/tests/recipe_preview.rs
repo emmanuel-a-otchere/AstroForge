@@ -50,6 +50,10 @@ fn empty_recipe(name: &str, target: &str, quality_profile: QualityProfile) -> Re
         processing_objectives: Vec::<ProcessingObjective>::new(),
         quality_targets: QualityTargets::default(),
         optional_operations: Vec::<String>::new(),
+        // CR-08 §21 / Slice G: empty constraints +
+        // no resource policy for legacy tests.
+        constraints: Vec::new(),
+        resource_policy: None,
     }
 }
 

@@ -125,6 +125,10 @@ fn base_recipe() -> Recipe {
         processing_objectives: vec![],
         quality_targets: Default::default(),
         optional_operations: vec![],
+        // CR-08 §21 / Slice G: empty constraints +
+        // no resource policy for legacy tests.
+        constraints: vec![],
+        resource_policy: None,
     }
 }
 

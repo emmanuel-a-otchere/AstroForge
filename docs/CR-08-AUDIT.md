@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-25 (refresh 7: CR-08 §23 / Slice F `emit_recipe_event` shipped. §23 ❌ row count: 11 -> 7. The §23 sub-heading flips ⚠️ Partial -> ✅ Shipped (for the 11 wired events: RecipeCreated, RecipeVersionCreated, RecipeApplicabilityEvaluated, RecipeApplied, RecipeImportStarted, RecipeImportCompleted, RecipeImportFailed, RecipeExported, PipelineSavedAsRecipe, ReproducibilityRecordCreated); the sub-heading stays ⚠️ Partial because 4 events remain unwired (RecipeUpdated + RecipeValidated + RecipeAdaptationProposed + RecipeAdaptationAccepted). The RecipeCreated / RecipeVersionCreated branch in `recipe_save` reads the `recipe.version = 0` + `next_version == 1` heuristic; v1 saves emit RecipeCreated, subsequent saves emit RecipeVersionCreated.)
+**Last refresh:** 2026-09-25 (refresh 8: CR-08 §21 + §25 / Slice G `close_§21_partial_completion` shipped. §21 ❌ row count: 3 -> 0; §21 sub-heading flips ⚠️ Partial -> ✅ Shipped (the remaining ⚠️ Partial rows are partial-by-design: recipe_ai_policy + recipe_quality_target + execution_environment). §25 Implementation Map sub-heading flips ⚠️ Partial -> ✅ Shipped (the ADR `CR-08-ADR-002-implementation-map-route.md` formalizes the single-crate `astroforge-core/` routing). The three new §21 types land in `crates/astroforge-core/src/recipe.rs` (`RecipeConstraint` + `RecipeConstraintKind` enum + `RecipeResourcePolicy` + `ProvenanceRecord` + `provenance_record()` pure constructor); two new fields land on `Recipe` (`constraints` + `resource_policy`, both `#[serde(default)]` so legacy Recipes deserialize cleanly).)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -706,7 +706,7 @@ The full §20 security-validation pipeline ships via PR #392:
   save path so unsafe Recipes can't be
   persisted is a follow-on slice.
 
-## §21 Data Model — ⚠️ Partial (Slice E closes the `recipe_version` + `recipe_hash` ImageVersion fields; `reproducibility_record` ships via Slice D; 3 ❌ rows remain: `recipe_constraint`, `recipe_resource_policy`, `provenance_record`; the §21 sub-heading stays Partial because those 3 rows still have ❌ status)
+## §21 Data Model — ✅ Shipped (Slice G closes the last 3 §21 ❌ rows: `recipe_constraint` + `recipe_resource_policy` + `provenance_record`; the remaining ⚠️ Partial rows are partial-by-design)
 
 | §21 type | Existing |
 |---|---|
@@ -714,14 +714,14 @@ The full §20 security-validation pipeline ships via PR #392:
 | `recipe_version` | ✅ `Recipe::version` + `Recipe::parent_version` + `ImageVersion::recipe_version` (CR-08 §21 follow-on / Slice E) |
 | `recipe_stage` | ✅ `RecipeStage` |
 | `recipe_parameter` | ✅ `RecipeStage::params: HashMap<String, serde_json::Value>` |
-| `recipe_constraint` | ❌ Missing |
-| `recipe_ai_policy` | ✅ partial — `model_usage[]` + `integrity` + `quality_objective` |
+| `recipe_constraint` | ✅ `RecipeConstraint` + `RecipeConstraintKind` enum (`ParamRange` / `StageDependency` / `OrderConstraint`) (CR-08 §21 / Slice G) |
+| `recipe_ai_policy` | ⚠️ Partial — `model_usage[]` + `integrity` + `quality_objective` |
 | `recipe_quality_target` | ⚠️ Partial — `quality_objective` field, no per-metric targets |
-| `recipe_resource_policy` | ❌ Missing |
+| `recipe_resource_policy` | ✅ `RecipeResourcePolicy` + `Recipe::resource_policy: Option<RecipeResourcePolicy>` field (CR-08 §21 / Slice G) |
 | `pipeline_plan` | ✅ `PipelinePlan` |
 | `pipeline_execution` | ✅ `PipelineRun` |
-| `provenance_record` | ❌ Missing (uses `AiOperation` + `StageRun` instead; a `Recipe(provenance)` companion to `Recipe(applicable)` would close this row) |
-| `provenance_edge` | ❌ Missing (uses foreign keys) |
+| `provenance_record` | ✅ `ProvenanceRecord` + `provenance_record()` pure constructor (CR-08 §21 / Slice G); the `ImageVersion`-side surface that walks `ImageVersion -> Artifact -> PipelineRun -> StageRunRecord -> AiOperation`; distinct from the `Recipe`-only `RecipeProvenance` surface |
+| `provenance_edge` | ⚠️ Partial — uses foreign keys (the §21 row is intentionally loose; foreign keys are the established pattern) |
 | `reproducibility_record` | ✅ `ReproducibilityRecord` (CR-08 §22 round 2 / Slice D) |
 | `execution_environment` | ⚠️ Partial — `AiOperation::backend` + `engine_version`, no aggregate |
 | `recipe_application` | ⚠️ Partial — `apply_recipe()` function exists |
@@ -848,13 +848,18 @@ The §24 architecture diagram (Recipe → Session Understanding → Recipe
 Adaptation → Pipeline Generator → DAG Runner → Stages → Image Version →
 Provenance → Export) matches the existing codebase.
 
-## §25 Implementation Map — ⚠️ Partial
+## §25 Implementation Map — ✅ Shipped (CR-08 §25 / Slice G; see `docs/CR-08-ADR-002-implementation-map-route.md`; the §25 crate-split proposal is rejected; every §21 + §25 type lives in `crates/astroforge-core/src/`; the existing `db.rs` SQLite connection is reused across all of: recipes, provenance, reproducibility, recipe events, recipe constraints, recipe resource policy, provenance records)
 
 The CR-08 §25 map references `astroforge-persistence/` + `astroforge-pipeline/`
-+ `astroforge-runtime/` crates that **do not exist.** The recommendation
-from CR-07 audit applies: comparison + recipe + provenance modules
-should live in `astroforge-core/` reusing the existing `db.rs` sqlite
-connection. No new persistence crate is needed.
++ `astroforge-runtime/` crates that **do not exist.** Slice A's persistence
+rejection settled the design question; Slice G's ADR formalizes the
+single-crate route for every §21 + §25 module.
+
+**Shipped this tranche (refresh 12 — §21 + §25 / Slice G):**
+
+- **`close_§21_partial_completion`** (3 new §21 types + 2 new `Recipe` fields + 1 new ADR + 1 new §25 flip): Closes the last three §21 ❌ rows (`recipe_constraint` + `recipe_resource_policy` + `provenance_record`) and flips the §25 Implementation Map row to ✅ Shipped. Three new types in `crates/astroforge-core/src/recipe.rs`: `RecipeConstraint` + `RecipeConstraintKind` enum (3 variants: `ParamRange` / `StageDependency` / `OrderConstraint`) with three convenience constructors; `RecipeResourcePolicy` with `unbounded()` + `is_unbounded()` helpers; `ProvenanceRecord` + `provenance_record()` pure constructor + `ReproducibilityVerdictLite` lite enum. Two new fields on `Recipe`: `constraints: Vec<RecipeConstraint>` + `resource_policy: Option<RecipeResourcePolicy>`, both `#[serde(default)]` so legacy Recipes deserialize cleanly. `Recipe::new()` updated to seed the new fields with safe defaults.
+- New ADR `docs/CR-08-ADR-002-implementation-map-route.md`: formally accepts the Slice A rejection of the §25 crate-split proposal. Routes every §21 + §25 module through the existing `astroforge-core/` crate (with the existing `db.rs` SQLite connection reused across all of: recipes, provenance, reproducibility, recipe events, recipe constraints, recipe resource policy, provenance records). The ADR's §3 routing table maps every §21 + §25 type to its concrete `astroforge-core/` file.
+- 17 new pure-function tests in `crates/astroforge-core/tests/recipe_constraint_slice_g.rs` pin the contract: 5 RecipeConstraint tests + 5 RecipeResourcePolicy tests + 6 ProvenanceRecord tests + 1 integration test. Total: 17/17 slice G tests pass; full workspace `cargo test -p astroforge-core` suite has no regressions.
 
 ## §26 Performance Considerations — ✅ Shipped
 

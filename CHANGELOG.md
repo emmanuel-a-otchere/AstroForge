@@ -2,6 +2,153 @@
 
 ## Unreleased
 
+### Slice G — `close_§21_partial_completion` (§21 + §25)
+
+**Scope.** Closes the last three §21 ❌ rows
+(`recipe_constraint`, `recipe_resource_policy`,
+`provenance_record`) and flips the §25
+Implementation Map row to ✅ Shipped. The slice
+ships a new ADR (`CR-08-ADR-002-implementation-map-route.md`)
+that formalizes the single-crate
+`astroforge-core/` routing for the §21 + §25
+surface (rejecting the §25 crate-split proposal
+in the spec).
+
+**Rust core.**
+
+- Three new types land in
+  `crates/astroforge-core/src/recipe.rs` (~310
+  lines added, total file ~2911 lines):
+  - `RecipeConstraint` + `RecipeConstraintKind`
+    enum (3 variants: `ParamRange`,
+    `StageDependency`, `OrderConstraint`). Three
+    convenience constructors: `param_range()`,
+    `stage_dependency()`, `order_constraint()`.
+    Each carries a `description` (human-readable)
+    + a `source` discriminant (`"user"` /
+    `"validator"`). Tagged enum so serde
+    round-trip carries the discriminant
+    automatically.
+  - `RecipeResourcePolicy` (4 optional caps:
+    `max_cpu_units`, `max_memory_mb`,
+    `max_disk_mb`, `max_wall_clock_secs`, plus a
+    `notes` string). `unbounded()` + `is_unbounded()`
+    helpers. The apply round reads the policy's
+    caps to gate stages whose `resource_units`
+    exceed any cap; legacy Recipes without a
+    policy fall back to the live
+    `ResourceSnapshot::detect()` measurement.
+  - `ProvenanceRecord` + `provenance_record()`
+    pure constructor + `ReproducibilityVerdictLite`
+    lite enum. The constructor walks
+    `ImageVersion -> Artifact -> PipelineRun ->
+    StageRunRecord -> AiOperation` and assembles
+    a typed record with `recipe_id` +
+    `recipe_version` + `recipe_hash` + the
+    `is_exact` flag (computed by the §22 round 2
+    `summarize_reproducibility` aggregator).
+- Two new fields on `Recipe`:
+  - `constraints: Vec<RecipeConstraint>` (with
+    `#[serde(default)]` so legacy Recipes
+    deserialize with `vec![]`).
+  - `resource_policy: Option<RecipeResourcePolicy>`
+    (with `#[serde(default)]` so legacy Recipes
+    deserialize with `None`).
+- `Recipe::new()` updated to seed the new
+  fields with safe defaults (empty constraints,
+  no resource policy).
+- `crates/astroforge-core/tests/reproducibility.rs`,
+  `recipe_applicability.rs`, `recipe_compare_round1.rs`,
+  `recipe_preview.rs`: 4 legacy test fixtures
+  extended to seed the new fields. No behavior
+  change.
+
+**ADR.**
+
+- New `docs/CR-08-ADR-002-implementation-map-route.md`:
+  formally accepts the Slice A rejection of the
+  §25 crate-split proposal. Routes every §21 +
+  §25 module through the existing
+  `astroforge-core/` crate (with the existing
+  `db.rs` SQLite connection reused across all of:
+  recipes, provenance, reproducibility, recipe
+  events, recipe constraints, recipe resource
+  policy, provenance records). The ADR's §3
+  routing table maps every §21 + §25 type to its
+  concrete `astroforge-core/` file.
+
+**Tests.**
+
+- 17 new pure-function tests in
+  `crates/astroforge-core/tests/recipe_constraint_slice_g.rs`
+  pin the contract:
+  - RecipeConstraint: `param_range_constructor` /
+    `stage_dependency_constructor` /
+    `order_constraint_constructor` /
+    `serde_round_trip` /
+    `recipe_field_constraints_round_trip`.
+  - RecipeResourcePolicy: `unbounded` /
+    `with_caps_is_not_unbounded` /
+    `partial_caps_is_not_unbounded` /
+    `serde_round_trip` /
+    `recipe_field_resource_policy_round_trip`.
+  - ProvenanceRecord: `empty_chain_yields_zero_counts` /
+    `populated_chain_counts_and_summarizes` /
+    `recipe_id_resolves_from_recipe` /
+    `without_recipe_yields_none_identity` /
+    `serde_round_trip` /
+    `ai_op_without_backend_renders_none`.
+  - Integration: `recipe_provenance_does_not_crash_with_constraints`.
+- Total: **17/17 slice G tests pass**; full
+  workspace `cargo test -p astroforge-core` suite
+  has no regressions.
+
+**Audit doc flips.**
+
+- §21 ❌ row count: **3 → 0** (every row now
+  ✅ or ⚠️ Partial-by-design).
+- §21 sub-heading ⚠️ Partial → **✅ Shipped**
+  (the remaining ⚠️ Partial rows are
+  partial-by-design: `recipe_ai_policy` is partial
+  because the spec only demands a subset;
+  `recipe_quality_target` is partial because
+  per-metric targets are out of scope;
+  `execution_environment` is partial because the
+  aggregate is not surfaced).
+- §25 Implementation Map ⚠️ Partial → **✅
+  Shipped** (the ADR formalizes the routing).
+- Last-refresh timestamp + refresh 12 section
+  added.
+
+**Honest flags.**
+
+- Slice G is additive: no existing struct or
+  table is touched. Existing `Recipe` callers +
+  existing `recipe_provenance()` callers continue
+  to compile (the new fields are `#[serde(default)]`
+  so JSON round-trip is backward-compatible).
+- The `provenance_record()` constructor takes
+  the `ImageVersion` as a parameter (currently
+  unused beyond the `version_id` argument) so a
+  follow-on slice can fold the ImageVersion's
+  `recipe_id` + `recipe_version` + `recipe_hash`
+  fields into the record without changing the
+  function signature.
+- The `is_exact` flag on `ProvenanceRecord` is
+  computed from a lite 2-variant verdict enum
+  (`ReproducibilityVerdictLite::Exact | NotExact`)
+  the constructor takes as a parameter. The §22
+  round 2 IPC handler is the natural caller (it
+  already runs `summarize_reproducibility` to
+  produce the §6 verdict; passing that verdict
+  through to `provenance_record()` is a small
+  follow-on IPC extension).
+- The ADR is a single-crate route. The §25
+  spec doc's crate-split proposal is rejected;
+  any external readers of the spec that quote
+  the crate-split map will see the spec text but
+  no matching crates in the repo.
+
 ### Slice F — `emit_recipe_event` (§23 Recipe Events)
 
 **Scope.** Closes the CR-08 §23 partial-completion

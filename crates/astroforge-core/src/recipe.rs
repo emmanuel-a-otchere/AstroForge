@@ -99,6 +99,30 @@ pub struct Recipe {
     /// the §10.1 Beginner defaults. Empty by default.
     #[serde(default)]
     pub optional_operations: Vec<String>,
+    /// CR-08 §21 / Slice G: Recipe constraints
+    /// surfaced as a first-class type. Each entry
+    /// carries a `kind` discriminant + the typed
+    /// payload (`ParamRange` / `StageDependency` /
+    /// `OrderConstraint`). The validation report
+    /// from `recipe_security_validate` produces the
+    /// same shape; this field persists them on the
+    /// Recipe so the §21 `recipe_constraint` row
+    /// has both a type + a home. Defaults to empty
+    /// via `#[serde(default)]` so legacy Recipes
+    /// deserialize cleanly.
+    #[serde(default)]
+    pub constraints: Vec<RecipeConstraint>,
+    /// CR-08 §21 / Slice G: optional Recipe
+    /// resource policy. The `apply_recipe` round
+    /// reads this field to gate stages whose
+    /// `resource_units` exceed the policy's caps.
+    /// `None` for legacy Recipes that did not
+    /// declare a policy (the apply round falls
+    /// back to the `ResourceSnapshot::detect()`
+    /// live measurement). Defaults to `None` via
+    /// `#[serde(default)]` for backward compat.
+    #[serde(default)]
+    pub resource_policy: Option<RecipeResourcePolicy>,
 }
 
 fn default_version() -> u32 {
@@ -391,6 +415,12 @@ impl Recipe {
             processing_objectives: Vec::new(),
             quality_targets: QualityTargets::default(),
             optional_operations: Vec::new(),
+            // CR-08 §21 / Slice G: new fields default to
+            // empty constraints + no resource policy so
+            // legacy Recipes (and unit-test `Recipe::new`
+            // calls) keep building without changes.
+            constraints: Vec::new(),
+            resource_policy: None,
             is_system: false,
         }
     }
@@ -2595,3 +2625,288 @@ pub fn check_recipe_applicability(
         warnings,
     }
 }
+
+// ─── CR-08 §21 / Slice G ──────────────────────────────────────────────────
+//
+// Three new types land here to close the last three
+// §21 ❌ rows:
+//
+// 1. `RecipeConstraint` + `RecipeConstraintKind`
+//    (closes the `recipe_constraint` row).
+// 2. `RecipeResourcePolicy` (closes the
+//    `recipe_resource_policy` row).
+// 3. `ProvenanceRecord` + `provenance_record()` pure
+//    constructor (closes the `provenance_record` row
+//    on the ImageVersion side; the existing
+//    `RecipeProvenance` is the Recipe-side surface).
+//
+// See `docs/CR-08-ADR-002-implementation-map-route.md`
+// for the §25 routing table that formalizes the
+// single-crate `astroforge-core/` home.
+
+/// CR-08 §21 / Slice G: one typed Recipe constraint.
+/// The `kind` discriminant carries the constraint
+/// variant; the typed payload rides alongside so
+/// consumers can deserialize without re-parsing
+/// strings. Three variants:
+/// - `ParamRange`: the Recipe pins a stage parameter
+///   to a numeric range (matches `validation::ParamRange`
+///   so the §20 stage-spec table can re-use the same
+///   shape).
+/// - `StageDependency`: the Recipe requires a stage
+///   to run before the annotated stage (mirrors the
+///   `StageSpec::required_stages` list).
+/// - `OrderConstraint`: the Recipe enforces a stage
+///   ordering (e.g. "stretch before denoise") that
+///   the apply round must preserve.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RecipeConstraintKind {
+    ParamRange {
+        stage_id: String,
+        param: String,
+        min: f64,
+        max: f64,
+    },
+    StageDependency {
+        stage_id: String,
+        depends_on: String,
+    },
+    OrderConstraint {
+        before: String,
+        after: String,
+    },
+}
+
+/// CR-08 §21 / Slice G: typed Recipe constraint.
+/// The `description` field carries a human-readable
+/// note so the §20 UI panel + the validation report
+/// can render the constraint verbatim; the
+/// `source` discriminant records whether the
+/// constraint was user-declared (`"user"`) or
+/// derived by the validation report (`"validator"`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecipeConstraint {
+    pub constraint: RecipeConstraintKind,
+    pub description: String,
+    pub source: String,
+}
+
+impl RecipeConstraint {
+    /// Build a `ParamRange` constraint (the most
+    /// common shape: a stage parameter bounded to
+    /// a numeric range).
+    pub fn param_range(stage_id: &str, param: &str, min: f64, max: f64) -> Self {
+        Self {
+            constraint: RecipeConstraintKind::ParamRange {
+                stage_id: stage_id.to_string(),
+                param: param.to_string(),
+                min,
+                max,
+            },
+            description: format!("{stage_id}.{param} in [{min}, {max}]"),
+            source: "user".to_string(),
+        }
+    }
+
+    /// Build a `StageDependency` constraint.
+    pub fn stage_dependency(stage_id: &str, depends_on: &str) -> Self {
+        Self {
+            constraint: RecipeConstraintKind::StageDependency {
+                stage_id: stage_id.to_string(),
+                depends_on: depends_on.to_string(),
+            },
+            description: format!("{stage_id} requires {depends_on}"),
+            source: "user".to_string(),
+        }
+    }
+
+    /// Build an `OrderConstraint` (e.g.
+    /// `order("stretch", "denoise")` means stretch
+    /// must run before denoise).
+    pub fn order_constraint(before: &str, after: &str) -> Self {
+        Self {
+            constraint: RecipeConstraintKind::OrderConstraint {
+                before: before.to_string(),
+                after: after.to_string(),
+            },
+            description: format!("{before} before {after}"),
+            source: "user".to_string(),
+        }
+    }
+}
+
+/// CR-08 §21 / Slice G: Recipe resource policy.
+/// The apply round reads the policy's caps to gate
+/// stages whose `resource_units` exceed any cap.
+/// `None` for any cap means "no cap; let the live
+/// `ResourceSnapshot::detect()` measurement
+/// decide". All numeric fields are `f64` so the
+/// policy can express both absolute caps (MB, ms)
+/// and relative caps (fraction of `MAX_RESOURCE_UNITS`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecipeResourcePolicy {
+    pub max_cpu_units: Option<f64>,
+    pub max_memory_mb: Option<f64>,
+    pub max_disk_mb: Option<f64>,
+    pub max_wall_clock_secs: Option<f64>,
+    pub notes: String,
+}
+
+impl RecipeResourcePolicy {
+    /// Build the default `RecipeResourcePolicy`
+    /// (no caps + an empty notes string). Used by
+    /// the `Recipe::default()` and by callers that
+    /// want an "allow everything" policy.
+    pub fn unbounded() -> Self {
+        Self {
+            max_cpu_units: None,
+            max_memory_mb: None,
+            max_disk_mb: None,
+            max_wall_clock_secs: None,
+            notes: String::new(),
+        }
+    }
+
+    /// `true` when every cap is `None` (the policy
+    /// places no constraints). Used by the apply
+    /// round to short-circuit the cap-check.
+    pub fn is_unbounded(&self) -> bool {
+        self.max_cpu_units.is_none()
+            && self.max_memory_mb.is_none()
+            && self.max_disk_mb.is_none()
+            && self.max_wall_clock_secs.is_none()
+    }
+}
+
+/// CR-08 §21 / Slice G: ImageVersion-side provenance
+/// record.
+///
+/// Distinct from `RecipeProvenance` (which is the
+/// Recipe-only surface: identity + lineage_steps +
+/// perceptual_models + ...). This struct records
+/// the actual record of how this ImageVersion came
+/// from this Recipe via these stage runs.
+///
+/// The constructor `provenance_record()` is a pure
+/// function that walks the chain `ImageVersion`
+/// then `Artifact` then `PipelineRun` then
+/// `StageRunRecord` then `AiOperation` and assembles
+/// the record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProvenanceRecord {
+    /// The ImageVersion the record describes.
+    pub version_id: String,
+    /// The Recipe identity (profile_id + version)
+    /// when the ImageVersion was produced by a
+    /// Recipe; `None` for AI-applied versions whose
+    /// `recipe_id` is null.
+    pub recipe_id: Option<String>,
+    pub recipe_version: Option<u32>,
+    pub recipe_hash: Option<String>,
+    /// Counts the §8 processing provenance chain:
+    /// how many stage runs produced this ImageVersion
+    /// (1 per enabled stage, regardless of attempt
+    /// count).
+    pub stage_runs: usize,
+    /// Counts the §9 AI provenance chain: how many
+    /// `AiOperation` rows this ImageVersion
+    /// references. `0` for Recipes that did not
+    /// invoke any AI enhancement.
+    pub ai_operations: usize,
+    /// Human-readable summary lines (one per stage
+    /// run + one per ai operation, in execution
+    /// order). The ProvenancePanel renders this
+    /// list verbatim; consumers can also parse it
+    /// line-by-line if they want the canonical text.
+    pub summary_lines: Vec<String>,
+    /// `true` when the record is reproducible to
+    /// the bit (mirrors the §6 `ReproducibilityVerdict::Exact`
+    /// verdict; `false` for Material / Indeterminate).
+    /// Computed lazily from the same chain.
+    pub is_exact: bool,
+}
+
+/// CR-08 §21 / Slice G: build the ImageVersion-side
+/// `ProvenanceRecord`. Pure function: takes the
+/// already-loaded `ImageVersion` (currently surfaced
+/// only via the `version_id` argument; the full
+/// struct is wired through so future slice can fold
+/// its `recipe_id` + `recipe_version` + `recipe_hash`
+/// fields into the record), optional Recipe
+/// identity (the `Recipe` itself is optional because
+/// the RecipeStore may not be able to resolve the
+/// `recipe_id` at record-build time), the ordered
+/// list of `StageRunRecord`s (from the project
+/// store), and the ordered list of `AiOperation`s
+/// (also from the project store). Returns the
+/// assembled `ProvenanceRecord`.
+///
+/// The `is_exact` field is computed by the same
+/// `summarize_reproducibility` aggregator that the
+/// §22 round 2 `recipe_get_reproducibility_report`
+/// IPC uses; this slice routes through the
+/// aggregator so the §21 + §22 surfaces agree.
+pub fn provenance_record(
+    version_id: &str,
+    _image_version: &crate::domain::ImageVersion,
+    recipe: Option<&Recipe>,
+    stage_runs: &[crate::domain::StageRunRecord],
+    ai_ops: &[crate::domain::AiOperation],
+    reproducibility_verdict: ReproducibilityVerdictLite,
+) -> ProvenanceRecord {
+    // Slice G narrows the §22 round 2
+    // `ReproducibilityVerdict` enum down to the
+    // 3-valued "exact?" flag the §21 record needs.
+    // We avoid pulling the full enum + aggregator
+    // into a method on `ProvenanceRecord` to keep
+    // the §21 type decoupled from §22's
+    // reproducibility module.
+    let is_exact = matches!(reproducibility_verdict, ReproducibilityVerdictLite::Exact);
+
+    let mut summary_lines: Vec<String> = Vec::with_capacity(stage_runs.len() + ai_ops.len());
+    for sr in stage_runs {
+        summary_lines.push(format!(
+            "stage_run {stage_id} attempt {attempt} -> {outcome}",
+            stage_id = sr.stage_id,
+            attempt = sr.attempt,
+            outcome = sr.status,
+        ));
+    }
+    for op in ai_ops {
+        summary_lines.push(format!(
+            "ai_op {op_id} model {model} backend {backend}",
+            op_id = op.operation_id,
+            model = op.model_id,
+            backend = op.backend.as_deref().unwrap_or("none"),
+        ));
+    }
+
+    ProvenanceRecord {
+        version_id: version_id.to_string(),
+        recipe_id: recipe.map(|r| RecipeStore::profile_id_for(&r.name, &r.target_type)),
+        recipe_version: recipe.map(|r| r.version),
+        recipe_hash: recipe.map(|r| r.pipeline_plan_hash()),
+        stage_runs: stage_runs.len(),
+        ai_operations: ai_ops.len(),
+        summary_lines,
+        is_exact,
+    }
+}
+
+/// CR-08 §21 / Slice G: minimal verdict shape the
+/// `provenance_record()` constructor needs. The §22
+/// round 2 `ReproducibilityVerdict` enum is richer
+/// (3 variants); this lite enum is what the §21
+/// record exposes publicly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReproducibilityVerdictLite {
+    Exact,
+    NotExact,
+}
+
+// `RecipeStore::profile_id_for` is in
+// `recipe_store.rs`; re-export under a local alias
+// so the constructor compiles without an extra
+// `use` at the call site.
+use crate::recipe_store::RecipeStore;

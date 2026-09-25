@@ -301,26 +301,92 @@ pub fn summarize_reproducibility(
         });
     }
 
-    // recipe: Recipe identity + content hash. When
-    // the Recipe is unknown (legacy ImageVersion
-    // without recipe_id), the dimension is
-    // `Unknown`.
+    // recipe: Recipe identity + content hash.
+    //
+    // Slice E (CR-08 §21 follow-on): the
+    // aggregator now also reads `recipe_version` +
+    // `recipe_hash` from the ImageVersion itself.
+    // If the ImageVersion carries all three
+    // (recipe_id + recipe_version + recipe_hash),
+    // the dimension resolves one of three ways:
+    //
+    // - `recipe_id` matches a current Recipe AND
+    //   the current Recipe's hash matches the
+    //   persisted `recipe_hash`: `Met`.
+    // - `recipe_id` matches a current Recipe BUT
+    //   the Recipe was edited post-apply (current
+    //   hash != persisted `recipe_hash`):
+    //   `Deviation` with a "Recipe was edited
+    //   after the ImageVersion was produced:
+    //   stored hash {a} != current hash {b}" note.
+    // - `recipe_id` matches a current Recipe AND
+    //   the persisted `recipe_hash` is empty:
+    //   `Deviation` with the original "Recipe
+    //   content hash is empty" note.
+    // - `recipe_id` does not match any current
+    //   Recipe: `Unknown` ("Recipe was deleted
+    //   from the store after the ImageVersion was
+    //   produced").
+    // - `recipe` is None (legacy ImageVersion
+    //   without `recipe_id`): `Unknown` (the
+    //   honest surface pre-Slice E).
     {
         let outcome = match recipe {
             Some(r) => {
-                let hash = r.pipeline_plan_hash();
-                if hash.is_empty() {
-                    ReproducibilityCondition::Deviation(
-                        "Recipe content hash is empty".to_string(),
-                    )
+                let current_hash = r.pipeline_plan_hash();
+                if current_hash.is_empty() {
+                    ReproducibilityCondition::Deviation("Recipe content hash is empty".to_string())
                 } else {
-                    ReproducibilityCondition::Met
+                    // Slice E: persisted hash matches the
+                    // current Recipe hash. `Met` even when
+                    // the persisted `recipe_hash` is None
+                    // (legacy apply rounds that only wrote
+                    // `recipe_id`).
+                    if image_version
+                        .recipe_hash
+                        .as_ref()
+                        .map(|h| h == &current_hash)
+                        .unwrap_or(true)
+                    {
+                        ReproducibilityCondition::Met
+                    } else {
+                        // Slice E: persisted hash differs
+                        // from the current Recipe hash.
+                        // Recipe was edited post-apply.
+                        ReproducibilityCondition::Deviation(
+                                format!(
+                                    "Recipe was edited after the ImageVersion was produced: stored hash {stored} != current hash {current}",
+                                    stored = image_version
+                                        .recipe_hash
+                                        .as_deref()
+                                        .unwrap_or("<none>"),
+                                    current = current_hash,
+                                ),
+                            )
+                    }
                 }
             }
-            None => ReproducibilityCondition::Unknown(
-                "Recipe is not recorded for this ImageVersion; cannot verify the recipe half of exact reproducibility"
-                    .to_string(),
-            ),
+            None => {
+                // Slice E: distinguish "legacy apply
+                // round without recipe_id" (Unknown)
+                // from "Recipe was deleted from the
+                // store after apply" (also Unknown,
+                // but with a sharper note).
+                if image_version.recipe_id.is_some()
+                    && image_version.recipe_version.is_some()
+                    && image_version.recipe_hash.is_some()
+                {
+                    ReproducibilityCondition::Unknown(
+                        "Recipe was deleted from the store after the ImageVersion was produced"
+                            .to_string(),
+                    )
+                } else {
+                    ReproducibilityCondition::Unknown(
+                        "Recipe is not recorded for this ImageVersion; cannot verify the recipe half of exact reproducibility"
+                            .to_string(),
+                    )
+                }
+            }
         };
         if let ReproducibilityCondition::Unknown(note) | ReproducibilityCondition::Deviation(note) =
             &outcome

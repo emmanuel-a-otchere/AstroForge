@@ -369,6 +369,8 @@ fn image_version_round_trip_preserves_sequence() {
         created_at: "2026-01-01 00:00:00 UTC".into(),
         hidden: false,
         recipe_id: None,
+        recipe_version: None,
+        recipe_hash: None,
     };
     let v2 = ImageVersion {
         version_id: "ver_2".into(),
@@ -380,6 +382,8 @@ fn image_version_round_trip_preserves_sequence() {
         created_at: "2026-01-02 00:00:00 UTC".into(),
         hidden: false,
         recipe_id: None,
+        recipe_version: None,
+        recipe_hash: None,
     };
     s.upsert_image_version(&v1).expect("upsert v1");
     s.upsert_image_version(&v2).expect("upsert v2");
@@ -404,6 +408,8 @@ fn image_version_sequence_increments() {
         created_at: "2026-01-01 00:00:00 UTC".into(),
         hidden: false,
         recipe_id: None,
+        recipe_version: None,
+        recipe_hash: None,
     };
     s.upsert_image_version(&v1).unwrap();
     assert_eq!(s.next_image_version_sequence("p1").unwrap(), 1);
@@ -429,6 +435,8 @@ fn hidden_versions_excluded_from_list() {
         created_at: "2026-01-01 00:00:00 UTC".into(),
         hidden: false,
         recipe_id: None,
+        recipe_version: None,
+        recipe_hash: None,
     };
     let v2_hidden = ImageVersion {
         version_id: "ver_2_hidden".into(),
@@ -440,6 +448,8 @@ fn hidden_versions_excluded_from_list() {
         created_at: "2026-01-02 00:00:00 UTC".into(),
         hidden: true,
         recipe_id: None,
+        recipe_version: None,
+        recipe_hash: None,
     };
     s.upsert_image_version(&v1).unwrap();
     s.upsert_image_version(&v2_hidden).unwrap();

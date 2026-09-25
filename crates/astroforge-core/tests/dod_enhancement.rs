@@ -71,6 +71,8 @@ fn source_image_version() -> ImageVersion {
         created_at: "2026-09-11 12:00:00 UTC".into(),
         hidden: false,
         recipe_id: None,
+        recipe_version: None,
+        recipe_hash: None,
     }
 }
 
@@ -208,6 +210,8 @@ fn result_image_version() -> ImageVersion {
         created_at: "2026-09-11 12:00:08 UTC".into(),
         hidden: false,
         recipe_id: None,
+        recipe_version: None,
+        recipe_hash: None,
     }
 }
 

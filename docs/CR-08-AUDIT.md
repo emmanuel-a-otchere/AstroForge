@@ -2,7 +2,7 @@
 
 **Source:** [`CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md`](CR-08-RECIPES-REPRODUCIBILITY-PROVENANCE.md)
 **Original audit date:** 2026-09-12
-**Last refresh:** 2026-09-24 (refresh 5: §22 round 2 Slice D `get_reproducibility_report` shipped. §22 ❌ row count: 1 -> 0 (the §22 round 2 series is complete: Slice A `preview_recipe` + Slice B `save_processing_as_recipe` + Slice C `check_recipe_applicability` + Slice D `get_reproducibility_report`).)
+**Last refresh:** 2026-09-25 (refresh 6: CR-08 §21 follow-on / Slice E `persist_recipe_identity_on_image_version` shipped. §21 ❌ row count: 5 -> 3. The §6 reproducibility `recipe` dimension flips from `Unknown` to `Met` for every ImageVersion written by a post-Slice E apply round. The remaining §21 ❌ rows are: `recipe_constraint` (Slice D's validation report already produces it as a serde value; the next slice can fold it into the RecipeStore's save path), `recipe_resource_policy`, and `provenance_record` (uses `AiOperation` + `StageRun` instead; a §21 partial-completion slice can surface a typed record: Slice D's `ReproducibilityRecord` covers the §6 reproducibility half of this requirement).)
 **Status:** ✅ Shipped / ⚠️ Partial / ❌ Missing
 
 Reconciled against `e5ec793` (post-CR-07 §31 close-out).
@@ -711,12 +711,12 @@ The full §20 security-validation pipeline ships via PR #392:
   save path so unsafe Recipes can't be
   persisted is a follow-on slice.
 
-## §21 Data Model — ⚠️ Partial
+## §21 Data Model — ⚠️ Partial (Slice E closes the `recipe_version` + `recipe_hash` ImageVersion fields; `reproducibility_record` ships via Slice D; 3 ❌ rows remain: `recipe_constraint`, `recipe_resource_policy`, `provenance_record`; the §21 sub-heading stays Partial because those 3 rows still have ❌ status)
 
 | §21 type | Existing |
 |---|---|
 | `recipe` | ✅ `Recipe` |
-| `recipe_version` | ✅ `Recipe::version` + `Recipe::parent_version` |
+| `recipe_version` | ✅ `Recipe::version` + `Recipe::parent_version` + `ImageVersion::recipe_version` (CR-08 §21 follow-on / Slice E) |
 | `recipe_stage` | ✅ `RecipeStage` |
 | `recipe_parameter` | ✅ `RecipeStage::params: HashMap<String, serde_json::Value>` |
 | `recipe_constraint` | ❌ Missing |
@@ -725,9 +725,9 @@ The full §20 security-validation pipeline ships via PR #392:
 | `recipe_resource_policy` | ❌ Missing |
 | `pipeline_plan` | ✅ `PipelinePlan` |
 | `pipeline_execution` | ✅ `PipelineRun` |
-| `provenance_record` | ❌ Missing (uses `AiOperation` + `StageRun` instead) |
+| `provenance_record` | ❌ Missing (uses `AiOperation` + `StageRun` instead; a `Recipe(provenance)` companion to `Recipe(applicable)` would close this row) |
 | `provenance_edge` | ❌ Missing (uses foreign keys) |
-| `reproducibility_record` | ❌ Missing |
+| `reproducibility_record` | ✅ `ReproducibilityRecord` (CR-08 §22 round 2 / Slice D) |
 | `execution_environment` | ⚠️ Partial — `AiOperation::backend` + `engine_version`, no aggregate |
 | `recipe_application` | ⚠️ Partial — `apply_recipe()` function exists |
 | `recipe_adaptation` | ✅ `AdaptiveParameterSet::reason: String` |
@@ -805,6 +805,14 @@ below for the remaining work).
 - TS bridge: `recipeGetReproducibilityReport(versionId)` in `src/lib/astroforge-api.ts` + the high-level wrapper `getReproducibilityReport(versionId)` in `src/lib/profile-store.ts` (mirrors `recipePreview`'s browser-mode placeholder pattern: returns a synthetic `Indeterminate` verdict + 11 `Unknown` dimension rows when not running under Tauri).
 - 19 new pure-function tests in `crates/astroforge-core/tests/reproducibility.rs` pin the contract (happy + sad paths + fold priority + serde round-trip + pure-function check + hardware projection). All pass (CI).
 
+**Shipped this tranche (refresh 10 — §21 follow-on / Slice E):**
+
+- **`persist_recipe_identity_on_image_version`** (`ImageVersion::recipe_version: Option<u32>` + `ImageVersion::recipe_hash: Option<String>`): The §21 partial-completion slice called out in Slice D's CHANGELOG. Slice D flagged that the `recipe` dimension of the `ReproducibilityRecord` was always `Unknown` because the ImageVersion did not yet persist the complete Recipe identity at apply time. Slice E extends `ImageVersion` to carry the full Recipe identity (`recipe_id` + `recipe_version` + `recipe_hash`) so the aggregator can flip the dimension from `Unknown` to `Met` (or `Deviation` when the persisted Recipe was edited post-apply).
+- `DomainStore` migrations `13` + `14`: add the `recipe_version INTEGER` + `recipe_hash TEXT` columns to `image_versions`, with partial indexes on `(recipe_id, recipe_version)` and `recipe_hash`. Schema version bumped to 14.
+- `summarize_reproducibility` (`reproducibility.rs`) reads `recipe_version` + `recipe_hash` from the `ImageVersion` and resolves the `recipe` dimension in one of four ways: `recipe_hash` matches the current Recipe hash: `Met`; `recipe_hash` differs from the current Recipe hash: `Deviation` with a "Recipe was edited after the ImageVersion was produced: stored hash {stored} != current hash {current}" note; ImageVersion carries all three identity fields but `RecipeStore` no longer resolves the Recipe: `Unknown` with a "Recipe was deleted from the store after the ImageVersion was produced" note; legacy ImageVersion (no `recipe_version` + no `recipe_hash`): the dimension stays `Unknown` (the pre-Slice E honest surface).
+- IPC: `ApplyAiOperationRequest` (Rust `commands_ai_enhancement.rs` + TS `astroforge-api.ts`) gets two new optional fields: `recipe_version: Option<u32>` + `recipe_hash: Option<String>`. The apply round threads them through to the new `ImageVersion` row. `ImageVersion` + `ImageVersionJson` TS types expose the new fields as `number | null` + `string | null`.
+- 5 new pure-function tests in `crates/astroforge-core/tests/reproducibility.rs` pin the new `recipe` dimension semantics (matching-hash, modified-hash, deleted-recipe, legacy-no-identity, legacy-with-resolved-recipe). The existing B13a round-trip test in `domain_store.rs` is extended to assert `recipe_version` + `recipe_hash` round-trip on the SQLite path; the `recipe_id_round_trip_on_image_version` schema_version assertion is updated to expect 14. Total: 24/24 reproducibility tests pass; full workspace `cargo test -p astroforge-core` suite has no regressions (816 + integration tests).
+
 ## §23 Events — ⚠️ Partial
 
 Most §23 events do not exist. `RecipeCreated`, `RecipeUpdated`,
@@ -869,7 +877,7 @@ hashes are all persisted locally.
 | AI model versions/hashes are retained | ✅ |
 | Backend/precision are retained | ✅ |
 | Seeds are retained where applicable | ✅ |
-| Reproducibility conditions are recorded | ✅ (CR-08 §22 round 2 / Slice D `recipe_get_reproducibility_report`; the `ReproducibilityRecord` aggregator walks every §6 dimension and surfaces the 3-way `ReproducibilityVerdict` per ImageVersion; the `recipe` dimension is intentionally `Unknown` today because the ImageVersion does not yet persist the Recipe version — a follow-on §21 partial-completion slice can extend the Recipe resolution by persisting the Recipe version on the ImageVersion) |
+| Reproducibility conditions are recorded | ✅ (CR-08 §22 round 2 / Slice D `recipe_get_reproducibility_report` + CR-08 §21 follow-on / Slice E `persist_recipe_identity_on_image_version`; the `ReproducibilityRecord` aggregator walks every §6 dimension and surfaces the 3-way `ReproducibilityVerdict` per ImageVersion; the `recipe` dimension resolves to `Met` when the apply round persists the Recipe identity and the Recipe has not been edited post-apply, to `Deviation` when the persisted hash differs from the current Recipe hash, and to `Unknown` (with the sharper "Recipe was deleted from the store" note) when the Recipe can no longer be resolved) |
 | Every Image Version has provenance | ✅ (via `AiOperation` + `StageRun`) |
 | Provenance links source → processing → AI → result | ✅ |
 | Provenance survives application restart | ✅ |

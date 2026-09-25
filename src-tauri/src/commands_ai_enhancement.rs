@@ -724,6 +724,27 @@ pub struct ApplyAiOperationRequest {
     /// rounds that aren't anchored on a named profile.
     #[serde(default)]
     pub recipe_id: Option<String>,
+    /// CR-08 §21 follow-on / Slice E: the Recipe
+    /// version that produced this ImageVersion.
+    /// Combined with `recipe_id` + `recipe_hash`,
+    /// this forms the complete Recipe identity so
+    /// the §6 reproducibility aggregator can flip
+    /// the `recipe` dimension from `Unknown` to
+    /// `Met`. None for legacy apply calls (the
+    /// field is brand new) + for apply rounds that
+    /// aren't anchored on a named profile.
+    #[serde(default)]
+    pub recipe_version: Option<u32>,
+    /// CR-08 §21 follow-on / Slice E: the Recipe
+    /// content hash (`Recipe::pipeline_plan_hash`)
+    /// at the moment the apply round fires. The
+    /// aggregator compares this against the current
+    /// Recipe hash to detect post-apply edits:
+    /// `Met` if the persisted Recipe still matches,
+    /// `Deviation` if the Recipe was edited after
+    /// this ImageVersion was produced.
+    #[serde(default)]
+    pub recipe_hash: Option<String>,
 }
 
 /// CR-06 P4 — response: the new Image Version + the
@@ -844,6 +865,15 @@ pub fn enhancement_apply_operation(
         // the panel shows the Recipe name + integrity
         // badge.
         recipe_id: request.recipe_id.clone(),
+        // CR-08 §21 follow-on / Slice E: thread the
+        // optional `recipe_version` + `recipe_hash`
+        // through too. Combined with `recipe_id`,
+        // the three form the complete Recipe identity
+        // the §6 reproducibility aggregator needs to
+        // flip the `recipe` dimension from `Unknown`
+        // to `Met`.
+        recipe_version: request.recipe_version,
+        recipe_hash: request.recipe_hash.clone(),
     };
     with_store(&state, |s| s.upsert_image_version(&version).map_err(|e| e.to_string()))?;
     let ai_op_id = format!("op_{}", new_id_suffix());

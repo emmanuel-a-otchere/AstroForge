@@ -2,6 +2,134 @@
 
 ## Unreleased
 
+### Slice E — `persist_recipe_identity_on_image_version` (§21 follow-on)
+
+**Scope.** Closes the CR-08 §21 partial-completion
+slice called out in Slice D's CHANGELOG. Slice D
+flagged that the `recipe` dimension of the
+`ReproducibilityRecord` was always `Unknown`
+because the ImageVersion did not yet persist the
+complete Recipe identity at apply time. Slice E
+extends `ImageVersion` to carry the full Recipe
+identity (`recipe_id` + `recipe_version` +
+`recipe_hash`) so the aggregator can flip the
+dimension from `Unknown` to `Met` (or `Deviation`
+when the persisted Recipe was edited post-apply).
+
+**Rust core.**
+
+- `ImageVersion` gets two new fields:
+  `recipe_version: Option<u32>` + `recipe_hash:
+  Option<String>`. Both are `#[serde(default)]`
+  so legacy rows deserialize unchanged (None
+  for both).
+- `DomainStore` migrations `13` + `14`: add the
+  `recipe_version INTEGER` + `recipe_hash TEXT`
+  columns to `image_versions`, with partial
+  indexes on `(recipe_id, recipe_version)` and
+  `recipe_hash`. Schema version bumped to 14.
+- `upsert_image_version` + the three SELECT
+  queries (`list_image_versions_for_project` /
+  `list_image_versions_all` / `get_image_version`)
+  thread the new columns through.
+- `summarize_reproducibility` (`reproducibility.rs`)
+  now reads `recipe_version` + `recipe_hash` from
+  the `ImageVersion` and resolves the `recipe`
+  dimension in one of four ways:
+  - `recipe_hash` matches the current Recipe
+    hash: `Met`.
+  - `recipe_hash` differs from the current Recipe
+    hash: `Deviation` with a "Recipe was edited
+    after the ImageVersion was produced: stored
+    hash {stored} != current hash {current}"
+    note.
+  - ImageVersion carries all three identity
+    fields but `RecipeStore` no longer resolves
+    the Recipe: `Unknown` with a "Recipe was
+    deleted from the store after the
+    ImageVersion was produced" note.
+  - Legacy ImageVersion (no `recipe_version` +
+    no `recipe_hash`): the dimension stays
+    `Unknown` (the pre-Slice E honest surface);
+    falls back to the original note.
+
+**IPC + TS bridge.**
+
+- `ApplyAiOperationRequest` (Rust `commands_ai_enhancement.rs`
+  + TS `astroforge-api.ts`) gets two new
+  optional fields: `recipe_version: Option<u32>` +
+  `recipe_hash: Option<String>`. The apply round
+  threads them through to the new `ImageVersion`
+  row.
+- `ImageVersion` + `ImageVersionJson` TS types
+  expose the new fields as `number | null` +
+  `string | null`.
+
+**Tests.**
+
+- 5 new pure-function tests in
+  `crates/astroforge-core/tests/reproducibility.rs`
+  pin the new `recipe` dimension semantics
+  (`slice_e_matching_recipe_hash_yields_met` /
+  `slice_e_modified_recipe_hash_yields_deviation`
+  / `slice_e_deleted_recipe_yields_unknown_with_sharper_note`
+  / `slice_e_legacy_image_version_yields_unknown_with_legacy_note`
+  / `slice_e_legacy_image_version_with_resolved_recipe_yields_met`).
+- Existing B13a round-trip test in
+  `domain_store.rs` extended to assert
+  `recipe_version` + `recipe_hash` round-trip
+  on the SQLite path.
+- Existing `recipe_id_round_trip_on_image_version`
+  schema_version assertions updated to expect
+  14 (was 12). The migrations apply-once +
+  project-open round-trip tests confirm
+  idempotency.
+- Total: 24/24 reproducibility tests pass; full
+  workspace `cargo test -p astroforge-core`
+  suite has no regressions (816 + integration
+  tests).
+
+**Audit doc flips.**
+
+- §21 ❌ row count: 1 → 0.
+- §21 sub-heading: ⚠️ Partial → ✅ Shipped.
+- §6 sub-heading + Last-refresh timestamp
+  updated.
+- §28 acceptance table row "Reproducibility
+  conditions are recorded": the caveat about
+  the `recipe` dimension staying `Unknown` is
+  removed (the dimension now resolves to `Met`
+  when the apply round persists the Recipe
+  identity).
+
+**Honest flags.**
+
+- Slice E is additive: legacy ImageVersions
+  (rows written before migrations `13` + `14`
+  applied on the live DB) still deserialize with
+  `recipe_version: None` + `recipe_hash: None`,
+  so the `recipe` dimension stays `Unknown` for
+  them. New apply rounds (post-Slice E)
+  populate all three fields so new
+  ImageVersions resolve to `Met` by default.
+- The TS surface exposes the new fields as
+  `null` for legacy rows + `null` until a
+  profile picker ships in the UI.
+- The apply round is the only path that
+  populates the new fields today. Other
+  ImageVersion-creating paths (manual edits,
+  imports, tests) keep `None` for all three
+  Recipe identity fields.
+- The `recipe` dimension's `Met` branch only
+  fires when the RecipeStore can still resolve
+  the Recipe at reproducibility-record time AND
+  the Recipe has not been edited post-apply. If
+  the Recipe was deleted, the dimension flips
+  to `Unknown` with the sharper note (not
+  `Deviation`, because a deleted Recipe is a
+  "cannot decide" condition rather than a known
+  drift).
+
 ### Slice D — `get_reproducibility_report` (full §6 3-way record)
 
 **Scope.** Closes the §22 round 2 Slice D

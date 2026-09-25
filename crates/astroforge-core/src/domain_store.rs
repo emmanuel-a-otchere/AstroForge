@@ -522,6 +522,38 @@ CREATE INDEX idx_image_decisions_quality_profile
     ON image_decisions(quality_profile) WHERE quality_profile IS NOT NULL;
 "#,
     ),
+    // CR-08 §21 follow-on / Slice E: persist the
+    // Recipe version on ImageVersion. Combined with
+    // the existing `recipe_id` column (B13a), the
+    // pair forms the complete Recipe identity at
+    // apply time so the §6 reproducibility
+    // aggregator can flip the `recipe` dimension
+    // from `Unknown` to `Met`.
+    (
+        13,
+        r#"
+ALTER TABLE image_versions ADD COLUMN recipe_version INTEGER;
+
+CREATE INDEX idx_image_versions_recipe_version
+    ON image_versions(recipe_id, recipe_version)
+    WHERE recipe_id IS NOT NULL AND recipe_version IS NOT NULL;
+"#,
+    ),
+    // CR-08 §21 follow-on / Slice E: persist the
+    // Recipe content hash (`Recipe::pipeline_plan_hash`)
+    // on ImageVersion. The aggregator uses this to
+    // detect post-apply edits: if the Recipe in the
+    // RecipeStore no longer matches the stored hash,
+    // the `recipe` dimension flips `Met` -> `Deviation`.
+    (
+        14,
+        r#"
+ALTER TABLE image_versions ADD COLUMN recipe_hash TEXT;
+
+CREATE INDEX idx_image_versions_recipe_hash
+    ON image_versions(recipe_hash) WHERE recipe_hash IS NOT NULL;
+"#,
+    ),
 ];
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -900,15 +932,20 @@ impl DomainStore {
     /// CR-07 B13a: also persists the optional recipe_id (the
     /// profile that produced this version) so the
     /// ProvenancePanel can surface it.
+    ///
+    /// CR-08 §21 follow-on / Slice E: also persists the
+    /// optional `recipe_version` + `recipe_hash` so the
+    /// §6 reproducibility aggregator can flip the
+    /// `recipe` dimension from `Unknown` to `Met`.
     pub fn upsert_image_version(&self, row: &ImageVersion) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO image_versions
                 (version_id, project_id, label, sequence,
                  primary_artifact_id, source_version_id, created_at, hidden,
-                 recipe_id)
+                 recipe_id, recipe_version, recipe_hash)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(NULLIF(?7, ''), datetime('now')), ?8,
-                     ?9)",
+                     ?9, ?10, ?11)",
             params![
                 row.version_id,
                 row.project_id,
@@ -919,6 +956,8 @@ impl DomainStore {
                 row.created_at,
                 row.hidden as i64,
                 row.recipe_id,
+                row.recipe_version,
+                row.recipe_hash,
             ],
         )?;
         Ok(())
@@ -930,7 +969,8 @@ impl DomainStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT version_id, project_id, label, sequence, primary_artifact_id,
-                    source_version_id, created_at, hidden, recipe_id
+                    source_version_id, created_at, hidden, recipe_id,
+                    recipe_version, recipe_hash
              FROM image_versions
              WHERE project_id = ?1 AND hidden = 0
              ORDER BY sequence ASC, created_at ASC, version_id ASC",
@@ -946,6 +986,8 @@ impl DomainStore {
                 created_at: row.get(6)?,
                 hidden: row.get::<_, i64>(7)? != 0,
                 recipe_id: row.get(8)?,
+                recipe_version: row.get::<_, Option<i64>>(9)?.map(|v| v as u32),
+                recipe_hash: row.get(10)?,
             })
         })?;
         let mut out = Vec::new();
@@ -966,7 +1008,8 @@ impl DomainStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT version_id, project_id, label, sequence, primary_artifact_id,
-                    source_version_id, created_at, hidden, recipe_id
+                    source_version_id, created_at, hidden, recipe_id,
+                    recipe_version, recipe_hash
              FROM image_versions
              ORDER BY created_at ASC, version_id ASC",
         )?;
@@ -981,6 +1024,8 @@ impl DomainStore {
                 created_at: row.get(6)?,
                 hidden: row.get::<_, i64>(7)? != 0,
                 recipe_id: row.get(8)?,
+                recipe_version: row.get::<_, Option<i64>>(9)?.map(|v| v as u32),
+                recipe_hash: row.get(10)?,
             })
         })?;
         let mut out = Vec::new();
@@ -997,7 +1042,8 @@ impl DomainStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT version_id, project_id, label, sequence, primary_artifact_id,
-                    source_version_id, created_at, hidden, recipe_id
+                    source_version_id, created_at, hidden, recipe_id,
+                    recipe_version, recipe_hash
              FROM image_versions WHERE version_id = ?1",
         )?;
         let mut rows = stmt.query(params![version_id])?;
@@ -1012,6 +1058,8 @@ impl DomainStore {
                 created_at: row.get(6)?,
                 hidden: row.get::<_, i64>(7)? != 0,
                 recipe_id: row.get(8)?,
+                recipe_version: row.get::<_, Option<i64>>(9)?.map(|v| v as u32),
+                recipe_hash: row.get(10)?,
             }))
         } else {
             Ok(None)
@@ -2673,10 +2721,14 @@ mod tests {
         // image_versions recipe_id ALTER TABLE migration.
         // CR-07 C-A3.5: schema_version() bumped to 12 by the
         // image_decisions quality_profile ALTER TABLE migration.
-        assert_eq!(s.schema_version(), 12);
+        // CR-08 §21 follow-on / Slice E: schema_version()
+        // bumped to 13 by the image_versions recipe_version
+        // ALTER TABLE migration + 14 by the recipe_hash
+        // ALTER TABLE migration.
+        assert_eq!(s.schema_version(), 14);
         // Re-running the migration runner must not fail or re-apply.
         let s2 = DomainStore::new(&PathBuf::from(":memory:")).unwrap();
-        assert_eq!(s2.schema_version(), 12);
+        assert_eq!(s2.schema_version(), 14);
     }
 
     #[test]
@@ -3249,6 +3301,8 @@ mod tests {
             created_at: "2026-09-01T00:00:00Z".into(),
             hidden: false,
             recipe_id: None,
+            recipe_version: None,
+            recipe_hash: None,
         };
         let v2 = ImageVersion {
             version_id: "ver_b".into(),
@@ -3260,6 +3314,8 @@ mod tests {
             created_at: "2026-09-02T00:00:00Z".into(),
             hidden: false,
             recipe_id: None,
+            recipe_version: None,
+            recipe_hash: None,
         };
         s.upsert_image_version(&v1).unwrap();
         s.upsert_image_version(&v2).unwrap();
@@ -3290,6 +3346,8 @@ mod tests {
             created_at: "2026-09-16T00:00:00Z".into(),
             hidden: false,
             recipe_id: Some("prof_deep_sky_balanced".into()),
+            recipe_version: Some(3),
+            recipe_hash: Some("abc123hash".into()),
         };
         let v_without = ImageVersion {
             version_id: "ver_no_recipe".into(),
@@ -3301,6 +3359,8 @@ mod tests {
             created_at: "2026-09-16T00:01:00Z".into(),
             hidden: false,
             recipe_id: None,
+            recipe_version: None,
+            recipe_hash: None,
         };
         s.upsert_image_version(&v_with).unwrap();
         s.upsert_image_version(&v_without).unwrap();
@@ -3311,15 +3371,25 @@ mod tests {
             got_with.recipe_id.as_deref(),
             Some("prof_deep_sky_balanced")
         );
+        // CR-08 §21 follow-on / Slice E: recipe_version
+        // + recipe_hash round-trip too.
+        assert_eq!(got_with.recipe_version, Some(3));
+        assert_eq!(got_with.recipe_hash.as_deref(), Some("abc123hash"));
         let got_without = s.get_image_version("ver_no_recipe").unwrap().unwrap();
         assert_eq!(got_without.recipe_id, None);
+        assert_eq!(got_without.recipe_version, None);
+        assert_eq!(got_without.recipe_hash, None);
 
         // list_image_versions_for_project carries the column
         // through; sort by sequence asc so the order is stable.
         let list = s.list_image_versions_for_project("proj_b13a").unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].recipe_id.as_deref(), Some("prof_deep_sky_balanced"));
+        assert_eq!(list[0].recipe_version, Some(3));
+        assert_eq!(list[0].recipe_hash.as_deref(), Some("abc123hash"));
         assert_eq!(list[1].recipe_id, None);
+        assert_eq!(list[1].recipe_version, None);
+        assert_eq!(list[1].recipe_hash, None);
 
         // list_image_versions_all also carries the column.
         let all = s.list_image_versions_all().unwrap();

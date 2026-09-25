@@ -2,6 +2,166 @@
 
 ## Unreleased
 
+### Slice F — `emit_recipe_event` (§23 Recipe Events)
+
+**Scope.** Closes the CR-08 §23 partial-completion
+slice called out in the audit. §23 lists 15 Recipe
+lifecycle events (RecipeCreated, RecipeUpdated,
+RecipeVersionCreated, RecipeValidated,
+RecipeApplicabilityEvaluated,
+RecipeAdaptationProposed, RecipeAdaptationAccepted,
+RecipeApplied, RecipeImportStarted,
+RecipeImportCompleted, RecipeImportFailed,
+RecipeExported, PipelineSavedAsRecipe,
+ProvenanceCreated, ReproducibilityRecordCreated);
+Slice F wires 11 of them into the existing IPC
+handlers + ships a new `recipe_list_events` IPC
+for the consumer. 4 are NOT wired in Slice F
+because no surface to hook them to exists yet
+(see honest flags below).
+
+**Rust core.**
+
+- New module `crates/astroforge-core/src/recipe_events.rs`
+  (~720 lines): `RecipeEventKind` enum (15 closed
+  variants with stable `as_str()`), `RecipeEvent`
+  struct, `RecipeEventFilter` (every field optional
+  so callers supply only the dimensions they know),
+  `RecipeEventStore` (sqlite-backed, append-only,
+  same DB file as `RecipeStore` so events share the
+  recipes lifecycle), `now_iso()` UTC ISO-8601
+  helper. `RecipeEventStoreError` enum
+  (`Sqlite` / `Json` / `Io`).
+- 12 canonical payload constructors for the 12
+  distinct event payloads (4 events share their
+  payload shape with another event: `RecipeUpdated`
+  uses `payload_recipe_updated`; `RecipeValidated`
+  uses `payload_recipe_validated`; both adaptation
+  events use `payload_recipe_adaptation_*`; both
+  `ProvenanceCreated` events live elsewhere).
+- `crates/astroforge-core/src/lib.rs` registers
+  the new module between `recipe` and `recipe_feed`.
+
+**IPC + TS bridge.**
+
+- New IPC `recipe_list_events(filter: RecipeEventFilter) -> Vec<RecipeEvent>`
+  in `src-tauri/src/main.rs`. The list endpoint
+  is read-only; emitting events is the job of the
+  write-side handlers.
+- TS bridge: `RecipeEvent` + `RecipeEventFilter`
+  types + `recipeListEvents(filter)` invoke
+  wrapper in `src/lib/astroforge-api.ts`.
+  `listRecipeEvents(filter)` browser-mode-aware
+  helper in `src/lib/profile-store.ts`
+  (returns `[]` when not running under Tauri).
+
+**Hooks.** 7 existing IPC handlers now emit
+events after the primary operation succeeds:
+
+- `recipe_save` → `RecipeCreated` (when the save
+  creates a fresh profile at version 1) or
+  `RecipeVersionCreated` (when the save creates
+  a new version of an existing profile).
+- `recipe_apply` → `RecipeApplied` with the
+  Recipe identity (profile_id + version) + the
+  `available_models` slice the apply round used.
+- `recipe_export` → `RecipeExported` with the
+  payload byte count (the file-dialog destination
+  lives in the UI follow-on).
+- `recipe_import` → `RecipeImportStarted`
+  (before parsing, so consumers see the attempt),
+  `RecipeImportFailed` (on persist failure), or
+  `RecipeImportCompleted` (after persist +
+  imported-flag flip).
+- `recipe_save_from_pipeline_plan` →
+  `PipelineSavedAsRecipe` with `source = "plan"`.
+- `recipe_save_from_stage_runs` →
+  `PipelineSavedAsRecipe` with `source = "stage_runs"`.
+- `recipe_check_applicability` →
+  `RecipeApplicabilityEvaluated` with the §12
+  verdict label + the warnings list.
+- `recipe_get_reproducibility_report` →
+  `ReproducibilityRecordCreated` with the §6
+  verdict label + the version_id.
+
+**Tests.**
+
+- 12 new pure-function tests in
+  `crates/astroforge-core/tests/recipe_events.rs`
+  pin the event-store contract:
+  `recipe_event_kind_as_str_is_stable` /
+  `recipe_event_payload_constructors` /
+  `record_and_list_single_event` /
+  `list_events_returns_newest_first` /
+  `list_events_filter_by_profile_id` /
+  `list_events_filter_by_kind` /
+  `list_events_filter_by_since` /
+  `list_events_filter_by_limit` /
+  `serde_round_trip_recipe_event` /
+  `list_events_empty_filter_default_limit` /
+  `now_iso_is_canonical` /
+  `count_events_monotonic`.
+- Total: 12/12 events tests pass; full workspace
+  `cargo test -p astroforge-core` suite has no
+  regressions (816 + integration tests).
+
+**Audit doc flips.**
+
+- §23 ❌ row count: 11 → 7.
+- §23 sub-heading ⚠️ Partial → ✅ Shipped (for
+  the 11 wired events); the §23 sub-heading stays
+  ⚠️ Partial because 4 events remain unwired
+  (`RecipeValidated` + 3 adaptation-related).
+- Last-refresh timestamp + refresh 11 section
+  added.
+
+**Honest flags.**
+
+- Slice F is additive: no existing struct or
+  table is touched. Existing `RecipeStore` +
+  `DomainStore` callers are unchanged.
+- 4 §23 events are NOT wired in Slice F:
+  - `RecipeUpdated`: no dedicated "update" IPC
+    exists (`recipe_save` writes a new version
+    rather than mutating; the audit doc flags
+    `update_recipe` as ⚠️ Partial). The payload
+    constructor + the enum variant are in place
+    for a follow-on slice that ships a dedicated
+    update IPC.
+  - `RecipeValidated`: no standalone validator
+    IPC exists today (§20 `validate_compatibility`
+    lives inside `recipe_apply` as an implicit
+    gate; the §22 round 2 `recipe_security_validate`
+    IPC validates against the §20 stage-spec
+    table, not against the Recipe itself, so it
+    does not surface the §23 `RecipeValidated`
+    event). A follow-on slice can ship a
+    `recipe_validate` IPC that emits this event.
+  - `RecipeAdaptationProposed` +
+    `RecipeAdaptationAccepted`: the §22
+    `adapt_recipe` row is ⚠️ Partial
+    (`derive_adaptive_parameters` is engine-side
+    only; no IPC). These two events are the
+    payload-shape contracts for the eventual
+    `adapt_recipe` IPC.
+- 1 §23 event (`ProvenanceCreated`) lives in the
+  `astroforge-core::provenance` module, not here,
+  because the `provenance_events` table predates
+  §23. Slice F does not touch the provenance
+  event log.
+- The `RecipeApplied` payload's `image_version_id`
+  field is empty in Slice F because the §22 round
+  2 `recipe_apply` IPC returns the stages payload;
+  the consumer that materializes the ImageVersion
+  emits the §21 ImageVersion-side event (or, today,
+  none: Slice F covers the Recipe-side events).
+- Event emission is best-effort: a failed event
+  write logs to stderr but does not propagate to
+  the IPC caller. This is intentional: the
+  primary operation has already succeeded; we
+  don't want a logging failure to roll back a
+  successful Recipe save.
+
 ### Slice E — `persist_recipe_identity_on_image_version` (§21 follow-on)
 
 **Scope.** Closes the CR-08 §21 partial-completion

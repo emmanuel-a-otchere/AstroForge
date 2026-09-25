@@ -810,6 +810,79 @@ export const recipeCheckApplicability = (
     matrix,
   }) as Promise<ApplicabilityReportFromRust>;
 
+/**
+ * CR-08 §22 round 2 / Slice D: full §6
+ * reproducibility record. Mirrors the Rust
+ * `astroforge_core::reproducibility::ReproducibilityRecord`
+ * + the inner enums. The 3-way verdict
+ * (`Exact` / `Material` / `Indeterminate`) is the
+ * post-flight reproducibility grade the UI uses
+ * to tell the user whether the Recipe can
+ * reproduce the exact pixels, only the material
+ * result, or whether the aggregator cannot
+ * decide. Distinct from `recipeCheckApplicability`
+ * (which evaluates the §12 pre-flight
+ * compatibility matrix) and from
+ * `recipeGetProvenance` (which evaluates the
+ * Recipe-only provenance chain).
+ */
+export type ReproducibilityVerdictFromRust =
+  | "Exact"
+  | "Material"
+  | "Indeterminate";
+
+export type ReproducibilityConditionFromRust =
+  | "Met"
+  | { Deviation: string }
+  | { Unknown: string };
+
+export interface ReproducibilityDimensionFromRust {
+  /** Stable dimension id the UI can switch on
+   * (`"source_assets"` /
+   * `"application_version"` / `"engine_version"` /
+   * `"recipe"` / `"models"` / `"parameters"` /
+   * `"backend"` / `"precision"` / `"seed"` /
+   * `"execution_config"` / `"hardware"`). New
+   * dimensions are additive: old UIs render the
+   * new id as "Unknown dimension" and the verdict
+   * still works. */
+  dimension: string;
+  outcome: ReproducibilityConditionFromRust;
+}
+
+export interface HardwareSummaryFromRust {
+  cpu_model: string;
+  gpu_models: string[];
+  available_memory_bytes: number;
+  recommended_backend: string;
+}
+
+export interface ReproducibilityRecordFromRust {
+  image_version_id: string;
+  run_id: string | null;
+  recipe_id: string | null;
+  recipe_version: number | null;
+  recipe_hash: string | null;
+  application_version: string | null;
+  engine_version: string | null;
+  hardware: HardwareSummaryFromRust | null;
+  /** Per-dimension verdict list. */
+  dimensions: ReproducibilityDimensionFromRust[];
+  /** Human-readable deviations. */
+  warnings: string[];
+  /** Top-level 3-way verdict. The audit doc
+   * tracks this as the §6 reproducibility
+   * grade. */
+  verdict: ReproducibilityVerdictFromRust;
+}
+
+export const recipeGetReproducibilityReport = (
+  versionId: string,
+): Promise<ReproducibilityRecordFromRust> =>
+  invoke("recipe_get_reproducibility_report", {
+    versionId,
+  }) as Promise<ReproducibilityRecordFromRust>;
+
 // CR-07 §29.2a: server-side diff cache IPC surface.
 // `DiffCache` is a Rust-only in-memory cache. The
 // following 5 commands expose the cache to the JS layer.

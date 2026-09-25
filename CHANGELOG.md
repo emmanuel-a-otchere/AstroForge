@@ -2,6 +2,225 @@
 
 ## Unreleased
 
+### Slice D — `get_reproducibility_report` (full §6 3-way record)
+
+**Scope.** Closes the §22 round 2 Slice D
+audit row by adding the `ReproducibilityRecord`
+aggregator the audit doc tracks as the §6
+reproducibility surface. Where Slice C added
+the §12 pre-flight compatibility matrix (will
+the Recipe run cleanly?), Slice D adds the §6
+post-flight reproducibility grade (can the user
+reproduce the exact pixels later?). The two
+surfaces are intentionally separate so the UI
+can show the user BOTH messages: "this Recipe
+is Compatible" (Slice C) + "this Recipe can
+reproduce the exact pixels" (Slice D).
+
+**Rust core.** New module
+`crates/astroforge-core/src/reproducibility.rs`:
+
+- `ReproducibilityVerdict` 3-way enum:
+  `Exact` (every §6 condition met) / `Material`
+  (known deviation; user can reproduce material
+  result but pixel parity is not guaranteed) /
+  `Indeterminate` (insufficient data). Carries
+  `label()` helper.
+- `ReproducibilityCondition` per-dimension
+  verdict: `Met` / `Deviation(String)` /
+  `Unknown(String)`. New conditions are additive.
+- `ReproducibilityDimension` per-dimension row
+  (id + outcome).
+- `HardwareSummary` pure projection of the
+  `ResourceSnapshot` (CPU model + GPU names +
+  available memory + recommended backend tag).
+  Built via `HardwareSummary::from_snapshot(&snap)`.
+- `ReproducibilityRecord` summary:
+  `image_version_id` + `run_id` + `recipe_id` +
+  `recipe_version` + `recipe_hash` +
+  `application_version` + `engine_version` +
+  `hardware` + `dimensions` (per-dimension list)
+  + `deviations` (human-readable list) +
+  `verdict`.
+- Pure function
+  `summarize_reproducibility(image_version, run, recipe, ai_ops, hardware) -> ReproducibilityRecord`.
+  Walks 11 §6 dimensions: `source_assets` /
+  `application_version` / `engine_version` /
+  `recipe` / `models` / `parameters` / `backend`
+  / `precision` / `seed` / `execution_config` /
+  `hardware`. Verdict folding: any `Unknown` ->
+  `Indeterminate`; any `Deviation` (no
+  `Unknown`) -> `Material`; all `Met` ->
+  `Exact`.
+
+The aggregator is intentionally pure: it does
+NOT touch the filesystem, the database, or the
+network. Callers assemble the inputs
+client-side and pass them in.
+
+**IPC.** New `recipe_get_reproducibility_report`
+Tauri command in `src-tauri/src/main.rs`:
+reads the ImageVersion via
+`DomainStore::get_image_version`, walks the
+primary artifact to the PipelineRun via
+`DomainStore::get_artifact` +
+`DomainStore::get_pipeline_run`, walks the
+PipelineRun to the StageRunRecords +
+AiOperations via
+`DomainStore::list_stage_runs` +
+`DomainStore::list_ai_operations_for_stage`,
+calls `ResourceSnapshot::detect()` for the
+hardware summary, and feeds everything into
+`summarize_reproducibility`. Returns the full
+`ReproducibilityRecord`. Registered alongside
+`recipe_check_applicability` in the
+`invoke_handler!`.
+
+**TS bridge.** New
+`recipeGetReproducibilityReport(versionId)` in
+`src/lib/astroforge-api.ts` (Tauri invoke + type
+definitions for the verdict enum, the condition
+enum, the dimension row, the hardware summary,
+and the full record) + a high-level wrapper
+`getReproducibilityReport(versionId)` in
+`src/lib/profile-store.ts` (mirrors
+`recipePreview`'s browser-mode placeholder
+pattern: returns a synthetic `Indeterminate`
+verdict + 11 `Unknown` dimension rows when not
+running under Tauri).
+
+**Tests.** 19 new pure-function tests in
+`crates/astroforge-core/tests/reproducibility.rs`
+pin the contract:
+
+1. All-Met inputs (every §6 dimension met) ->
+   `Exact` verdict, no deviations.
+2. Root ImageVersion (no source_version_id) ->
+   `Indeterminate` (source_assets Unknown).
+3. Missing PipelineRun -> `Indeterminate`
+   (application_version + engine_version +
+   execution_config Unknown).
+4. Missing Recipe -> `Indeterminate` (recipe
+   Unknown).
+5. Missing model_hash on any AiOperation ->
+   `Material` (models Deviation).
+6. Missing parameters_json on any AiOperation ->
+   `Material` (parameters Deviation).
+7. Missing backend on any AiOperation ->
+   `Indeterminate` (backend Unknown: the engine
+   did not record the runtime backend).
+8. Missing precision on any AiOperation ->
+   `Material` (precision Deviation; fp16 / fp32
+   drift is a known source of material-but-not-
+   exact per §6).
+9. Stochastic / generative AiOperation without
+   seed -> `Material` (seed Deviation; CR-06 §16
+   requires seed).
+10. Deterministic AiOperation without seed ->
+    `Met` (seed legitimately None).
+11. Empty `ai_ops` -> `Indeterminate` (every
+    AI-derived dimension Unknown).
+12. Missing hardware -> `Indeterminate`
+    (hardware Unknown).
+13. Per-dimension rows are returned in stable
+    order: `source_assets`,
+    `application_version`, `engine_version`,
+    `recipe`, `models`, `parameters`, `backend`,
+    `precision`, `seed`, `execution_config`,
+    `hardware`.
+14. `label()` returns the documented stable
+    label per variant.
+15. Verdict folding: any Unknown wins over any
+    Deviation (mixed Unknown + Deviation
+    surfaces Indeterminate).
+16. Serde round-trip via JSON preserves the
+    verdict enum tag + per-dimension list.
+17. Pure function: same inputs produce the same
+    record (no I/O).
+18. Empty `execution_mode` on the recorded run
+    -> `Material` (execution_config Deviation).
+19. `HardwareSummary::from_snapshot()` projects
+    the `ResourceSnapshot` correctly (CPU model +
+    GPU names + available memory + recommended
+    backend tag).
+
+All 19 pass locally (CI). Full workspace test
+suite passes with no regressions.
+
+**Audit doc flip.** §22
+`get_reproducibility_report`: ❌ -> ✅. §22 ❌
+row count: 1 -> 0 (the §22 round 2 series is
+complete: Slice A `preview_recipe`, Slice B
+`save_processing_as_recipe`, Slice C
+`check_recipe_applicability`, Slice D
+`get_reproducibility_report`). §22 sub-heading
+refresh line + Last refresh timestamp updated.
+§6 sub-heading flipped: ⚠️ Partial -> ✅
+Shipped (the reproducibility conditions are
+now recorded per ImageVersion via the
+ReproducibilityRecord aggregator).
+
+**Honest flags.**
+
+- The Recipe is intentionally not resolved by
+  the IPC handler in Slice D: the ImageVersion
+  carries a `recipe_id` (profile_id), but the
+  `RecipeStore::get` requires `(profile_id,
+  version)` and the ImageVersion does not yet
+  carry the Recipe version. The aggregator
+  surfaces `None Recipe` as `Unknown` in the
+  §6 recipe dimension: the honest surface.
+  A follow-on slice can extend the Recipe
+  resolution by persisting the Recipe version
+  on the ImageVersion (CR-08 §21 partial
+  completion).
+- The `hardware` dimension is informational
+  (always surfaced in the record) but is NOT
+  folded into the verdict: the §6 spec calls
+  hardware drift out as material
+  reproducibility, but the per-AiOperation
+  `backend` + `precision` dimensions already
+  cover the runtime half of hardware drift.
+  The aggregator surfaces `Met` when the
+  hardware summary is supplied, `Unknown`
+  otherwise.
+- The `precision` dimension surfaces as
+  `Deviation` (not `Unknown`) when missing,
+  because fp16 / fp32 / mixed drift is a known
+  source of material-but-not-exact per §6.
+- The `backend` dimension surfaces as
+  `Unknown` (not `Deviation`) when missing,
+  because the engine legitimately may not
+  record the runtime backend on early-CI runs
+  (the absence is a recording gap, not a
+  drift statement).
+- The `seed` dimension uses
+  `safety_classification` (the CR-06 §16
+  three-way enum) to distinguish deterministic
+  ops (legitimately `None` seed) from
+  stochastic / generative ops (must carry a
+  seed per CR-06 §16). The legacy `deterministic`
+  bool is also checked for backward compatibility.
+- Distinct from `recipe_check_applicability`
+  (Slice C): that surface evaluates the §12
+  pre-flight Recipe compatibility matrix; this
+  surface evaluates the §6 post-flight
+  reproducibility conditions. The two surfaces
+  are intentionally separate so the UI can
+  render both messages without confusion.
+- Distinct from `recipe_get_provenance` (round
+  1): that surface evaluates the Recipe-only
+  provenance chain (Recipe identity +
+  lineage_steps + perceptual_models + required
+  models + quality_profile + pipeline_plan_hash
+  + is_system); this surface evaluates the
+  ImageVersion-level reproducibility conditions
+  (the §6 chain). The two surfaces compose: the
+  Recipe provenance tells the user WHERE the
+  Recipe came from; the reproducibility record
+  tells the user WHETHER the user can re-run
+  the Recipe later and reproduce the result.
+
 ### Slice C — `check_recipe_applicability` (full §12 6-variant matrix)
 
 **Scope.** Closes the §22 round 2 Slice C

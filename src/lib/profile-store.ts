@@ -1066,3 +1066,70 @@ export async function checkRecipeApplicability(
   const { recipeCheckApplicability } = await import("./astroforge-api");
   return recipeCheckApplicability(profileId, version, matrix);
 }
+
+/**
+ * CR-08 §22 round 2 / Slice D: full §6
+ * reproducibility record. Wraps the
+ * `recipe_get_reproducibility_report` Tauri
+ * command. Returns the Rust-side
+ * `ReproducibilityRecord` verbatim (3-way
+ * verdict + per-dimension list + human-readable
+ * deviations + hardware summary). Browser-mode
+ * placeholder returns a synthetic `Indeterminate`
+ * verdict (with 11 `Unknown` dimension rows + an
+ * empty deviations list) so the UI flow exercises
+ * end-to-end during development.
+ *
+ * Distinct from `recipeCheckApplicability` (the
+ * §12 pre-flight compatibility matrix): this
+ * surface is the §6 post-flight reproducibility
+ * grade the UI uses to tell the user whether the
+ * Recipe can reproduce the exact pixels, only the
+ * material result, or whether the aggregator
+ * cannot decide.
+ *
+ * @param versionId  The `ImageVersion.version_id`
+ *   the report should evaluate. Walks the
+ *   ImageVersion -> Artifact -> PipelineRun ->
+ *   StageRunRecord -> AiOperation chain via the
+ *   existing DomainStore + `ResourceSnapshot::detect()`
+ *   for the hardware summary.
+ */
+export async function getReproducibilityReport(
+  versionId: string,
+): Promise<
+  import("./astroforge-api").ReproducibilityRecordFromRust
+> {
+  if (!isTauri()) {
+    // Browser-mode placeholder: return a synthetic
+    // Indeterminate verdict so the UI flow exercises
+    // end-to-end during development.
+    return {
+      image_version_id: versionId,
+      run_id: null,
+      recipe_id: null,
+      recipe_version: null,
+      recipe_hash: null,
+      application_version: null,
+      engine_version: null,
+      hardware: null,
+      dimensions: [
+        { dimension: "source_assets", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "application_version", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "engine_version", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "recipe", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "models", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "parameters", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "backend", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "precision", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "seed", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "execution_config", outcome: { Unknown: "browser-mode placeholder" } },
+        { dimension: "hardware", outcome: { Unknown: "browser-mode placeholder" } },
+      ],
+      warnings: [],
+      verdict: "Indeterminate",
+    };
+  }
+  const { recipeGetReproducibilityReport } = await import("./astroforge-api");
+  return recipeGetReproducibilityReport(versionId);
+}

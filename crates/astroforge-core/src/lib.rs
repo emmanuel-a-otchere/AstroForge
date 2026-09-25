@@ -62,6 +62,7 @@ pub mod recipe_feed;
 pub mod recipe_store;
 pub mod recommendation;
 pub mod registration;
+pub mod reproducibility;
 pub mod resource;
 pub mod seed;
 pub mod session;

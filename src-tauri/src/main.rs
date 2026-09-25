@@ -1180,6 +1180,113 @@ fn recipe_check_applicability(
     Ok(check_recipe_applicability(&recipe, &matrix))
 }
 
+/// CR-08 §22 round 2 / Slice D: full §6
+/// reproducibility report for an ImageVersion.
+/// Walks the ImageVersion -> Artifact ->
+/// PipelineRun -> StageRunRecord -> AiOperation
+/// chain via the existing DomainStore +
+/// `ResourceSnapshot::detect()` for hardware, and
+/// returns the complete `ReproducibilityRecord`
+/// (top-level 3-way verdict + per-dimension
+/// outcome list + human-readable deviations).
+///
+/// Distinct from `recipe_check_applicability`:
+/// that surface evaluates the §12 matrix
+/// (pre-flight Recipe compatibility); this
+/// surface evaluates the §6 reproducibility
+/// conditions (post-flight Recipe re-runnability).
+///
+/// Returns `ReproducibilityRecord::Indeterminate`
+/// when the ImageVersion cannot be found OR when
+/// the §6 conditions cannot be evaluated (the
+/// caller decides whether to surface the absence
+/// vs. an empty record; the IPC returns the
+/// aggregator's verdict + the deviations list
+/// either way).
+#[tauri::command]
+fn recipe_get_reproducibility_report(
+    domain_state: State<'_, DomainState>,
+    _recipe_state: State<'_, RecipeState>,
+    version_id: String,
+) -> Result<
+    astroforge_core::reproducibility::ReproducibilityRecord,
+    CommandError,
+> {
+    use astroforge_core::reproducibility::{summarize_reproducibility, HardwareSummary};
+    use astroforge_core::resource::ResourceSnapshot;
+
+    // Scope the domain lock so we don't hold it
+    // while the aggregator runs (the aggregator
+    // does not need the lock; only the IO lookups
+    // do). The Recipe lookup is intentionally
+    // best-effort: the ImageVersion carries a
+    // `recipe_id` (profile_id), but the
+    // RecipeStore.get requires (profile_id,
+    // version) and the ImageVersion does not
+    // carry the Recipe version. For Slice D the
+    // aggregator surfaces None Recipe as Unknown
+    // in the §6 recipe dimension: the honest
+    // surface. A follow-on slice can extend the
+    // Recipe resolution by persisting the Recipe
+    // version on the ImageVersion.
+    let (image_version, pipeline_run, ai_ops) = {
+        let store = domain_state
+            .0
+            .lock()
+            .expect("domain store mutex poisoned");
+        let image_version =
+            store.get_image_version(&version_id)?.ok_or_else(|| {
+                CommandError {
+                    message: format!("ImageVersion '{version_id}' not found"),
+                }
+            })?;
+
+        // Walk the primary artifact to the
+        // PipelineRun.
+        let pipeline_run = match store.get_artifact(&image_version.primary_artifact_id) {
+            Ok(artifact) => match artifact.pipeline_run_id {
+                Some(run_id) => match store.get_pipeline_run(&run_id) {
+                    Ok(run) => Some(run),
+                    Err(_) => None,
+                },
+                None => None,
+            },
+            Err(_) => None,
+        };
+
+        // Walk the PipelineRun -> StageRunRecord
+        // -> AiOperation chain. Empty list when
+        // the PipelineRun is unknown or has no
+        // recorded stage runs.
+        let mut ai_ops: Vec<astroforge_core::domain::AiOperation> = Vec::new();
+        if let Some(run) = &pipeline_run {
+            if let Ok(stage_runs) = store.list_stage_runs(&run.run_id) {
+                for sr in stage_runs {
+                    if let Ok(ops) =
+                        store.list_ai_operations_for_stage(&sr.stage_run_id)
+                    {
+                        ai_ops.extend(ops);
+                    }
+                }
+            }
+        }
+
+        (image_version, pipeline_run, ai_ops)
+    };
+
+    // Hardware summary from ResourceSnapshot::detect().
+    let snap = ResourceSnapshot::detect();
+    let hw = HardwareSummary::from_snapshot(&snap);
+
+    Ok(summarize_reproducibility(
+        &image_version,
+        pipeline_run.as_ref(),
+        None,
+        &ai_ops,
+        Some(&hw),
+    ))
+}
+
 /// CR-08 §20: validate a Recipe against the
 /// §20 stage-spec table for the five risk classes
 /// (range, dependency, filesystem, executable,
@@ -1578,6 +1685,7 @@ fn main() {
             recipe_get_provenance,
             recipe_preview,
             recipe_check_applicability,
+            recipe_get_reproducibility_report,
             recipe_security_validate,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,

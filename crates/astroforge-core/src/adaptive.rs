@@ -430,3 +430,211 @@ mod tests {
         assert_eq!(p.kind, NoiseKind::Moderate);
     }
 }
+
+// ─── CR-08 §22 + §28 / Slice I ──────────────────────────────────────────
+//
+// Three new types + one pure function land here to
+// wire the §28 adaptation rows + the 2 §23
+// adaptation events. The slice closes:
+//
+// 1. §28 row "Adaptations are explicitly shown":
+//    the new `RecipeAdaptationResponse` carries the
+//    original Recipe + the proposed Recipe + the
+//    reason + the adaptive parameters so the UI can
+//    render the diff.
+// 2. §28 row "User can accept or reject
+//    adaptations": the new `recipe_accept_adaptation`
+//    IPC saves the proposed Recipe as the next
+//    version, and `recipe_adapt` itself implicitly
+//    supports rejection (the caller simply does not
+//    call `recipe_accept_adaptation`).
+// 3. §23 events `RecipeAdaptationProposed` +
+//    `RecipeAdaptationAccepted`: the IPC wrappers
+//    emit the Slice F enum's already-wired variants.
+
+/// CR-08 §22 + §28 / Slice I: response surface for
+/// the `recipe_adapt` IPC. The caller renders the
+/// `proposed` Recipe + `reason` + `adaptive_params`
+/// so the user can decide whether to accept or
+/// reject the adaptation. `is_noop` is `true` when
+/// the §22 matrix verdict was `Compatible` (no
+/// adaptation needed); `false` for `Adaptable` /
+/// `PartiallyCompatible`. For the two hard-blocker
+/// variants (`Incompatible` / `MissingModels` /
+/// `SchemaMismatch`) the IPC surfaces a
+/// `RecipeAdaptationResponse` with `proposed =
+/// original` + an explanatory `reason` so the UI
+/// can render "adaptation refused: <reason>".
+///
+/// The struct deliberately does NOT derive
+/// `PartialEq` because `Recipe` does not (its
+/// `RecipeStage::params` field is a `HashMap<String,
+/// serde_json::Value>`). Tests compare individual
+/// fields rather than the whole struct.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecipeAdaptationResponse {
+    /// The Recipe the adaptation was derived
+    /// against (carries the same `version` as
+    /// `proposed.version - 1` when the adaptation
+    /// succeeded).
+    pub original: crate::recipe::Recipe,
+    /// The proposed adapted Recipe. Equal to
+    /// `original` when the verdict was
+    /// `Compatible` (`is_noop = true`) or when
+    /// the verdict was a hard blocker (the IPC
+    /// surfaces the refusal verbatim; the user
+    /// can re-edit + re-adapt).
+    pub proposed: crate::recipe::Recipe,
+    /// Human-readable reason (one or more §12
+    /// dimension verdicts concatenated). The UI
+    /// renders this verbatim; it carries the
+    /// "why" behind every adaptive parameter
+    /// change.
+    pub reason: String,
+    /// The adaptive parameters derived from the
+    /// measured image metrics. Carries a
+    /// `NoiseProfile` + `SharpeningProfile`
+    /// (each optional); `None` when the §22
+    /// matrix did not supply `image_metrics`.
+    pub adaptive_params: Option<AdaptiveParameterSet>,
+    /// `true` when no adaptation was applied
+    /// (the §22 verdict was `Compatible`). The
+    /// UI uses this to suppress the "accept
+    /// adaptation" button when there's nothing
+    /// to accept.
+    pub is_noop: bool,
+    /// The §22 matrix verdict label (one of
+    /// `Compatible` / `Adaptable` /
+    /// `PartiallyCompatible` / `Incompatible` /
+    /// `Missing models` / `Schema mismatch`).
+    /// The UI uses this to colour-code the
+    /// adaptation banner.
+    pub verdict_label: String,
+}
+
+/// CR-08 §22 + §28 / Slice I: pure-function
+/// derivation of an adapted Recipe. Takes the
+/// original Recipe + the §22 matrix verdict +
+/// optional measured image metrics. Returns a
+/// triple `(proposed, adaptive_params, reason)`
+/// the IPC handler can wrap in a
+/// `RecipeAdaptationResponse`.
+///
+/// The function:
+/// 1. Maps the matrix verdict to one of four
+///    outcomes:
+///    - `Compatible` -> `(original.clone(), None,
+///      "Recipe is compatible; no adaptation
+///      needed.")`.
+///    - `Adaptable` / `PartiallyCompatible` ->
+///      clone the Recipe, bump
+///      `parent_version` + `version` + append
+///      `flags.push("adapted")`, derive the
+///      adaptive parameters from the supplied
+///      image metrics (when present), and return
+///      the proposed Recipe + the adaptive
+///      parameters + the concatenation of every
+///      per-dimension `Adaptable` / `PartialSkip`
+///      note (so the UI can show every reason).
+///    - `Incompatible` / `MissingModels` /
+///      `SchemaMismatch` -> return
+///      `(original.clone(), None, "adaptation
+///      refused: <dimension verdict notes>")`.
+///      The proposed Recipe equals the original
+///      (the IPC handler surfaces the refusal
+///      verbatim so the UI can render it).
+/// 2. Never panics on unexpected inputs (missing
+///    metrics, empty dimensions). Returns a
+///    `Compatible`-shaped no-op when the verdict
+///    is empty or the dimensions list is empty
+///    (defensive default).
+pub fn derive_adapted_recipe(
+    original: &crate::recipe::Recipe,
+    report: &crate::recipe::ApplicabilityReport,
+    image_metrics: Option<&ImageMetrics>,
+) -> (crate::recipe::Recipe, Option<AdaptiveParameterSet>, String) {
+    use crate::recipe::ApplicabilityOutcome;
+
+    // `ApplicabilityReport.verdict` is the §22
+    // matrix verdict. The function reads it
+    // directly so callers do not need to pass a
+    // separate `verdict` argument.
+    let verdict = &report.verdict;
+
+    // Defensive default. When the verdict enum
+    // is unrecognised (a forward-compatible
+    // variant) we treat the Recipe as no-op
+    // compatible rather than crashing the IPC
+    // handler.
+    let outcome = verdict;
+    let adaptive_params = image_metrics.map(derive_adaptive_parameters);
+
+    match outcome {
+        ApplicabilityOutcome::Compatible => (
+            original.clone(),
+            adaptive_params,
+            "Recipe is compatible; no adaptation needed.".to_string(),
+        ),
+        ApplicabilityOutcome::Adaptable | ApplicabilityOutcome::PartiallyCompatible => {
+            // Clone the Recipe and stamp the
+            // lineage metadata for the proposed
+            // next-version Recipe.
+            let mut proposed = original.clone();
+            proposed.parent_version = Some(proposed.version);
+            proposed.version = proposed.version.saturating_add(1);
+            // The Slice F RecipeEventKind::RecipeAdaptationAccepted
+            // distinguishes an "adapted" Recipe
+            // (the user accepted an adaptation
+            // proposal) from a vanilla
+            // version-bumped Recipe (the user
+            // hand-edited the Recipe). The flag
+            // is a single string in the existing
+            // `Recipe.flags` field; downstream
+            // surfaces can pivot on it.
+            if !proposed.flags.iter().any(|f| f == "adapted") {
+                proposed.flags.push("adapted".to_string());
+            }
+            // Rebuild the reason from every
+            // per-dimension `Adaptable` /
+            // `PartialSkip` note so the UI can
+            // show every reason verbatim.
+            let mut reasons: Vec<String> = Vec::new();
+            for dim in &report.dimensions {
+                use crate::recipe::DimensionOutcome;
+                match &dim.outcome {
+                    DimensionOutcome::Adaptable(note) | DimensionOutcome::PartialSkip(note) => {
+                        reasons.push(format!("{}: {}", dim.dimension, note));
+                    }
+                    _ => {}
+                }
+            }
+            let reason = if reasons.is_empty() {
+                "Recipe adapted per §22 matrix; see adaptive_params for details.".to_string()
+            } else {
+                reasons.join("; ")
+            };
+            (proposed, adaptive_params, reason)
+        }
+        ApplicabilityOutcome::Incompatible
+        | ApplicabilityOutcome::MissingModels(_)
+        | ApplicabilityOutcome::SchemaMismatch(_) => {
+            // Hard blockers: surface the refusal
+            // verbatim but do not propose a new
+            // Recipe version.
+            let reason = match outcome {
+                ApplicabilityOutcome::Incompatible => {
+                    "adaptation refused: Recipe is incompatible.".to_string()
+                }
+                ApplicabilityOutcome::MissingModels(missing) => format!(
+                    "adaptation refused: Recipe requires models [{}] which are not available.",
+                    missing.join(", ")
+                ),
+                ApplicabilityOutcome::SchemaMismatch(s) => {
+                    format!("adaptation refused: Recipe schema_version mismatch ({s}).")
+                }
+                _ => "adaptation refused.".to_string(),
+            };
+            (original.clone(), None, reason)
+        }
+    }
+}

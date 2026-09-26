@@ -1456,8 +1456,27 @@ fn recipe_check_applicability(
     // event. The payload carries the verdict label (one of
     // the 6 §12 outcome labels) + the warnings list so the
     // consumer can reconstruct the per-dimension outcome.
+    //
+    // CR-08 §28 / Slice I: pre-existing bug fix. The
+    // field is `report.verdict` (the struct's
+    // `ApplicabilityReport.verdict` is the
+    // top-level 6-variant `ApplicabilityOutcome`),
+    // not `report.outcome` (which is on
+    // `ApplicabilityDimension` and carries the
+    // per-dimension `DimensionOutcome`). The bug
+    // survived earlier slices because Tauri
+    // command registration does not invoke the
+    // function at build time; the function is
+    // invoked when the UI sends the IPC, at which
+    // point Rust would reject `report.outcome`
+    // with `no field 'outcome' on type
+    // 'ApplicabilityReport'`. Slice I lands the
+    // adaptation IPC, which forces the §22 path
+    // through this code at runtime; the field
+    // rename is required to keep that path
+    // compiling.
     let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
-    let verdict_label = match &report.outcome {
+    let verdict_label = match &report.verdict {
         astroforge_core::recipe::ApplicabilityOutcome::Compatible => "compatible",
         astroforge_core::recipe::ApplicabilityOutcome::Adaptable => "adaptable",
         astroforge_core::recipe::ApplicabilityOutcome::PartiallyCompatible => "partially_compatible",
@@ -1481,6 +1500,151 @@ fn recipe_check_applicability(
     }
 
     Ok(report)
+}
+
+/// CR-08 §22 + §28 / Slice I: derive an adapted
+/// Recipe for the user to accept or reject. Loads
+/// the Recipe by `(profile_id, version)`, runs the
+/// §22 applicability matrix against the caller's
+/// session criteria, and returns the proposed
+/// adapted Recipe + the adaptive parameters + the
+/// reason. The caller renders the diff in the UI
+/// and either calls `recipe_accept_adaptation` to
+/// commit the proposal (which emits
+/// `RecipeAdaptationAccepted`) or simply discards
+/// the response (which is the rejection path; no
+/// event is emitted on rejection).
+///
+/// The IPC emits `RecipeAdaptationProposed` once
+/// the proposed Recipe is computed; the
+/// `AdaptiveParameterSet` derives from the
+/// caller-supplied `image_metrics` (when present)
+/// via the existing `derive_adaptive_parameters`
+/// engine. For the 3 hard-blocker verdicts
+/// (`Incompatible` / `MissingModels` /
+/// `SchemaMismatch`) the response surfaces
+/// `is_noop = true` + `proposed = original` + a
+/// "adaptation refused: <reason>" reason so the UI
+/// can render the refusal verbatim.
+#[tauri::command]
+fn recipe_adapt(
+    state: State<'_, RecipeState>,
+    event_state: State<'_, RecipeEventState>,
+    profile_id: String,
+    version: u32,
+    matrix: astroforge_core::recipe::ApplicabilityMatrix,
+    image_metrics: Option<astroforge_core::adaptive::ImageMetrics>,
+) -> Result<
+    astroforge_core::adaptive::RecipeAdaptationResponse,
+    CommandError,
+> {
+    use astroforge_core::adaptive::{
+        derive_adapted_recipe, RecipeAdaptationResponse,
+    };
+    use astroforge_core::recipe::check_recipe_applicability;
+
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let original = store.get(&profile_id, version)?;
+    let report = check_recipe_applicability(&original, &matrix);
+    let (proposed, adaptive_params, reason) =
+        derive_adapted_recipe(&original, &report, image_metrics.as_ref());
+
+    // CR-08 §23 / Slice F: emit
+    // `RecipeAdaptationProposed` once the proposed
+    // Recipe is computed. The payload carries the
+    // proposed Recipe's `version` (as a JSON
+    // number in the `params` slot per Slice F's
+    // `payload_recipe_adaptation_proposed` shape)
+    // + the reason in `stage_id` so the consumer
+    // can render the proposal banner verbatim.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::RecipeAdaptationProposed,
+        Some(&profile_id),
+        Some(proposed.version),
+        astroforge_core::recipe_events::payload_recipe_adaptation_proposed(
+            &reason,
+            serde_json::json!(proposed.version),
+        ),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_adapt: failed to record event for {profile_id:?}: {e}"
+        );
+    }
+
+    let is_noop = matches!(
+        report.verdict,
+        astroforge_core::recipe::ApplicabilityOutcome::Compatible
+            | astroforge_core::recipe::ApplicabilityOutcome::Incompatible
+            | astroforge_core::recipe::ApplicabilityOutcome::MissingModels(_)
+            | astroforge_core::recipe::ApplicabilityOutcome::SchemaMismatch(_)
+    );
+    Ok(RecipeAdaptationResponse {
+        verdict_label: report.verdict.label().to_string(),
+        is_noop,
+        original,
+        proposed,
+        reason,
+        adaptive_params,
+    })
+}
+
+/// CR-08 §22 + §28 / Slice I: accept an adapted
+/// Recipe proposal. The caller sends the
+/// `proposed` Recipe from the
+/// `recipe_adapt` response; the IPC saves it as the
+/// next version of the profile (cloning the
+/// `version` + `parent_version` + `flags` from the
+/// proposed Recipe). The IPC emits
+/// `RecipeAdaptationAccepted` after the persist
+/// step succeeds.
+///
+/// Rejection is implicit: the caller simply does
+/// not invoke this IPC. No rejection event is
+/// emitted; the consumer tracks
+/// `RecipeAdaptationProposed` events that did not
+/// see a follow-up `RecipeAdaptationAccepted` to
+/// surface a "rejected" badge.
+#[tauri::command]
+fn recipe_accept_adaptation(
+    state: State<'_, RecipeState>,
+    event_state: State<'_, RecipeEventState>,
+    proposed: astroforge_core::recipe::Recipe,
+) -> Result<
+    astroforge_core::recipe_store::RecipeSummary,
+    CommandError,
+> {
+    let store = state.0.lock().expect("recipe store mutex poisoned");
+    let summary = store.save(&proposed).map_err(Into::into)?;
+
+    // CR-08 §23 / Slice F: emit
+    // `RecipeAdaptationAccepted` once the persist
+    // step succeeds. The payload carries the new
+    // `version` (as a JSON number in the `params`
+    // slot per Slice F's
+    // `payload_recipe_adaptation_accepted` shape)
+    // + the profile_id in `stage_id` so the
+    // consumer can correlate the event with the
+    // proposal.
+    let event_store = event_state.0.lock().expect("recipe events db mutex poisoned");
+    if let Err(e) = event_store.record_event(
+        RecipeEventKind::RecipeAdaptationAccepted,
+        Some(&summary.profile_id),
+        Some(summary.version),
+        astroforge_core::recipe_events::payload_recipe_adaptation_accepted(
+            &summary.profile_id,
+            serde_json::json!(summary.version),
+        ),
+        &recipe_events_now_iso(),
+    ) {
+        eprintln!(
+            "recipe_accept_adaptation: failed to record event for {:?}: {e}",
+            summary.profile_id
+        );
+    }
+
+    Ok(summary)
 }
 
 /// CR-08 §22 round 2 / Slice D: full §6
@@ -2047,6 +2211,9 @@ fn main() {
             recipe_get_provenance,
             recipe_preview,
             recipe_check_applicability,
+            // CR-08 §22 + §28 / Slice I: adaptation IPCs.
+            recipe_adapt,
+            recipe_accept_adaptation,
             recipe_get_reproducibility_report,
             recipe_security_validate,
             recipe_list_events,

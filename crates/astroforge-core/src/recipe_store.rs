@@ -49,6 +49,13 @@ pub struct RecipeSummary {
     /// the recipe has never been applied. Drives the
     /// Recently Used tab ORDER BY DESC.
     pub last_used_at: Option<String>,
+    /// CR-08 §21 follow-on / Slice E + §28 / Slice H:
+    /// the Recipe's content hash (mirrors
+    /// `Recipe::content_hash`). Empty string for
+    /// legacy rows that pre-date the field's
+    /// introduction.
+    #[serde(default)]
+    pub content_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +92,21 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecipeSummary> {
     let raw_is_system: i64 = row.get(10)?;
     let raw_is_archived: i64 = row.get(11)?;
     let raw_is_imported: i64 = row.get(12)?;
+    // CR-08 §21 follow-on / Slice E + §28 / Slice H:
+    // deserialize `payload_json` to pull the
+    // `content_hash` field. We tolerate a parse
+    // failure here (legacy rows where the payload
+    // does not carry the field) and fall back to an
+    // empty string.
+    let payload_json: String = row.get(14)?;
+    let content_hash: String = serde_json::from_str::<serde_json::Value>(&payload_json)
+        .ok()
+        .and_then(|v| {
+            v.get("content_hash")
+                .and_then(|h| h.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default();
     Ok(RecipeSummary {
         id: row.get(0)?,
         profile_id: row.get(1)?,
@@ -100,6 +122,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecipeSummary> {
         is_archived: raw_is_archived != 0,
         is_imported: raw_is_imported != 0,
         last_used_at: row.get(13)?,
+        content_hash,
     })
 }
 
@@ -282,7 +305,7 @@ impl RecipeStore {
         let mut stmt = conn.prepare(
             "SELECT id, profile_id, schema_version, name, description, target_type, \
                     version, parent_version, branch, created_at, \
-                    is_system, is_archived, is_imported, last_used_at \
+                    is_system, is_archived, is_imported, last_used_at, payload_json \
              FROM recipes WHERE profile_id = ?1 AND version = ?2 AND branch = ?3",
         )?;
         let row = stmt.query_row(
@@ -303,7 +326,8 @@ impl RecipeStore {
         let mut stmt = conn.prepare(
             "SELECT r.id, r.profile_id, r.schema_version, r.name, r.description, \
                     r.target_type, r.version, r.parent_version, r.branch, r.created_at, \
-                    r.is_system, r.is_archived, r.is_imported, r.last_used_at \
+                    r.is_system, r.is_archived, r.is_imported, r.last_used_at, \
+                    r.payload_json \
              FROM recipes r \
              INNER JOIN ( \
                  SELECT profile_id, MAX(version) AS max_version \

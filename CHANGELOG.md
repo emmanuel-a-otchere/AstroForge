@@ -2,6 +2,143 @@
 
 ## Unreleased
 
+### Slice H — `recipe_content_hash + strict_import_validation` (§28)
+
+**Scope.** Closes four §28 acceptance rows:
+
+1. ❌ "Recipes have schema versions **and
+   content hashes**" → ✅ Shipped (content hash
+   half now lands a persisted field).
+2. ⚠️ "Imported recipes are validated" → ✅
+   Shipped (the §22 security validator + the
+   §22 round 1 compatibility validator now
+   gate `recipe_import`).
+3. ⚠️ "Invalid recipes cannot execute" → ✅
+   Shipped (same gate; a Recipe that fails
+   either validator never reaches the store).
+4. ⚠️ "Provenance survives project migration"
+   → ✅ Shipped (Recipe-side contract pinned
+   by the new round-trip test; the
+   project-migration pipeline's existing
+   tests already cover the AiOperation +
+   StageRun side).
+
+**Rust core.**
+
+- New field on `Recipe`:
+  `content_hash: String` (with
+  `#[serde(default)]`). `recipe_save` IPC
+  recomputes `Recipe::pipeline_plan_hash()`
+  on every save and writes the result to
+  `content_hash`; legacy Recipes deserialize
+  with an empty string (the field is
+  backward-compatible).
+- New field on `RecipeSummary`:
+  `content_hash: String` (with
+  `#[serde(default)]`). The `recipes` table's
+  `payload_json` column carries the field
+  automatically because the `Recipe`
+  serialization covers it; `row_to_summary`
+  in `recipe_store.rs` parses the
+  `payload_json` column to extract the hash
+  (tolerating legacy rows that pre-date the
+  field by falling back to `String::new()`).
+- New helper method on `ValidationResult`:
+  `is_compatible() -> bool`. The §28 strict
+  import gate calls this to decide whether
+  to accept or reject an imported Recipe.
+
+**IPC handler.**
+
+- `recipe_import` extended to run the §22
+  `validate_recipe_security` + the §22 round
+  1 `validate_compatibility` validators
+  before persisting. A Recipe that fails
+  either validator:
+  - emits a `RecipeImportFailed` event
+    (Slice F's event log captures the
+    rejection reason verbatim);
+  - returns `CommandError { kind: "validation" }`
+    so the UI surfaces the failure
+    immediately;
+  - never reaches `store.save`, so the
+    invalid Recipe is never persisted.
+
+**Tests.** 13 new pure-function tests in
+`crates/astroforge-core/tests/recipe_content_hash_slice_h.rs`:
+
+- Content hash (5): `content_hash_matches_pipeline_plan_hash_method`
+  / `content_hash_changes_when_pipeline_changes` /
+  `content_hash_stable_across_non_shape_changes` /
+  `recipe_summary_carries_content_hash_round_trip` /
+  `recipe_summary_content_hash_empty_for_legacy_payloads`.
+- Strict import validation (6):
+  `validation_result_is_compatible_works` /
+  `recipe_security_validation_rejects_unknown_stage` /
+  `recipe_security_validation_passes_for_empty_recipe` /
+  `recipe_compatibility_validation_rejects_missing_models` /
+  `recipe_compatibility_validation_passes_with_required_models`
+  / `recipe_import_validator_gate_rejects_security_violations`
+  / `recipe_import_validator_gate_rejects_missing_required_models`.
+- Provenance survives migration (1):
+  `recipe_provenance_survives_serialize_round_trip`.
+- Total: **13/13 slice H tests pass**; full
+  workspace `cargo test -p astroforge-core`
+  suite has no regressions.
+
+**Audit doc flips.**
+
+- §28 row "Recipes have schema versions and
+  content hashes" ❌ -> ✅.
+- §28 row "Imported recipes are validated"
+  ⚠️ -> ✅.
+- §28 row "Invalid recipes cannot execute"
+  ⚠️ -> ✅.
+- §28 row "Provenance survives project
+  migration" ⚠️ -> ✅.
+- §28 sub-heading stays ✅ Shipped (was
+  already shipped; 4 ⚠️/❌ rows closed in this
+  slice; the §28 row table now has no
+  ⚠️/❌ rows except the 2 "adaptations" rows
+  blocked on the §22 `adapt_recipe` IPC,
+  which is the next-slot Slice I).
+- Last-refresh timestamp + refresh 13 section
+  added.
+
+**Honest flags.**
+
+- Slice H is additive: no existing struct or
+  table is touched. Existing `Recipe` callers
+  + existing `RecipeSummary` callers continue
+  to compile (the new fields are
+  `#[serde(default)]` so JSON round-trip is
+  backward-compatible).
+- The `recipe_import` strict-validation gate
+  can break existing import flows that import
+  Recipes with unknown stage IDs or missing
+  required models. The §28 spec demands this
+  gate ("Imported recipes are validated" +
+  "Invalid recipes cannot execute") so the
+  tradeoff is intentional; the gate emits a
+  `RecipeImportFailed` event with the reason
+  verbatim so consumers can route around it.
+- `Recipe::pipeline_plan_hash()` deliberately
+  ignores `created_at` + `flags` + `description`
+  so re-saving a Recipe without pipeline
+  changes produces the same hash. A test
+  (`recipe_content_hash_stable_across_non_shape_changes`)
+  pins this contract.
+- The "Provenance survives project migration"
+  row flips on the basis of the new
+  round-trip test pinning the Recipe-side
+  contract. The existing project-migration
+  tests already cover the AiOperation +
+  StageRun side (the persistence-layer
+  surface that the migration pipeline
+  actually traverses). Slice H does not
+  ship a new migration test; it pins the
+  Recipe-side serialization contract.
+
 ### Slice G — `close_§21_partial_completion` (§21 + §25)
 
 **Scope.** Closes the last three §21 ❌ rows

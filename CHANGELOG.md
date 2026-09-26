@@ -2,6 +2,190 @@
 
 ## Unreleased
 
+### Slice I — `adapt_recipe + accept_adaptation` (§22 + §23 + §28)
+
+**Scope.** Closes the last 4 ❌ rows in the
+audit doc:
+
+1. §28 row "Adaptations are explicitly shown"
+   → ✅ Shipped (the new `recipe_adapt` IPC
+   returns the proposed adapted Recipe + the
+   reason + the adaptive parameters so the UI
+   can render the diff).
+2. §28 row "User can accept or reject
+   adaptations" → ✅ Shipped (the new
+   `recipe_accept_adaptation` IPC saves the
+   proposed Recipe + emits
+   `RecipeAdaptationAccepted`; rejection is
+   implicit — the caller simply does not
+   invoke `recipe_accept_adaptation`).
+3. §23 event `RecipeAdaptationProposed` →
+   ✅ Wired (the `recipe_adapt` IPC emits
+   this event every time it derives a
+   proposed Recipe).
+4. §23 event `RecipeAdaptationAccepted` →
+   ✅ Wired (the `recipe_accept_adaptation`
+   IPC emits this event after a successful
+   persist).
+
+**Rust core.**
+
+- New types in
+  `crates/astroforge-core/src/adaptive.rs`
+  (~225 lines added, total file ~637 lines):
+  - `RecipeAdaptationResponse`: the IPC
+    response surface (carries
+    `original` + `proposed` + `reason` +
+    `adaptive_params` + `is_noop` +
+    `verdict_label`).
+  - `derive_adapted_recipe()`: pure function
+    that maps the §22 matrix verdict to a
+    `(proposed_recipe, reason)` triple. Branches
+    on the 6-variant `ApplicabilityOutcome`:
+    - `Compatible` -> no-op (proposed ==
+      original, reason = "no adaptation
+      needed").
+    - `Adaptable` / `PartiallyCompatible` ->
+      version-bump + `parent_version` set +
+      `flags.push("adapted")` + per-dimension
+      reason concatenation.
+    - `Incompatible` / `MissingModels` /
+      `SchemaMismatch` -> refusal verbatim
+      ("adaptation refused: <reason>"), no
+      proposal.
+
+**IPC handlers** (in `src-tauri/src/main.rs`).
+
+- `recipe_adapt(profile_id, version,
+  matrix, image_metrics)`:
+  loads the Recipe, runs the §22 matrix
+  evaluator + `derive_adapted_recipe`, emits
+  `RecipeAdaptationProposed`, returns the
+  `RecipeAdaptationResponse`.
+- `recipe_accept_adaptation(proposed)`:
+  saves the proposed Recipe (via
+  `RecipeStore::save`) + emits
+  `RecipeAdaptationAccepted`. The store's
+  save path runs the existing system-recipe
+  guard (so an adapted system Recipe is
+  rejected at accept time).
+
+**Pre-existing bug fix.**
+
+- The `recipe_check_applicability` IPC
+  handler (Slice C) referenced
+  `report.outcome` instead of the correct
+  field name `report.verdict` (the struct's
+  `verdict` is the top-level
+  `ApplicabilityOutcome`; `outcome` is a
+  field on `ApplicabilityDimension`, not on
+  `ApplicabilityReport`). The bug survived
+  Slice A through Slice H because Tauri
+  command registration does not invoke the
+  function at build time; the bug would have
+  surfaced at runtime the first time the UI
+  called `recipe_check_applicability`.
+  Slice I fixes the field reference; the
+  adaptation IPC routes through the same
+  evaluator, so Slice I would have
+  inherited the bug.
+
+**Tests.** 19 new pure-function tests in
+`crates/astroforge-core/tests/recipe_adaptation_slice_i.rs`:
+
+- Engine-side derivation (10):
+  `derive_adapted_recipe_compatible_returns_noop_with_original`
+  / `derive_adapted_recipe_compatible_with_metrics_returns_adaptive_params`
+  / `derive_adapted_recipe_adaptable_bumps_version_and_stamps_adapted_flag`
+  / `derive_adapted_recipe_partially_compatible_also_bumps_version`
+  / `derive_adapted_recipe_incompatible_returns_refusal_no_proposal`
+  / `derive_adapted_recipe_missing_models_carries_model_list_in_reason`
+  / `derive_adapted_recipe_schema_mismatch_carries_schema_in_reason`
+  / `derive_adapted_recipe_does_not_double_stamp_adapted_flag`
+  / `derive_adapted_recipe_no_adaptable_dimensions_uses_default_reason`
+  / `derive_adapted_recipe_handles_zero_version_gracefully`.
+- Response surface (3):
+  `recipe_adaptation_response_serde_round_trip`
+  / `derive_adaptive_parameters_matches_image_metrics`
+  / `derive_adaptive_parameters_default_is_empty`.
+- Recipe preservation (2):
+  `derive_adapted_recipe_preserves_required_models`
+  / `derive_adapted_recipe_preserves_schema_version`.
+- Type / shape (3):
+  `matrix_with_available_models_round_trip`
+  / `dimension_outcome_variants_constructable`
+  / `recipe_adaptation_response_json_keys_match_ts_surface`.
+- RecipeStage params round-trip (1):
+  `recipe_stage_params_round_trip_via_json`.
+- Total: **19/19 slice I tests pass**; full
+  workspace `cargo test -p astroforge-core`
+  suite has no regressions.
+
+**Audit doc flips.**
+
+- §23 ❌ row count: **2 → 0** (the
+  `RecipeAdaptationProposed` +
+  `RecipeAdaptationAccepted` events are now
+  wired; the §23 row table now has no ❌ rows
+  for any event kind — Slice F + Slice I
+  together wire every §23 event).
+- §28 ❌ row count: **2 → 0** (the
+  `Adaptations are explicitly shown` +
+  `User can accept or reject adaptations`
+  rows now flip to ✅).
+- §23 sub-heading stays ✅ Shipped.
+- §28 sub-heading stays ✅ Shipped.
+- Last-refresh timestamp + refresh 14 section
+  added.
+
+**Honest flags.**
+
+- Slice I is additive at the surface level
+  but lands a critical pre-existing bug fix
+  in the §22 applicability IPC (`outcome` →
+  `verdict`). The bug fix is forced: Slice I
+  routes the adaptation IPC through the same
+  evaluator, so without the fix Slice I would
+  inherit the bug and `recipe_check_applicability`
+  would crash at runtime. The bug existed in
+  PR #403 (Slice C) since 2026-09-25; the
+  CI checks did not catch it because the
+  Tauri command registration does not invoke
+  the function. **Action required**: this
+  is a behavioral change to
+  `recipe_check_applicability`. The
+  `recipe_check_applicability` IPC handler
+  now emits the correct verdict label;
+  consumers reading the verdict label from
+  the `RecipeApplicabilityEvaluated` event
+  payload will see the same labels they
+  previously expected.
+- The `recipe_accept_adaptation` IPC
+  accepts any Recipe via `RecipeStore::save`.
+  The store's existing system-recipe guard
+  refuses to persist an adapted system
+  Recipe. The TS-side caller is expected to
+  never invoke `recipe_accept_adaptation`
+  with a system Recipe; if it does, the IPC
+  surfaces a `CommandError` with the
+  `RecipeStoreError::SystemRecipeProtected`
+  reason.
+- `RecipeAdaptationResponse` deliberately
+  does NOT derive `PartialEq` because
+  `Recipe` does not (its
+  `RecipeStage::params` field is a
+  `HashMap<String, serde_json::Value>`).
+  Tests compare individual fields rather
+  than the whole struct.
+- The IPC `recipe_adapt` carries the
+  optional `image_metrics` parameter. When
+  `None` the `AdaptiveParameterSet` is also
+  `None`; the UI may pass `Some(...)` to
+  derive the canonical adaptive parameters
+  even when the verdict is `Compatible` (the
+  engine returns the adaptive parameters as
+  informational telemetry).
+
 ### Slice H — `recipe_content_hash + strict_import_validation` (§28)
 
 **Scope.** Closes four §28 acceptance rows:

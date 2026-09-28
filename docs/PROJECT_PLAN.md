@@ -326,6 +326,79 @@ separation and replace is mathematically exact (verifiable by difference maps).
 
 ---
 
+## Phase 1.6: Node-Based Editor (CR-10)
+
+**Goal:** Ship the user-facing node-based editor over the §7 deep-sky
+pipeline: a node palette grouped by six engine categories, a
+constrained (default) and free-form (draggable SVG canvas) layout
+mode, per-stage mutation (enable / disable / reorder / remove /
+insert), Graph ↔ `.astroforge-recipe` JSON round-trip, per-project
+default graph plus per-session overrides, and tooltips generated from
+Rust `*Params` doc-comments.
+
+**Exit criterion:** A user can switch a session from Wizard to Node
+mode, see the active `PipelinePlan` as a graph of named + tooltipped
+nodes, drag-or-click to insert / reorder / disable stages, save the
+graph as a `.astroforge-recipe` file, load a recipe back into a new
+session, and apply the same graph to different image sets with
+per-image `StageExecution` history preserved.
+
+**CR reference:** [CR-10](./CR-10-NODE-BASED-EDITOR.md)
+**Plan:** [plans/2026-09-28-cr10-node-based-editor/PLAN.md](./plans/2026-09-28-cr10-node-based-editor/PLAN.md)
+
+### Milestone 1.6.1: Substrate
+
+> Lock the data model, the generated tooltip manifest, and the Tauri
+> command surface for read-only access. No UI changes in this
+> milestone.
+
+| ID | Task | CR ref | Status | Depends on |
+|---|---|---|---|---|
+| P1.6-M1-T1 | Spike: pick the free-form canvas library (OD-CR-10-2). Compare `@xyflow/svelte`, `rete.js`, hand-rolled SVG; ~200 LOC proof-of-concept | §7.7.4 | pending | (spike) |
+| P1.6-M1-T2 | Introduce `NodeCatalog` data type in `crates/astroforge-core/src/node_catalog.rs`; build-time generator that emits `node_catalog.json` from the Rust `*Params` doc-comments in `dispatch.rs` | §7.7.8, §7.7.9 | pending | T1 |
+| P1.6-M1-T3 | Add `get_node_catalog` Tauri command in `src-tauri/src/commands_node_graph.rs` + register in `main.rs::invoke_handler` + frontend wrapper in `astroforge-api.ts` | §7.7.1, §7.7.8 | pending | T2 |
+
+### Milestone 1.6.2: Palette + Constrained Layout
+
+> Ship the `NodePalette.svelte` component, the Wizard/Node mode
+> toggle, and the constrained (default) layout. Tooltips sourced from
+> the generated manifest.
+
+| ID | Task | CR ref | Status | Depends on |
+|---|---|---|---|---|
+| P1.6-M2-T1 | Implement `NodePalette.svelte` skeleton: six collapsible groups (Input / Calibration / Calibration-Free / Stacking / Stretch / Refinement / Output) + search field; click-to-insert stub | §7.7.3 | pending | P1.6-M1-T3 |
+| P1.6-M2-T2 | Mount `NodePalette` in `ProcessWorkspace.svelte` when the session is in Node mode; wire the search filter client-side | §7.7.3 | pending | T1 |
+| P1.6-M2-T3 | Add Wizard/Node mode toggle in the top navigation bar of `App.svelte`; persist to `localStorage` key `astroforge.session.mode` | §7.7.4 | pending | T2 |
+| P1.6-M2-T4 | Extend `NodeSidebar.svelte` for constrained layout: render every `PipelineStage` as a card with status LED + label; hover tooltip from the catalog; wire `insert_stage` IPC | §7.7.2, §7.7.4, §7.7.8 | pending | T3 |
+
+### Milestone 1.6.3: Mutation + Free-Form Layout
+
+> Ship per-stage mutation (enable / disable / reorder / remove /
+> insert) and the free-form draggable canvas mode.
+
+| ID | Task | CR ref | Status | Depends on |
+|---|---|---|---|---|
+| P1.6-M3-T1 | Add `update_graph` IPC (single write-path for graph state) + in-process mutation primitives in `crates/astroforge-core/src/node_graph/mutation.rs` (insert / remove / reorder / set_enabled) | §7.7.5 | pending | P1.6-M2-T4 |
+| P1.6-M3-T2 | Mutation UI in `NodeSidebar.svelte`: right-click context menu (Re-run from here, Disable, Insert before, Insert after, Move up, Move down, Reset to default params, Remove); destructive confirmation via `DestructiveConfirmDialog.svelte` | §7.7.5 | pending | T1 |
+| P1.6-M3-T3 | Free-form canvas mode in `NodeSidebar.svelte` using the library/framework chosen in P1.6-M1-T1; layout-mode toggle in the top bar; `PipelineStage.sequence` derived from topological order on every layout change | §7.7.4 | pending | T2 |
+| P1.6-M3-T4 | Extend `ParameterSidebar.svelte` to consume the generated `sub_features` manifest; show hint badge per parameter | §7.7.8 | pending | T3 |
+
+### Milestone 1.6.4: Recipe Round-Trip + Per-Image-Set + Three New Stages
+
+> Ship Graph ↔ `.astroforge-recipe` JSON round-trip, per-project
+> default graph plus per-session overrides, and the three new engine
+> stages (`crop`, `star_handling`, `creative_polish`).
+
+| ID | Task | CR ref | Status | Depends on |
+|---|---|---|---|---|
+| P1.6-M4-T1 | Add `graph_to_recipe` IPC + `crates/astroforge-core/src/node_graph/recipe_io.rs::Graph::to_recipe_json()` with §11.2 sanitization | §7.7.7 | pending | P1.6-M3-T4 |
+| P1.6-M4-T2 | Add `recipe_to_graph` IPC + `Graph::from_recipe_json()` with unknown `stage_type` diagnostic | §7.7.7 | pending | T1 |
+| P1.6-M4-T3 | Add `list_project_graphs`, `get_session_graph_override`, `set_session_graph_override`, `reset_session_to_project_default` IPCs; "Reset to project default" toolbar button | §7.7.6 | pending | T2 |
+| P1.6-M4-T4 | Implement three new engine stages in `pipeline_plan/dispatch.rs`: `CropHandler`, `StarHandlingHandler`, `CreativePolishHandler` + their `*Params` structs with documented fields; register in `PIPELINE_STAGES` + `PipelineStageType`; extend `NodeCatalog` mapping | §7.7.9, CR-10 §6 | pending | T3 |
+| P1.6-M4-T5 | Acceptance pass: walk the 15 criteria from CR-10 §5; produce `docs/CR-10-AUDIT.md`; extend `docs/specs/SPEC_INDEX.md` | CR-10 §5 | pending | T4 |
+
+---
+
 ## Phase 2 — Full Deep-Sky Pipeline
 
 **Goal:** All deep-sky pipeline stages from the spec are functional, including
@@ -381,7 +454,7 @@ super-resolution, and export a finished image with a shareable recipe.
 
 | ID | Task | Spec ref | Status | Depends on |
 |---|---|---|---|---|
-| P2-M4-T1 | [#73](https://github.com/emmanuel-a-otchere/AstroForge/issues/73) | Evaluate plate-solve dependency: bundle ASTAP vs. online astrometry.net vs. defer | §17 item 8 | pending | — |
+| P2-M4-T1 | [#73](https://github.com/emmanuel-a-otchere/AstroForge/issues/73) | Evaluate plate-solve dependency: bundle ASTAP vs. online astrometry.net vs. defer | §17 item 8 | pending | (spike) |
 | P2-M4-T2 | [#74](https://github.com/emmanuel-a-otchere/AstroForge/issues/74) | Integrate ASTAP binary (bundled, offline star catalogs) | §7 Stage 6.5 | pending | T1 |
 | P2-M4-T3 | [#75](https://github.com/emmanuel-a-otchere/AstroForge/issues/75) | Implement WCS output to FITS header | §7 Stage 6.5 | pending | T2 |
 | P2-M4-T4 | [#76](https://github.com/emmanuel-a-otchere/AstroForge/issues/76) | Implement auto-crop to subject using WCS | §7 Stage 10 | pending | T3, P2-M2-T6 |
@@ -545,7 +618,7 @@ are optimized. StableSR is available as an experimental opt-in plugin.
 
 | ID | Task | Spec ref | Status | Depends on |
 |---|---|---|---|---|
-| P4-M5-T1 | [#130](https://github.com/emmanuel-a-otchere/AstroForge/issues/130) | Decide WCAG AA scope (v1 or deferred) | §17 item 12 | pending | — |
+| P4-M5-T1 | [#130](https://github.com/emmanuel-a-otchere/AstroForge/issues/130) | Decide WCAG AA scope (v1 or deferred) | §17 item 12 | pending | (spike) |
 | P4-M5-T2 | [#131](https://github.com/emmanuel-a-otchere/AstroForge/issues/131) | Implement keyboard navigation and screen reader support if in scope | §17 item 12 | pending | T1 |
 | P4-M5-T3 | [#132](https://github.com/emmanuel-a-otchere/AstroForge/issues/132) | Implement i18n framework and initial translations if in scope | §17 item 12 | pending | T1 |
 

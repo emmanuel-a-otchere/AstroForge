@@ -2,6 +2,93 @@
 
 ## Unreleased
 
+### Slice P0: CR-10 Node-Based Editor (spec + plan; docs-only)
+
+**Scope.** Establishes the CR-10 Node-Based Editor surface as a
+proposed scope, with the spec + plan updates needed to realize it in
+follow-on implementation slices. No Rust, Svelte, IPC, or test changes
+in this slice. This is the P0 docs-only phase per the
+`astroforge-cr-slices` convention.
+
+**Spec carrier** [`docs/specs/AstroForge_Spec_v1.4.0.md`](docs/specs/AstroForge_Spec_v1.4.0.md):
+
+- Adds §7.7 Node-Based Editor Surface in the body (between §7.6
+  Narrowband → RGB Composition and §8 Planetary / Lunar Pipeline
+  Variant). Subsections: §7.7.1 Node Catalog, §7.7.2 Node
+  Presentation, §7.7.3 Node Palette, §7.7.4 Graph Layout Modes,
+  §7.7.5 Pipeline Mutation, §7.7.6 Per-Image-Set Graphs, §7.7.7
+  Graph ↔ Recipe Round-Trip, §7.7.8 Tooltips and Hints, §7.7.9
+  Taxonomy Reconciliation, §7.7.10 Out of Scope.
+- Appends a "Delta from 1.4.0 (CR-10 Node-Based Editor, proposed)"
+  section at the foot of the file documenting the 10 locked
+  decisions (D-CR-10-1 through D-CR-10-10) and the canonical CR
+  pointer.
+
+**Tracking CR** [`docs/CR-10-NODE-BASED-EDITOR.md`](docs/CR-10-NODE-BASED-EDITOR.md):
+
+- New standalone CR document with sections: 1 Intent, 2 Product
+  Decision, 3 Scope, 4 UX Specification, 5 Acceptance Criteria (15
+  items), 6 New Stages (crop, star_handling, creative_polish), 7
+  Implementation Locations, 8 Open Decisions, 9 Related Work, 10
+  Carrier.
+- Status: Proposed. Target: AstroForge v1.5.0. Depends on CR-02,
+  CR-05, CR-08. Enables CR-11, Phase 2 deep-sky pipeline UI
+  revisions, Phase 4 recipe gallery UX.
+
+**Implementation plan** [`docs/plans/2026-09-28-cr10-node-based-editor/PLAN.md`](docs/plans/2026-09-28-cr10-node-based-editor/PLAN.md):
+
+- New plan document. Decomposes CR-10 into 17 slices (P0 docs-only
+  + P1.6.1 substrate + P1.6.2 palette / constrained + P1.6.3
+  mutation / free-form + P1.6.4 recipe / per-image-set / three new
+  stages). Estimated total scope: ~10,200 LOC.
+
+**Project plan** [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md):
+
+- Adds a new Phase 1.6 (Node-Based Editor) between Phase 1.5
+  (Guided Processing Train) and Phase 2 (Full Deep-Sky Pipeline).
+- Phase 1.6 decomposes into four sub-milestones (1.6.1 substrate,
+  1.6.2 palette + constrained, 1.6.3 mutation + free-form, 1.6.4
+  recipe round-trip + per-image-set + three new stages) with one
+  task per IPC per Decision D-CR-10-10.
+
+**Spec index** [`docs/specs/SPEC_INDEX.md`](docs/specs/SPEC_INDEX.md):
+
+- Adds a forward-look entry pointing to CR-10 + the implementation
+  plan.
+
+**Locked decisions** (carried into CR-10 §2 + spec §7.7):
+
+- D-CR-10-1 spec versioning: keep v1.4.0 carrier, add §7.7 + Delta
+  section in-place
+- D-CR-10-2 plan placement: new Phase 1.6
+- D-CR-10-3 tracking CR: standalone CR-10
+- D-CR-10-4 graph layout: ship both Constrained (default) and
+  Free-form
+- D-CR-10-5 palette grouping: six groups by engine category
+- D-CR-10-6 apply target: one graph per project + per-session
+  overrides
+- D-CR-10-7 recipe round-trip: bidirectional Graph ↔
+  `.astroforge-recipe`
+- D-CR-10-8 tooltip source: Rust `*Params` doc-comments → generated
+  JSON manifest
+- D-CR-10-9 mutation permissions: user may insert / reorder /
+  enable / disable / remove
+- D-CR-10-10 slice shape: one task per IPC; 17 slices across P0 +
+  four sub-milestones
+
+**Verification** (P0 docs-only exception per `astroforge-cr-slices`):
+
+- Manual diff review against the spec carrier's "Versioning" section
+  to confirm the carrier pattern is followed
+- No Rust, Svelte, IPC, or test changes; behavior-gating CI steps
+  run as no-ops
+
+**Out of scope for this slice** (lands in P1.6.1 through P1.6.4
+follow-ons): the `NodeCatalog` Rust type, the generated tooltip
+manifest, the `NodePalette.svelte` component, the free-form
+draggable canvas mode, the `update_graph` IPC, the Graph ↔ Recipe
+JSON round-trip module, the three new engine stages.
+
 ### Slice I — `adapt_recipe + accept_adaptation` (§22 + §23 + §28)
 
 **Scope.** Closes the last 4 ❌ rows in the

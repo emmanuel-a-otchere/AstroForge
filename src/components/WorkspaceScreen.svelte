@@ -19,15 +19,28 @@
     description,
     icon,
     children,
+    sidebar,
   }: {
     title: string;
     description: string;
     icon: string;
     children: Snippet;
+    /**
+     * Optional left-sidebar slot. CR-10 P1.6.2.2
+     * mounts the NodePalette here when the session
+     * is in Node mode; other workspaces pass no
+     * sidebar and get the existing single-column
+     * layout.
+     */
+    sidebar?: Snippet;
   } = $props();
 </script>
 
-<section class="workspace" aria-labelledby="workspace-title">
+<section
+  class="workspace"
+  class:has-sidebar={sidebar !== undefined}
+  aria-labelledby="workspace-title"
+>
   <header class="workspace-header">
     <span class="material-symbols-outlined workspace-icon" aria-hidden="true">
       {icon}
@@ -37,8 +50,15 @@
       <p class="workspace-description font-body">{description}</p>
     </div>
   </header>
-  <div class="workspace-body">
-    {@render children()}
+  <div class="workspace-layout">
+    {#if sidebar !== undefined}
+      <aside class="workspace-sidebar" aria-label="Workspace sidebar">
+        {@render sidebar()}
+      </aside>
+    {/if}
+    <div class="workspace-body">
+      {@render children()}
+    </div>
   </div>
 </section>
 
@@ -53,6 +73,34 @@
     width: 100%;
     box-sizing: border-box;
     color: var(--on-surface);
+  }
+
+  /*
+   * CR-10 P1.6.2.2: when a sidebar snippet is
+   * supplied (Node mode), the layout widens past
+   * the 1100 px cap so the palette can live next
+   * to the workspace body without squeezing the
+   * run list / parameter panel.
+   */
+  .workspace.has-sidebar {
+    max-width: 1440px;
+  }
+
+  .workspace-layout {
+    display: flex;
+    gap: var(--sp-lg);
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .workspace-sidebar {
+    flex: 0 0 auto;
+    align-self: stretch;
+  }
+
+  .workspace-body {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .workspace-header {

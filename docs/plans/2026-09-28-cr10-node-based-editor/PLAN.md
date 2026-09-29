@@ -163,6 +163,8 @@ Canonical-only stages (`stack`, `register`, `debayer`, `background`, `color`, `d
 
 #### P1.6.2.2: Palette mount + search field wiring
 
+Status: ✅ Shipped (PR #414, commit TBD; lands in CR-10 Slice P1.6.2.2).
+
 Goal: mount `NodePalette` in `ProcessWorkspace.svelte` and wire the search filter.
 
 Implementation:
@@ -174,6 +176,20 @@ Files touched:
 
 - `src/components/ProcessWorkspace.svelte` (mount palette)
 - `src/lib/node-graph-store.ts` (new: `nodeGraphMode` writable)
+
+**Slice detail.** Three changes:
+
+1. New `src/lib/node-graph-store.ts` with `nodeGraphMode: Writable<NodeGraphMode>` (`"wizard" | "node"`) + `isNodeMode` + `isWizardMode` derived stores + `setNodeGraphMode` / `resetNodeGraphMode` helpers. Default = `"wizard"`. Persistence deliberately NOT wired in this slice (P1.6.2.3 owns the localStorage round-trip).
+2. `src/components/WorkspaceScreen.svelte` extended with an optional `sidebar?: Snippet` prop. When supplied, it renders next to the children in a flex row; `max-width` widens from 1100 px to 1440 px so the palette does not squeeze the run list.
+3. `src/components/ProcessWorkspace.svelte` mounts `<NodePalette>` inside a `{#snippet sidebar()}` block, gated by `$isNodeMode`. In Wizard mode (default), no sidebar renders and the workspace is identical to before.
+
+**Tests.** 7 new vitest tests in `src/lib/__tests__/node-graph-store-slice-p-1-6-2-2.test.ts` pin the store contract (default, derived predicates, setter, reset, type union). Total vitest: 100/100 pass.
+
+**Honest flags.**
+
+- The mount is invisible until P1.6.2.3 lands the toggle UI. In the meantime, `$isNodeMode` is always false (no toggle exists yet to set it true), so the sidebar snippet returns nothing and the workspace renders as before. This is the intended slice ordering: P1.6.2.2 ships the wiring skeleton so P1.6.2.3 can drop the toggle in without further changes to ProcessWorkspace.
+- Persistence: not wired. Resetting the page returns to Wizard mode.
+- Type union: only `"wizard" | "node"` accepted. Future slices can extend the union (e.g. `"expert"`) by updating `NodeGraphMode` + `PALETTE_GROUP_ORDER` mappings; the test file pins the current union.
 
 #### P1.6.2.3: Mode toggle (Wizard / Node)
 

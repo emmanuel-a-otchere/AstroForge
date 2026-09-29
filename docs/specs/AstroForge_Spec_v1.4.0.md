@@ -326,6 +326,210 @@ narrowband branch.
 
 ---
 
+## 7.7 Node-Based Editor Surface
+
+The node-based editor is the user-facing surface over the §7 deep-sky
+pipeline (and the §8 planetary variant). It replaces the wizard-stepper
+paradigm for users who want to see the pipeline as a graph of named
+operations, with tooltips, hints, and a palette for inserting or
+reordering stages. The wizard surface remains in place; the node editor
+is the complementary, graph-oriented view.
+
+### 7.7.1 Node Catalog
+
+The canonical user-facing node list is the union of `PipelineStageType`
+in `src/lib/pipeline-store.ts` plus the engine-dispatched `stage_type`
+strings locked by the `all_eight_classical_stage_types_are_not_ai` test
+in `crates/astroforge-core/src/ai_boundary.rs`. Each node carries four
+fields, surfaced in the UI:
+
+| Field | Source | Purpose |
+|---|---|---|
+| `type` | `PipelineStageType` (TS) or `stage_type` (Rust) | Stable identifier; the round-trip key for `.astroforge-recipe`. |
+| `label` | `PIPELINE_STAGES[i].label` | Short human-readable name shown on the card. |
+| `description` | `PIPELINE_STAGES[i].description` | One-sentence explanation shown in the node card and the palette tooltip. |
+| `sub_features` | Rust `*Params` doc-comments → generated JSON | Per-parameter hint surfaced in the expanded parameter panel and the hover tooltip. |
+
+The 12 user-facing nodes (per `pipeline-store.ts`) are: `ingest`,
+`crop_rotate`, `background_extraction`, `color_wb`, `color_scnr`,
+`sharpen_deconvolution`, `denoise`, `stretch`, `star_handling`,
+`creative_polish`, `export`, plus the engine-only `color_calibration`
+alias. The 10 engine-dispatched stage types are: `calibrate`, `debayer`,
+`register`, `stack`, `background`, `color`, `stretch`, `export`,
+`denoise`, `detail`.
+
+### 7.7.2 Node Presentation
+
+Each node renders as a card with the following visual surface:
+
+- Icon (one of `material-symbols-outlined` glyphs: `image`, `crop_rotate`,
+  `gradient`, `palette`, `auto_fix_high`, `noise_aware`, `tune`,
+  `star`, `auto_awesome`, `save_alt`)
+- Label (from `PIPELINE_STAGES`)
+- Status LED (color from the existing `NodeStatus` enum in
+  `pipeline-store.ts`: pending, running, completed, failed, skipped,
+  active)
+- AI badge (when `AiBoundaryLabel::for_stage_type(stage_type).uses_ai`
+  is `true`: "Perceptual enhancement" per §10.7)
+- Hover tooltip: the first 3 to 7 words of `description`
+- Click → expanded parameter panel (`ParameterSidebar.svelte`)
+- Right-click → context menu (Re-run from here, Disable, Insert
+  before, Insert after, Remove)
+
+### 7.7.3 Node Palette
+
+A sidebar panel listing the catalog grouped by six engine categories:
+
+| Group | Nodes |
+|---|---|
+| Input | `ingest` |
+| Calibration | `debayer`, `background` (alias of `background_extraction`) |
+| Calibration-Free | `color_wb`, `color_scnr`, `color` (alias of `color_calibration`) |
+| Stacking | `stack`, `register` |
+| Stretch | `stretch` |
+| Refinement | `sharpen_deconvolution`, `denoise`, `detail`, `star_handling`, `creative_polish` |
+| Output | `export` |
+
+Each palette entry shows the icon + label + a one-line hint. Click
+inserts the node into the active graph at the current cursor position
+(free-form layout) or at the end of the linear sequence (constrained
+layout). Drag-to-insert is a follow-on (see §7.7.10).
+
+### 7.7.4 Graph Layout Modes
+
+Two layout modes are available, selected by a top-bar toggle:
+
+- **Constrained (default):** linear vertical DAG with auto-placement.
+  Mirrors the existing `NodeSidebar.svelte` behaviour (straight `<line>`
+  connectors, status colors, active node highlight). One node per row;
+  sequence is read-only.
+- **Free-form:** draggable nodes on an SVG canvas, bezier wires,
+  pan/zoom, snap-to-grid. Nodes may be positioned freely; the
+  underlying `sequence` is derived from the topological order of the
+  edges. Switching modes preserves the node set + edges; only the
+  visual layout is recomputed.
+
+The mode toggle is a user preference (not a per-project setting); it
+does not mutate the engine pipeline representation. The
+`PipelineStage.sequence` field is always the authoritative execution
+order, regardless of layout.
+
+### 7.7.5 Pipeline Mutation
+
+Within an active graph, the user may:
+
+- Enable or disable any stage (`PipelineStage.enabled`)
+- Reorder stages by drag (free-form mode) or by context menu
+  "Move up / Move down" (constrained mode)
+- Insert a stage from the palette at any sequence position
+- Remove any non-required stage (`PipelineStage.required = false`)
+- Required stages cannot be removed; removal is blocked with an
+  inline warning
+
+Each mutation writes through a single IPC (`update_graph`) that takes
+the new full graph state (nodes + edges + sequence + enabled flags)
+and returns the persisted `PipelinePlan`. Per-stage mutation primitives
+(`insert_stage`, `remove_stage`, `reorder_stage`, `set_stage_enabled`)
+are documented for testing but not exposed as separate IPCs; the
+unified `update_graph` is the write path.
+
+### 7.7.6 Per-Image-Set Graphs
+
+A graph is bound to a `Project` (CR-02 substrate). Within a project, the
+graph is the default for every `Session`; per-session overrides live in
+`PipelinePlan.parameters_json` keyed by `session_id`. Re-applying the
+project's default graph to a session is a one-click "Reset to project
+default" action. Per-image-set behaviour (applying the graph to a
+specific subset of images) is delegated to the existing
+`CompareWorkspace` per-version model: each image version carries its
+own `StageExecution` history, keyed by `plan_id + stage_id + attempt`
+per `domain.rs:540`.
+
+### 7.7.7 Graph ↔ Recipe Round-Trip
+
+A graph serializes to the existing `.astroforge-recipe` JSON format
+(§11.1) via the `pipeline[]` array, where each entry is
+`{ "stage": stage_type, "params": { ... } }`. The round-trip is
+bidirectional:
+
+- **Graph → Recipe:** serialize the active `PipelinePlan` to recipe
+  JSON, stripping paths, GPS, timestamps, and machine-specific info
+  per §11.2.
+- **Recipe → Graph:** parse a recipe JSON, validate that every
+  referenced `stage_type` is in the engine catalog, materialize a
+  `PipelinePlan`, and apply the parameters to the matching
+  `PipelineStage.parameters_json`.
+
+The Expert tier of `RecipeEditor.svelte` (currently a "ProfileManager"
+stub at the §10.4 component comment) becomes the wire-format editor
+backed by the node-graph store. Recipes and graphs are not isomorphic
+(a recipe can describe intent without binding to a fixed stage
+sequence); the round-trip preserves intent where it can, and surfaces a
+diagnostic where it cannot.
+
+### 7.7.8 Tooltips and Hints
+
+Tooltip source-of-truth is generated from the Rust `*Params` struct
+doc-comments:
+
+- `CalibrateParams { light_frame_type, master_dark_required }` (see
+  `crates/astroforge-core/src/pipeline_plan/dispatch.rs:337`)
+- `StretchParams { shadows, highlights, midtones }` (see
+  `dispatch.rs:495`)
+- `DenoiseParams { max_iterations, learning_rate, early_stop_patience,
+  early_stop_threshold, noise_reg, blend_ratio }` (see
+  `dispatch.rs:541`)
+
+The Rust doc-comments are the canonical source; a build-time generator
+emits a typed JSON manifest at `crates/astroforge-core/src/node_catalog.json`
+that the frontend reads via a new IPC (`get_node_catalog`). Each
+`sub_features` entry maps a `stage_type` to a list of `{ name, type,
+default, hint }` records.
+
+Context-sensitive warnings come from the existing `DESTRUCTIVE_STAGES`
+set in `pipeline-store.ts:28-35` (`crop_rotate`, `background_extraction`,
+`color_calibration`, `sharpen_deconvolution`, `denoise`): enabling or
+re-running any of these stages triggers the
+`DestructiveConfirmDialog.svelte` confirmation.
+
+### 7.7.9 Taxonomy Reconciliation
+
+The 12 user-facing `PipelineStageType` values map to the 10
+engine-dispatched `stage_type` values per the following table (locked
+by CR-10 §5 acceptance):
+
+| User-facing (`PipelineStageType`) | Engine (`stage_type`) | Notes |
+|---|---|---|
+| `ingest` | (none; pre-pipeline) | Produces the `Session`; no engine stage. |
+| `crop_rotate` | `crop` | New stage added by CR-10 §6. |
+| `background_extraction` | `background` | Direct alias. |
+| `color_wb` | `color` | First half of `color_calibration` split (per `PROFILE_PIPELINES_PLAN.md` D-4). |
+| `color_scnr` | `color` | Second half of the split; distinct UI, same engine stage. |
+| `color_calibration` | `color` | Aggregate alias; new code prefers `color_wb` + `color_scnr`. |
+| `sharpen_deconvolution` | `detail` | Engine stage was previously unnamed for this purpose. |
+| `denoise` | `denoise` | Direct mapping; AI badge applies (`AiBoundaryLabel::for_stage_type("denoise").uses_ai`). |
+| `stretch` | `stretch` | Direct mapping. |
+| `star_handling` | `star_handling` | New stage added by CR-10 §6. |
+| `creative_polish` | `creative_polish` | New stage added by CR-10 §6. |
+| `export` | `export` | Direct mapping. |
+
+The mapping is enforced by `NodeCatalog::resolve(stage_type)` in
+`crates/astroforge-core/src/node_catalog.rs`; an unmapped user-facing
+type is a startup-time error.
+
+### 7.7.10 Out of Scope (v1.5.0 carrier)
+
+- Free-form graph editing with arbitrary user-defined node types
+- Custom node authoring (a user cannot define a new `stage_type`; the
+  catalog is closed)
+- Real-time collaborative graph editing (multiple users editing one
+  graph)
+- Version-controlled graph branches (linear history lives at
+  `.astroforge-recipe` v1; branching is a Phase 4 follow-on)
+- Drag-to-insert from the palette (click-to-insert only in v1.5.0)
+
+---
+
 ## 8. Planetary / Lunar Pipeline Variant
 
 Same DAG skeleton, different parameters per stage:
@@ -657,5 +861,70 @@ This 1.4.0 carrier preserves the 1.3.0 carrier content and adds the
 carrier pattern: copy the previous carrier, update the header, append
 a "Delta from X.Y.Z" section that links to canonical CR documents
 rather than re-authoring prose.
+
+---
+
+# Delta from 1.4.0 (CR-10 Node-Based Editor, proposed)
+
+This delta captures the substantive spec changes that CR-10 proposes
+between 1.4.0 and 1.5.0. The §7.7 section is added in-place to the
+§7 Deep-Sky Pipeline Stages chapter; the catalogue items below
+reference that section rather than re-authoring prose.
+
+## New section: §7.7 Node-Based Editor Surface
+
+A user-facing node-based editor over the §7 deep-sky pipeline. New
+sections §7.7.1 (Node Catalog), §7.7.2 (Node Presentation), §7.7.3
+(Node Palette), §7.7.4 (Graph Layout Modes), §7.7.5 (Pipeline
+Mutation), §7.7.6 (Per-Image-Set Graphs), §7.7.7 (Graph ↔ Recipe
+Round-Trip), §7.7.8 (Tooltips and Hints), §7.7.9 (Taxonomy
+Reconciliation), and §7.7.10 (Out of Scope). Source CR:
+[`CR-10-NODE-BASED-EDITOR.md`](../CR-10-NODE-BASED-EDITOR.md).
+
+## Locked decisions (D-CR-10-1 through D-CR-10-10)
+
+D-CR-10-1 (spec versioning): keep 1.4.0 carrier, add §7.7 + Delta
+section in-place.
+
+D-CR-10-2 (plan placement): new Phase 1.6 in `PROJECT_PLAN.md`,
+between Phase 1.5 (Guided Processing Train) and Phase 2 (Full
+Deep-Sky Pipeline).
+
+D-CR-10-3 (tracking CR): standalone `CR-10-NODE-BASED-EDITOR.md`,
+not an extension of CR-05 or CR-08.
+
+D-CR-10-4 (graph layout): ship both Constrained (default) and
+Free-form (draggable) modes; top-bar toggle.
+
+D-CR-10-5 (palette grouping): six groups by engine category:
+Input, Calibration, Calibration-Free, Stacking, Stretch,
+Refinement, Output.
+
+D-CR-10-6 (apply target): one graph per project plus per-session
+overrides; per-image-set behaviour delegated to the existing
+CompareWorkspace per-version model.
+
+D-CR-10-7 (recipe round-trip): bidirectional Graph ↔
+`.astroforge-recipe` JSON from v1.5.0.
+
+D-CR-10-8 (tooltip source): Rust `*Params` doc-comments →
+generated JSON manifest → frontend consumption.
+
+D-CR-10-9 (mutation permissions): user may insert / reorder /
+enable / disable / remove stages; required stages cannot be
+removed.
+
+D-CR-10-10 (slice shape): one task per IPC command; Phase 1.6
+decomposes into four sub-milestones (1.6.1 through 1.6.4).
+
+## Out of scope for CR-10
+
+Free-form graph editing with arbitrary user-defined node types,
+custom node authoring, real-time collaborative graph editing,
+version-controlled graph branches, drag-to-insert from the
+palette (see §7.7.10).
+
+**Canonical:** [`CR-10-NODE-BASED-EDITOR.md`](../CR-10-NODE-BASED-EDITOR.md)
++ [`plans/2026-09-28-cr10-node-based-editor/PLAN.md`](../plans/2026-09-28-cr10-node-based-editor/PLAN.md).
 
 ---

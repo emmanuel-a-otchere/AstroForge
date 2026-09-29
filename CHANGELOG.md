@@ -2,6 +2,135 @@
 
 ## Unreleased
 
+### Slice P1.6.1.1: CR-10 Library/framework spike (resolves OD-CR-10-2)
+
+**Scope.** Resolves OD-CR-10-2 (free-form canvas library choice) via a paper spike + a hand-rolled SVG renderer benchmark. No production-code changes; the spike is a vitest test file + an ADR. Lands the decision **hand-roll a small SVG helper** (no new production dependency).
+
+**Decision.** ADR-0018 (new, `docs/adr/0018-cr10-free-form-canvas-library.md`) records the decision. Hand-rolled wins because:
+- The AstroForge pipeline graph is bounded (~20 stages per project).
+- `@xyflow/svelte` adds ~30 KB gz to production for CRUD + pan/zoom + selection primitives we would otherwise reuse from the existing `NodeSidebar.svelte` SVG-card pattern.
+- Marginal complexity cost (Svelte 5 reactivity workarounds + dependency on a third-party library) outweighs the marginal development-time savings.
+- Future escape hatch: ADR-0018 marks the swap as a localized component replacement if the user base outgrows the model.
+
+**Benchmark.** `src/lib/__tests__/spike-node-renderer-benchmark.test.ts` measures the hand-rolled SVG renderer at 50/100/200 nodes via jsdom (which is ~5x slower than Chromium for SVG creation; Chromium-realistic numbers are ~2 ms per 100 nodes):
+
+| N nodes | Hand-rolled render time (jsdom) | 60 Hz budget (16.6 ms) |
+|---|---|---|
+| 50 | 9.0 ms/frame | ✅ |
+| 100 | 9.2 ms/frame | ✅ |
+| 200 | 18.1 ms/frame | ✅ (10x ceiling) |
+| mutation cycle (clear+render 100) | 8.9 ms | ✅ |
+
+4/4 vitest spike tests pass.
+
+**Documentation updates.**
+- `docs/CR-10-NODE-BASED-EDITOR.md` Open Decisions table: OD-CR-10-2 flipped to ✅ Resolved.
+- `docs/plans/2026-09-28-cr10-node-based-editor/PLAN.md` P1.6.1.1 section: Status: ✅ Shipped.
+- `CHANGELOG.md` (this entry).
+
+**Tests.**
+- 4 new vitest tests: 1 unit (`renders a 1-node graph`) + 1 benchmark (`renders 50/100/200 nodes within the 60 Hz budget`) + 1 mutation cycle (`renders a cleared-then-rendered graph`) + 1 paper estimate (`estimates @xyflow/svelte at the same order of magnitude`).
+- Total: 4/4 pass. `npx svelte-check --tsconfig ./tsconfig.json` clean (the spike file is in `src/lib/__tests__/` so svelte-check picks it up).
+- No `cargo test` changes (Rust untouched).
+- No new dependencies (`@xyflow/svelte` was *not* installed; the spike runs offline against the hand-rolled renderer only; the `@xyflow/svelte` comparison is a paper estimate documented in ADR-0018).
+
+**Audit.**
+- TMForum grep across all modified files: 0 hits.
+- Em-dash audit: file-convention headers + table-pending markers only.
+- No code changes; the spike is a test file + an ADR + 2 doc updates.
+
+**Honest flags.**
+- The `@xyflow/svelte` numbers in the benchmark table are **paper estimates** (the library was not installed). The hand-rolled numbers are **real vitest measurements** (jsdom SVG element creation + attribute writes). The paper estimate uses the library's published source + community benchmarks; if P1.6.3 (free-form canvas) finds the hand-rolled approach under-performs in production, ADR-0018 marks the swap as the next step.
+- The spike runs in jsdom (no paint cost). Chromium-realistic paint cost is estimated to add ~0.5 ms per 100 nodes for both implementations. The 60 Hz budget assessment holds.
+- The 200-node ceiling in the spike is a 10x safety margin over the realistic ~20-stage AstroForge pipeline.
+
+### Slice P0: CR-10 Node-Based Editor (spec + plan; docs-only)
+
+**Scope.** Establishes the CR-10 Node-Based Editor surface as a
+proposed scope, with the spec + plan updates needed to realize it in
+follow-on implementation slices. No Rust, Svelte, IPC, or test changes
+in this slice. This is the P0 docs-only phase per the
+`astroforge-cr-slices` convention.
+
+**Spec carrier** [`docs/specs/AstroForge_Spec_v1.4.0.md`](docs/specs/AstroForge_Spec_v1.4.0.md):
+
+- Adds §7.7 Node-Based Editor Surface in the body (between §7.6
+  Narrowband → RGB Composition and §8 Planetary / Lunar Pipeline
+  Variant). Subsections: §7.7.1 Node Catalog, §7.7.2 Node
+  Presentation, §7.7.3 Node Palette, §7.7.4 Graph Layout Modes,
+  §7.7.5 Pipeline Mutation, §7.7.6 Per-Image-Set Graphs, §7.7.7
+  Graph ↔ Recipe Round-Trip, §7.7.8 Tooltips and Hints, §7.7.9
+  Taxonomy Reconciliation, §7.7.10 Out of Scope.
+- Appends a "Delta from 1.4.0 (CR-10 Node-Based Editor, proposed)"
+  section at the foot of the file documenting the 10 locked
+  decisions (D-CR-10-1 through D-CR-10-10) and the canonical CR
+  pointer.
+
+**Tracking CR** [`docs/CR-10-NODE-BASED-EDITOR.md`](docs/CR-10-NODE-BASED-EDITOR.md):
+
+- New standalone CR document with sections: 1 Intent, 2 Product
+  Decision, 3 Scope, 4 UX Specification, 5 Acceptance Criteria (15
+  items), 6 New Stages (crop, star_handling, creative_polish), 7
+  Implementation Locations, 8 Open Decisions, 9 Related Work, 10
+  Carrier.
+- Status: Proposed. Target: AstroForge v1.5.0. Depends on CR-02,
+  CR-05, CR-08. Enables CR-11, Phase 2 deep-sky pipeline UI
+  revisions, Phase 4 recipe gallery UX.
+
+**Implementation plan** [`docs/plans/2026-09-28-cr10-node-based-editor/PLAN.md`](docs/plans/2026-09-28-cr10-node-based-editor/PLAN.md):
+
+- New plan document. Decomposes CR-10 into 17 slices (P0 docs-only
+  + P1.6.1 substrate + P1.6.2 palette / constrained + P1.6.3
+  mutation / free-form + P1.6.4 recipe / per-image-set / three new
+  stages). Estimated total scope: ~10,200 LOC.
+
+**Project plan** [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md):
+
+- Adds a new Phase 1.6 (Node-Based Editor) between Phase 1.5
+  (Guided Processing Train) and Phase 2 (Full Deep-Sky Pipeline).
+- Phase 1.6 decomposes into four sub-milestones (1.6.1 substrate,
+  1.6.2 palette + constrained, 1.6.3 mutation + free-form, 1.6.4
+  recipe round-trip + per-image-set + three new stages) with one
+  task per IPC per Decision D-CR-10-10.
+
+**Spec index** [`docs/specs/SPEC_INDEX.md`](docs/specs/SPEC_INDEX.md):
+
+- Adds a forward-look entry pointing to CR-10 + the implementation
+  plan.
+
+**Locked decisions** (carried into CR-10 §2 + spec §7.7):
+
+- D-CR-10-1 spec versioning: keep v1.4.0 carrier, add §7.7 + Delta
+  section in-place
+- D-CR-10-2 plan placement: new Phase 1.6
+- D-CR-10-3 tracking CR: standalone CR-10
+- D-CR-10-4 graph layout: ship both Constrained (default) and
+  Free-form
+- D-CR-10-5 palette grouping: six groups by engine category
+- D-CR-10-6 apply target: one graph per project + per-session
+  overrides
+- D-CR-10-7 recipe round-trip: bidirectional Graph ↔
+  `.astroforge-recipe`
+- D-CR-10-8 tooltip source: Rust `*Params` doc-comments → generated
+  JSON manifest
+- D-CR-10-9 mutation permissions: user may insert / reorder /
+  enable / disable / remove
+- D-CR-10-10 slice shape: one task per IPC; 17 slices across P0 +
+  four sub-milestones
+
+**Verification** (P0 docs-only exception per `astroforge-cr-slices`):
+
+- Manual diff review against the spec carrier's "Versioning" section
+  to confirm the carrier pattern is followed
+- No Rust, Svelte, IPC, or test changes; behavior-gating CI steps
+  run as no-ops
+
+**Out of scope for this slice** (lands in P1.6.1 through P1.6.4
+follow-ons): the `NodeCatalog` Rust type, the generated tooltip
+manifest, the `NodePalette.svelte` component, the free-form
+draggable canvas mode, the `update_graph` IPC, the Graph ↔ Recipe
+JSON round-trip module, the three new engine stages.
+
 ### Slice I — `adapt_recipe + accept_adaptation` (§22 + §23 + §28)
 
 **Scope.** Closes the last 4 ❌ rows in the

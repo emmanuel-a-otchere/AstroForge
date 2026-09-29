@@ -46,6 +46,23 @@ truth for the project's behavior, architecture, and feature set.
 > (carrier from 1.3.0 with a **Delta from 1.3.0** section). Each carrier
 > preserves the previous carrier's full content unchanged; the delta
 > section links to canonical CR documents rather than re-authoring prose.
+>
+> **CR-10 Node-Based Editor (proposed, this PR):**
+> [CR-10-NODE-BASED-EDITOR.md](../CR-10-NODE-BASED-EDITOR.md)
+> establishes a user-facing node-based editor over the §7 deep-sky
+> pipeline. New spec section §7.7 Node-Based Editor Surface is
+> added in-place to
+> [AstroForge_Spec_v1.4.0.md](./AstroForge_Spec_v1.4.0.md) between
+> §7.6 (Narrowband → RGB Composition) and §8 (Planetary / Lunar
+> Pipeline Variant); a "Delta from 1.4.0" entry is appended at the
+> foot of that file. The project plan gains a new Phase 1.6 (Node-Based
+> Editor) between Phase 1.5 (Guided Processing Train) and Phase 2
+> (Full Deep-Sky Pipeline). The implementation plan lives at
+> [../plans/2026-09-28-cr10-node-based-editor/PLAN.md](../plans/2026-09-28-cr10-node-based-editor/PLAN.md).
+> 17 slices total (P0 docs-only + P1.6.1 substrate + P1.6.2 palette /
+> constrained + P1.6.3 mutation / free-form + P1.6.4 recipe /
+> per-image-set / three new stages). Status: Proposed. Target:
+> AstroForge v1.5.0.
 
 ## Historical Specifications
 

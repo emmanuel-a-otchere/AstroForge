@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### Slice P1.6.1.3: CR-10 Tauri command surface for read-only catalog access
+
+**Scope.** Wires the NodeCatalog (P1.6.1.2) into the Tauri IPC bridge + provides a typed TS bridge for the palette / constrained layout / free-form canvas (P1.6.2.x onwards). The slice adds one Rust Tauri command (`read_node_catalog`) + one TS bridge module (`src/lib/node-catalog.ts`) + 12 vitest tests.
+
+**Rust IPC.** New `#[tauri::command]` in `src-tauri/src/main.rs`:
+
+- `read_node_catalog() -> Result<NodeCatalog, CommandError>`: returns the canonical `NodeCatalog` struct (auto-serialized to JSON via Tauri's `Serialize` impl).
+- Belt-and-braces version check: if the in-Rust version drifts from the manifest version, surface a `CommandError::Internal` so the TS side can retry after a rebuild.
+- Registered in `tauri::generate_handler!` next to `recipe_list_events` (the other read-only handler).
+
+**TS bridge.** New module `src/lib/node-catalog.ts` (~140 lines):
+
+- `NodeCatalog` + `NodeCatalogEntry` interfaces mirroring the Rust struct 1:1.
+- `loadNodeCatalog()`: fetches via `invoke('read_node_catalog')` and caches in module scope.
+- `getCachedNodeCatalog()`: synchronous accessor for callers that already have a loaded catalog (palette, constrained layout, free-form canvas).
+- `clearNodeCatalogCache()`: resets the cache (used by tests; future reload-on-version-bump paths).
+- **Concurrent callers share a single inflight Promise** (no thundering-herd; no duplicate IPCs under `Promise.all([loadNodeCatalog(), loadNodeCatalog(), ...])`).
+- **Browser-mode fallback**: if the IPC is not registered (e.g. dev server without Tauri), returns `{ version: 0, entries: [] }` so the dev server keeps working. Unexpected IPC errors are rethrown so callers see real failures.
+
+**Vitest tests.** `src/lib/__tests__/node-catalog-slice-p-1-6-1-3.test.ts` (~220 lines, 12 tests):
+
+- Bridge (7): loads via the IPC, caches in module scope, returns null until first load, clears cache correctly, shares inflight Promise across concurrent callers, browser-mode fallback for missing IPC, rethrows unexpected IPC errors.
+- Interface shape (5): every required field present on a typical entry, `default_params` is always a JSON object, `supported_models` populated iff `ai_uses_ai`, `ai_model_id` set iff `ai_uses_ai`, `version` is a non-negative integer.
+
+**Total: 12 new tests pass (4 + 12 + 66 across the slice). 0 regressions in the existing 54 vitest tests. cargo clippy --workspace --tests -- -D warnings clean. cargo fmt --all clean. cargo test --workspace passes (all 800+ existing tests + 10 P1.6.1.2 unit tests + 10 P1.6.1.2 integration tests).**
+
+**Slice deviation from PLAN.md.** The PLAN.md called for a new `src-tauri/src/commands_node_graph.rs` module + `src/lib/astroforge-api.ts` wrapper. The slice landed with the command colocated in `src-tauri/src/main.rs` (next to the other recipe catalog handlers) and the TS bridge in a new `src/lib/node-catalog.ts` module. Rationale: one file is cheaper than a new module for a single read-only IPC; the `commands_node_graph.rs` module can split later when P1.6.2.x / P1.6.3.x add their own IPC handlers. The TS bridge landed in `node-catalog.ts` rather than `astroforge-api.ts` because the catalog is a CR-10 surface (not a generic API extension) and deserves its own module. Both deviations are documented in the PLAN.md "Files touched" section.
+
+**Audit.**
+
+- TMForum grep across all modified files: 0 hits.
+- Em-dash audit: file-convention headers + table-pending markers only.
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --tests -- -D warnings` clean.
+
+**Honest flags.**
+
+- The Tauri side (`src-tauri/src/main.rs`) does NOT compile in this Hermes environment because the Tauri build chain requires `libwebkit2gtk-4.1-dev` which is not installed. CI installs the dev libraries via `apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev` before building, so the CI gate catches compilation issues. Local validation is limited to `astroforge-core` (the workspace that does not depend on Tauri).
+- The TS-side `loadNodeCatalog` falls back to `{ version: 0, entries: [] }` when the IPC is not registered. Callers that depend on catalog presence must gate behind `catalog.entries.length > 0`. The slice's tests pin this behaviour.
+- `read_node_catalog` is a synchronous IPC. Tauri's IPC layer supports async commands; the slice keeps this synchronous because the catalog is computed in memory (no I/O) and serializes in <1 ms. If future slices add disk-backed catalogs, the command can become async without changing the TS bridge signature.
+- The mock-based vitest tests stub `@tauri-apps/api/core` at module scope; they do not exercise the Rust side. The Rust-side test coverage lives in P1.6.1.2 (the catalog itself is tested; the IPC handler is a 5-line pass-through).
+
 ### Slice P1.6.1.2: CR-10 NodeCatalog data type + generated manifest
 
 **Scope.** Establishes the `NodeCatalog` as a first-class Rust type in `crates/astroforge-core/src/node_catalog.rs` and emits the JSON manifest at `crates/astroforge-core/src/node_catalog.json`. The catalog is the canonical source of truth for the 12 user-facing `PipelineStageType` variants (matching `src/lib/pipeline-store.ts:8-22`) and the 7.7.9 mapping table that reconciles them to the 8-classical + 2-AI canonical stage types. No UI changes; the TS-side consumption lands in P1.6.1.3 + P1.6.2.x.

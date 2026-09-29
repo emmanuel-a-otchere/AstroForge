@@ -14,6 +14,7 @@ use astroforge_core::project::ProjectManager;
 use astroforge_core::recipe::{apply_recipe, QualityProfile, Recipe, RecipeAiDiffSummary};
 use astroforge_core::recipe_store::{RecipeStore, RecipeSummary, RecipeVersion};
 use astroforge_core::recipe_events::{RecipeEvent, RecipeEventFilter, RecipeEventKind, RecipeEventStore, now_iso as recipe_events_now_iso};
+use astroforge_core::node_catalog::{NodeCatalog, CATALOG_VERSION};
 use astroforge_core::session::SessionStore;
 use astroforge_core::validation::StageSpec;
 use serde::Serialize;
@@ -1804,6 +1805,44 @@ fn recipe_list_events(
     store.list_events(&filter).map_err(Into::into)
 }
 
+/// CR-10 §7.7.1 / P1.6.1.3: read-only Tauri command
+/// surface for the NodeCatalog. Returns the
+/// canonical 12-entry catalog that drives the
+/// palette (P1.6.2.x) + the constrained layout
+/// (P1.6.2.4) + the free-form canvas (P1.6.3.x).
+///
+/// The catalog is regenerated at build time by
+/// `cargo run -p astroforge-core --example
+/// emit_node_catalog`. The TS side consumes it
+/// via the `loadNodeCatalog` helper in
+/// `src/lib/node-catalog.ts` and caches the result
+/// for the session — the catalog is read-only and
+/// versioned, so a single load is enough for the
+/// Node editor's lifetime.
+///
+/// Returns the full `NodeCatalog` struct (serialized
+/// as JSON via Tauri's automatic `Serialize` impl).
+/// The TS-side `NodeCatalog` interface mirrors the
+/// Rust struct 1:1.
+#[tauri::command]
+fn read_node_catalog() -> Result<NodeCatalog, CommandError> {
+    let catalog = astroforge_core::node_catalog::node_catalog();
+    // Belt-and-braces version check: if the
+    // in-Rust version drifts from the manifest
+    // version we are about to emit, surface the
+    // discrepancy as a CommandError so the TS
+    // side can retry after a rebuild. (The
+    // manifest is checked in; `node_catalog()` is
+    // the live source of truth.)
+    if catalog.version != CATALOG_VERSION {
+        return Err(CommandError::Internal(format!(
+            "node catalog version mismatch: in-Rust={} manifest={}",
+            catalog.version, CATALOG_VERSION
+        )));
+    }
+    Ok(catalog)
+}
+
 /// CR-08 §20: validate a Recipe against the
 /// §20 stage-spec table for the five risk classes
 /// (range, dependency, filesystem, executable,
@@ -2217,6 +2256,8 @@ fn main() {
             recipe_get_reproducibility_report,
             recipe_security_validate,
             recipe_list_events,
+            // CR-10 §7.7.1 / P1.6.1.3: NodeCatalog read-only IPC.
+            read_node_catalog,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,
             diff_cache_clear,

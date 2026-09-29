@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "stage_type": "ingest",
+      "label": "Ingest & Analyse",
+      "description": "Load image files, detect camera type, filter set, and basic statistics",
+      "ai_uses_ai": false,
+      "ai_model_id": null,
+      "destructive": false,
+      "produces_image_version": false,
+      "undo_supported": false,
+      "default_params": {},
+      "supported_models": []
+    },
+    {
+      "stage_type": "crop_rotate",
+      "label": "Framing / Crop / Rotate",
+      "description": "Interactive crop with live rotation and aspect-ratio presets",
+      "ai_uses_ai": false,
+      "ai_model_id": null,
+      "destructive": true,
+      "produces_image_version": true,
+      "undo_supported": true,
+      "default_params": {
+        "aspectRatio": "free",
+        "rotation": 0
+      },
+      "supported_models": []
+    },
+    {
+      "stage_type": "background_extraction",
+      "label": "Gradient / Background Extraction",
+      "description": "Remove sky gradients while preserving nebulosity",
+      "ai_uses_ai": false,
+      "ai_model_id": null,
+      "destructive": true,
+      "produces_image_version": true,
+      "undo_supported": false,
+      "default_params": {
+        "model": "polynomial",
+        "strength": 0.8
+      },
+      "supported_models": []
+    },
+    {
+      "stage_type": "color_calibration",
+      "label": "Colour Calibration / Balance",
+      "description": "Bounded white-balance corrections for dual-band and mono data",
+      "ai_uses_ai": false,
+      "ai_model_id": null,
+      "destructive": true,
+      "produces_image_version": true,
+      "undo_supported": true,
+      "default_params": {
+        "method": "auto",
+        "strength": 0.7
+      },
+      "supported_models": []
+    },
+    {
+      "stage_type": "color_wb",
+      "label": "White Balance",
+      "description": "Per-channel white-balance scaling with clipping guard",
+      "ai_uses_ai": false,
+      "ai_model_id": null,
+      "destructive": false,
+      "produces_image_version": true,
+      "undo_supported": true,
+      "default_params": {
+        "method": "auto",
+        "strength": 0.7
+      },
+      "supported_models": []
+    },
+    {
+      "stage_type": "color_scnr",
+      "label": "SCNR Green",
+      "description": "Remove green cast from dual-band and RGB narrowband",
+      "ai_uses_ai": false,
+      "ai_model_id": null,
+      "destructive": false,
+      "produces_image_version": true,
+      "undo_supported": true,
+      "default_params": {
+        "amount": 0.5,
+        "preserveHighlights": true
+      },
+      "supported_models": []
+    },
+    {
+      "stage_type": "sharpen_deconvolution",
+      "label": "Sharpen / Deconvolution",
+      "description": "Richardson-Lucy or van Cittert sharpening with PSF from stars",
+      "ai_uses_ai": true,
+      "ai_model_id": "astroforge_detail_v1.2",
+      "destructive": true,
+      "produces_image_version": true,
+      "undo_supported": false,
+      "default_params": {
+        "algorithm": "richardson_lucy",
+        "iterations": 10
+      },
+      "supported_models": [
+        "astroforge_detail_v1.2"
+      ]
+    },
+    {
+      "stage_type": "denoise",
+      "label": "Denoise",
+      "description": "Noise reduction with preview-stable statistics",
+      "ai_uses_ai": true,
+      "ai_model_id": "astroforge_denoise_v1",
+      "destructive": true,
+      "produces_image_version": true,
+      "undo_supported": false,
+      "default_params": {
+        "method": "swinir",
+        "strength": 0.5
+      },
+      "supported_models": [
+        "astroforge_denoise_v1"
+      ]
+    },
+    {
+      "stage_type": "stretch",
+      "label": "Stretch",
+      "description": "Data-anchored Deep stretch with multi-preview grid",
+      "ai_uses_ai": false,
+      "ai_model_id": null,
+      "destructive": false,
+      "produces_image_version": true,
+      "undo_supported": false,
+      "default_params": {
+        "blackPoint": 0,
+        "highlights": 1,
+        "midtones": 0.25,
+        "mode": "deep"
+      },
+      "supported_models": []
+    },
+    {
+      "stage_type": "star_handling",
+      "label": "Star Handling",
+      "description": "Separate stars, edit layers independently, exact or soft replace",
+      "ai_uses_ai": true,
+      "ai_model_id": "astroforge_detail_v1.2",
+      "destructive": false,
+      "produces_image_version": true,
+      "undo_supported": false,
+      "default_params": {
+        "colorBoost": 0,
+        "replaceStrength": 1.0,
+        "separationMethod": "exact"
+      },
+      "supported_models": [
+        "astroforge_detail_v1.2"
+      ]
+    },
+    {
+      "stage_type": "creative_polish",
+      "label": "Creative / Final Polish",
+      "description": "Curves, colour transmutation spells, narrowband palette mixes",
+      "ai_uses_ai": true,
+      "ai_model_id": "astroforge_detail_v1.2",
+      "destructive": false,
+      "produces_image_version": true,
+      "undo_supported": false,
+      "default_params": {
+        "curves": [],
+        "saturation": 0
+      },
+      "supported_models": [
+        "astroforge_detail_v1.2"
+      ]
+    },
+    {
+      "stage_type": "export",
+      "label": "Export",
+      "description": "Multi-format export: FITS master, TIFF, JPEG, starless, stars-only",
+      "ai_uses_ai": false,
+      "ai_model_id": null,
+      "destructive": false,
+      "produces_image_version": false,
+      "undo_supported": false,
+      "default_params": {
+        "format": "tiff16",
+        "includeStarless": false,
+        "includeStarsOnly": false
+      },
+      "supported_models": []
+    }
+  ]
+}

@@ -79,6 +79,8 @@ Decision: hand-roll a small SVG helper. ADR-0018 records the decision. Benchmark
 
 #### P1.6.1.2: NodeCatalog data type + generated manifest
 
+Status: ✅ Shipped (PR #411, commit TBD; lands in CR-10 Slice P1.6.1.2).
+
 Goal: introduce `NodeCatalog` as a first-class Rust type and emit the tooltip manifest at build time.
 
 Implementation:

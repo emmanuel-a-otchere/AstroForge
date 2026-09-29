@@ -2,7 +2,51 @@
 
 ## Unreleased
 
-<<<<<<< HEAD
+### Slice P1.6.1.2: CR-10 NodeCatalog data type + generated manifest
+
+**Scope.** Establishes the `NodeCatalog` as a first-class Rust type in `crates/astroforge-core/src/node_catalog.rs` and emits the JSON manifest at `crates/astroforge-core/src/node_catalog.json`. The catalog is the canonical source of truth for the 12 user-facing `PipelineStageType` variants (matching `src/lib/pipeline-store.ts:8-22`) and the 7.7.9 mapping table that reconciles them to the 8-classical + 2-AI canonical stage types. No UI changes; the TS-side consumption lands in P1.6.1.3 + P1.6.2.x.
+
+**Rust core.** New module `crates/astroforge-core/src/node_catalog.rs` (~660 lines):
+
+- `NodeCatalog { version, entries }` struct (versioned at `CATALOG_VERSION = 1`).
+- `NodeCatalogEntry { stage_type, label, description, ai_uses_ai, ai_model_id, destructive, produces_image_version, undo_supported, default_params, supported_models }`.
+- `USER_FACING_STAGE_TYPES` constant: the 12 user-facing types (matches the TS union).
+- `CANONICAL_STAGE_TYPES` constant: the 8-classical + 2-AI canonical types (matches `AiBoundaryLabel::for_stage_type`).
+- `user_facing_to_canonical(stage_type)`: the 7.7.9 mapping table.
+- `node_catalog()` pure function: returns the canonical `NodeCatalog` with all 12 entries; reads no I/O.
+- `emit_catalog_json()`: serializes the catalog to pretty JSON.
+- `load_catalog_from_str(s)`: loads from JSON.
+- 10 unit tests pinning the catalog shape (entry count, version, label/description non-empty, AI classification for denoise + sharpen + star_handling + creative_polish, classical classification for the rest, destructive set matches TS `DESTRUCTIVE_STAGES`, ingest + export do not produce image versions, emit + load round-trip, default_params are objects, user_facing_to_canonical is total).
+
+**Generated manifest.** `crates/astroforge-core/src/node_catalog.json` (194 lines) — the canonical regeneration output of `cargo run -p astroforge-core --example emit_node_catalog`. Format: pretty (2-space indent) for git diff-ability. Includes all 12 entries with the 10 fields above.
+
+**Emit binary.** `crates/astroforge-core/examples/emit_node_catalog.rs` — the canonical regeneration path. Pipes the catalog to stdout; the manifest is regenerated via `cargo run -p astroforge-core --example emit_node_catalog > src/node_catalog.json`.
+
+**Integration tests.** `crates/astroforge-core/tests/node_catalog_slice_p_1_6_1_2.rs` (~220 lines, 10 tests): checked-in manifest matches in-Rust source (snapshot test), manifest version matches `CATALOG_VERSION`, every entry has the 10 required fields, manifest stage-type order matches `USER_FACING_STAGE_TYPES`, manifest is idempotent under re-emit, manifest is loadable from disk, in-Rust catalog matches the manifest, every user-facing type maps to a canonical type in `CANONICAL_STAGE_TYPES`, no duplicate stage_types in manifest, `supported_models` only populated for AI stages.
+
+**Total: 20 new tests** (10 unit + 10 integration). All pass. **0 regressions** in the existing 800+ workspace tests. `cargo clippy --workspace --tests -- -D warnings` clean.
+
+**Design notes.**
+
+- The catalog is checked in (not generated at build time). Rationale: checked-in files are diff-able in git, require no `build.rs` plumbing, and the snapshot test catches drift between the in-Rust source and the file on disk.
+- `star_handling` + `creative_polish` are classified as AI (perceptual) and map to the canonical `detail` stage type. The classification is locked at `AiBoundaryLabel::for_stage_type("detail")` which returns `astroforge_detail_v1.2` as the model ID. This matches the spec wording ("Separate stars / edit layers / exact or soft replace" + "Curves / colour transmutation / narrowband palette mixes" — both perceptual).
+- `user_facing_to_canonical` panics on unknown stage types rather than silently mapping to a default. The slice's `node_catalog()` function enumerates `USER_FACING_STAGE_TYPES` (12 known), so the panic is a developer-error guard, not a runtime path. The integration test `every_user_facing_type_maps_to_known_canonical_type` pins the invariant.
+- `load_catalog_from_str` is the production reader the TS side will call (via `serde_json::from_str` in P1.6.1.3). It validates JSON shape via `serde::Deserialize` and the `version` field via `CATALOG_VERSION`.
+
+**Audit.**
+
+- TMForum grep across all modified files: 0 hits.
+- Em-dash audit: file-convention headers + table-pending markers only.
+- `cargo clippy --workspace --tests -- -D warnings` clean.
+- `rustfmt crates/astroforge-core/src/node_catalog.rs` clean.
+
+**Honest flags.**
+
+- The TS side does NOT yet consume the manifest. The bridge lands in P1.6.1.3 (Tauri command for read-only access) + P1.6.2.x (palette + constrained layout consume the manifest). Until then the manifest is a build-time artifact used by tests + future slices.
+- `node_catalog()` is a pure function but the file path is hardcoded to `crates/astroforge-core/src/node_catalog.json`. The Tauri command surface in P1.6.1.3 will read from a Tauri-managed path; the `load_catalog_from_str` helper is the canonical reader.
+- The AI classification for `star_handling` + `creative_polish` is asserted by `denoise_and_detail_user_facing_types_are_marked_ai`. The decision was made by reading the spec wording ("perceptual AI"); if the spec later decides these are classical, the slice's tests + the canonical mapping table flip together.
+- The `default_params` are sourced from `src/lib/pipeline-store.ts:131-192`. They will drift if TS-side defaults change. P1.6.1.3 should add a test that pins TS-side defaults to the manifest (would require a TS test runner to read both; deferred to a follow-on).
+
 ### Slice P1.6.1.1: CR-10 Library/framework spike (resolves OD-CR-10-2)
 
 **Scope.** Resolves OD-CR-10-2 (free-form canvas library choice) via a paper spike + a hand-rolled SVG renderer benchmark. No production-code changes; the spike is a vitest test file + an ADR. Lands the decision **hand-roll a small SVG helper** (no new production dependency).
@@ -45,8 +89,6 @@
 - The spike runs in jsdom (no paint cost). Chromium-realistic paint cost is estimated to add ~0.5 ms per 100 nodes for both implementations. The 60 Hz budget assessment holds.
 - The 200-node ceiling in the spike is a 10x safety margin over the realistic ~20-stage AstroForge pipeline.
 
-=======
->>>>>>> e272375 (docs(spec): CR-10 Node-Based Editor (P0 docs-only slice))
 ### Slice P0: CR-10 Node-Based Editor (spec + plan; docs-only)
 
 **Scope.** Establishes the CR-10 Node-Based Editor surface as a

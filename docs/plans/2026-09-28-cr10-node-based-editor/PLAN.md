@@ -1,7 +1,7 @@
 # CR-10 Implementation Plan: Node-Based Editor
 
 **Date:** 2026-09-28
-**Status:** Proposed (P0 + P1.6.1.1 + P1.6.1.2 + P1.6.1.3 + P1.6.2.1 + P1.6.2.2 all shipped; P1.6.2.3 onwards pending)
+**Status:** Proposed (P0 + P1.6.1.1 + P1.6.1.3 + P1.6.2.1 + P1.6.2.2 all shipped; P1.6.1.2 awaiting PR #411 merge [rebased onto current main, 6/6 CI green as of 2026-09-29T17:02Z]; P1.6.2.3 onwards pending)
 **Source CR:** [`../../CR-10-NODE-BASED-EDITOR.md`](../../CR-10-NODE-BASED-EDITOR.md)
 **Spec carrier:** [`../../specs/AstroForge_Spec_v1.4.0.md`](../../specs/AstroForge_Spec_v1.4.0.md) §7.7 + Delta from 1.4.0
 **Strategy:** P0 docs-only (this PR), then four sub-milestones (1.6.1 through 1.6.4) decomposed into one-task-per-IPC slices per Decision D-CR-10-10. Each slice is one PR-sized tranche; each tranche is independently reviewable and CI-green before the next starts.
@@ -65,7 +65,7 @@ Goal: lock the data model, the generated manifest, and the Tauri command surface
 
 #### P1.6.1.1: Library / framework spike
 
-Status: ✅ Shipped (PR #410, commit TBD; lands in CR-10 Slice P1.6.1.1).
+Status: ✅ Shipped (PR #410, commit 3872420; lands in CR-10 Slice P1.6.1.1).
 
 Goal: pick the free-form canvas library (open decision OD-CR-10-2).
 

@@ -1,7 +1,7 @@
 # CR-10 Implementation Plan: Node-Based Editor
 
 **Date:** 2026-09-28
-**Status:** Proposed (P0 docs-only slice + P1.6.1.1 + P1.6.1.2 + P1.6.1.3 all shipped; P1.6.2 onwards pending)
+**Status:** Proposed (P0 docs-only slice + P1.6.1.1 + P1.6.1.2 + P1.6.1.3 + P1.6.2.1 all shipped; P1.6.2.2 onwards pending)
 **Source CR:** [`../../CR-10-NODE-BASED-EDITOR.md`](../../CR-10-NODE-BASED-EDITOR.md)
 **Spec carrier:** [`../../specs/AstroForge_Spec_v1.4.0.md`](../../specs/AstroForge_Spec_v1.4.0.md) §7.7 + Delta from 1.4.0
 **Strategy:** P0 docs-only (this PR), then four sub-milestones (1.6.1 through 1.6.4) decomposed into one-task-per-IPC slices per Decision D-CR-10-10. Each slice is one PR-sized tranche; each tranche is independently reviewable and CI-green before the next starts.
@@ -124,7 +124,7 @@ Goal: ship the NodePalette component + extend `NodeSidebar.svelte` for the const
 
 #### P1.6.2.1: `NodePalette.svelte` skeleton + IPC
 
-Status: ✅ Shipped (PR #413, commit TBD; lands in CR-10 Slice P1.6.2.1).
+Status: ✅ Shipped (PR #413, commit 62d9912; lands in CR-10 Slice P1.6.2.1).
 
 Goal: render the palette grouped by the six engine categories.
 

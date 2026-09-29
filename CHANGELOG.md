@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+<<<<<<< HEAD
 ### Slice P1.6.1.1: CR-10 Library/framework spike (resolves OD-CR-10-2)
 
 **Scope.** Resolves OD-CR-10-2 (free-form canvas library choice) via a paper spike + a hand-rolled SVG renderer benchmark. No production-code changes; the spike is a vitest test file + an ADR. Lands the decision **hand-roll a small SVG helper** (no new production dependency).
@@ -44,6 +45,8 @@
 - The spike runs in jsdom (no paint cost). Chromium-realistic paint cost is estimated to add ~0.5 ms per 100 nodes for both implementations. The 60 Hz budget assessment holds.
 - The 200-node ceiling in the spike is a 10x safety margin over the realistic ~20-stage AstroForge pipeline.
 
+=======
+>>>>>>> e272375 (docs(spec): CR-10 Node-Based Editor (P0 docs-only slice))
 ### Slice P0: CR-10 Node-Based Editor (spec + plan; docs-only)
 
 **Scope.** Establishes the CR-10 Node-Based Editor surface as a

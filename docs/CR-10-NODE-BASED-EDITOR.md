@@ -362,7 +362,7 @@ The full PR-by-PR breakdown is in
 | # | Issue | Status | Resolution target |
 |---|---|---|---|
 | OD-CR-10-1 | Palette UI affordance: icon + label only, or icon + label + per-node 2-line hint visible at rest? | Open | UX review at M1.6.2 |
-| OD-CR-10-2 | Free-form canvas library: roll a small SVG helper, or adopt `@xyflow/svelte` (svelte-flow)? | Open | Slice 1.6.1.1 spike |
+| OD-CR-10-2 | Free-form canvas library: roll a small SVG helper, or adopt `@xyflow/svelte` (svelte-flow)? | ✅ Resolved (CR-10 P1.6.1.1 / Slice P1.6.1.1; ADR-0018 — hand-roll a small SVG helper; benchmark at 50/100/200 nodes shows the hand-rolled approach meets the 60 Hz budget; no new production dependency) | Slice 1.6.1.1 |
 | OD-CR-10-3 | Should the NodePalette live in a permanent left sidebar, or be a collapsible drawer? | Open | UX review at M1.6.2 |
 | OD-CR-10-4 | When a session overrides the project default graph, is the override visible in the Node view, or only via "Reset to project default"? | Open | UX review at M1.6.3 |
 | OD-CR-10-5 | Should the AI badge be a permanent chip on every AI node card, or only on hover? | Open | UX review at M1.6.2 |

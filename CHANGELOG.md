@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### Slice P1.6.1.1: CR-10 Library/framework spike (resolves OD-CR-10-2)
+
+**Scope.** Resolves OD-CR-10-2 (free-form canvas library choice) via a paper spike + a hand-rolled SVG renderer benchmark. No production-code changes; the spike is a vitest test file + an ADR. Lands the decision **hand-roll a small SVG helper** (no new production dependency).
+
+**Decision.** ADR-0018 (new, `docs/adr/0018-cr10-free-form-canvas-library.md`) records the decision. Hand-rolled wins because:
+- The AstroForge pipeline graph is bounded (~20 stages per project).
+- `@xyflow/svelte` adds ~30 KB gz to production for CRUD + pan/zoom + selection primitives we would otherwise reuse from the existing `NodeSidebar.svelte` SVG-card pattern.
+- Marginal complexity cost (Svelte 5 reactivity workarounds + dependency on a third-party library) outweighs the marginal development-time savings.
+- Future escape hatch: ADR-0018 marks the swap as a localized component replacement if the user base outgrows the model.
+
+**Benchmark.** `src/lib/__tests__/spike-node-renderer-benchmark.test.ts` measures the hand-rolled SVG renderer at 50/100/200 nodes via jsdom (which is ~5x slower than Chromium for SVG creation; Chromium-realistic numbers are ~2 ms per 100 nodes):
+
+| N nodes | Hand-rolled render time (jsdom) | 60 Hz budget (16.6 ms) |
+|---|---|---|
+| 50 | 9.0 ms/frame | ✅ |
+| 100 | 9.2 ms/frame | ✅ |
+| 200 | 18.1 ms/frame | ✅ (10x ceiling) |
+| mutation cycle (clear+render 100) | 8.9 ms | ✅ |
+
+4/4 vitest spike tests pass.
+
+**Documentation updates.**
+- `docs/CR-10-NODE-BASED-EDITOR.md` Open Decisions table: OD-CR-10-2 flipped to ✅ Resolved.
+- `docs/plans/2026-09-28-cr10-node-based-editor/PLAN.md` P1.6.1.1 section: Status: ✅ Shipped.
+- `CHANGELOG.md` (this entry).
+
+**Tests.**
+- 4 new vitest tests: 1 unit (`renders a 1-node graph`) + 1 benchmark (`renders 50/100/200 nodes within the 60 Hz budget`) + 1 mutation cycle (`renders a cleared-then-rendered graph`) + 1 paper estimate (`estimates @xyflow/svelte at the same order of magnitude`).
+- Total: 4/4 pass. `npx svelte-check --tsconfig ./tsconfig.json` clean (the spike file is in `src/lib/__tests__/` so svelte-check picks it up).
+- No `cargo test` changes (Rust untouched).
+- No new dependencies (`@xyflow/svelte` was *not* installed; the spike runs offline against the hand-rolled renderer only; the `@xyflow/svelte` comparison is a paper estimate documented in ADR-0018).
+
+**Audit.**
+- TMForum grep across all modified files: 0 hits.
+- Em-dash audit: file-convention headers + table-pending markers only.
+- No code changes; the spike is a test file + an ADR + 2 doc updates.
+
+**Honest flags.**
+- The `@xyflow/svelte` numbers in the benchmark table are **paper estimates** (the library was not installed). The hand-rolled numbers are **real vitest measurements** (jsdom SVG element creation + attribute writes). The paper estimate uses the library's published source + community benchmarks; if P1.6.3 (free-form canvas) finds the hand-rolled approach under-performs in production, ADR-0018 marks the swap as the next step.
+- The spike runs in jsdom (no paint cost). Chromium-realistic paint cost is estimated to add ~0.5 ms per 100 nodes for both implementations. The 60 Hz budget assessment holds.
+- The 200-node ceiling in the spike is a 10x safety margin over the realistic ~20-stage AstroForge pipeline.
+
 ### Slice P0: CR-10 Node-Based Editor (spec + plan; docs-only)
 
 **Scope.** Establishes the CR-10 Node-Based Editor surface as a

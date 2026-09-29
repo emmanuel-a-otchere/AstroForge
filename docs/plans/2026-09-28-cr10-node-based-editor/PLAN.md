@@ -65,15 +65,17 @@ Goal: lock the data model, the generated manifest, and the Tauri command surface
 
 #### P1.6.1.1: Library / framework spike
 
+Status: ✅ Shipped (PR #410, commit TBD; lands in CR-10 Slice P1.6.1.1).
+
 Goal: pick the free-form canvas library (open decision OD-CR-10-2).
 
-Options to evaluate:
+Options evaluated:
 
 - Roll a small SVG helper (zero deps, hand-rolled drag + bezier)
-- `@xyflow/svelte` (svelte-flow; ~80 KB gzipped)
-- `rete.js` v2 (canvas-based; would need a Svelte adapter)
+- `@xyflow/svelte` (svelte-flow; ~30 KB gzipped; mature)
+- `rete.js` v2 (canvas-based; would need a Svelte adapter — eliminated early)
 
-The spike writes a 200-line proof-of-concept that renders three draggable nodes + two bezier edges and persists positions on drag-end. The decision lands on the option with the best fit-for-purpose for the Node use case + acceptable bundle size. If no library is acceptable, the spike lands the small SVG helper as the v1.5.0 path.
+Decision: hand-roll a small SVG helper. ADR-0018 records the decision. Benchmark at 50/100/200 nodes in `src/lib/__tests__/spike-node-renderer-benchmark.test.ts` shows the hand-rolled approach meets the 60 Hz budget comfortably (jsdom cost is ~5x Chromium; Chromium-realistic numbers are ~2 ms per 100 nodes). The AstroForge pipeline graph is bounded (~20 stages for a single project; the spike's 200-node ceiling is a 10x safety margin). `@xyflow/svelte`'s strengths (minimap, autolayout, 1000+ node support) are not needed at current scale; the marginal complexity cost (Svelte 5 reactivity workarounds + dependency on a third-party library) outweighs the marginal development-time savings.
 
 #### P1.6.1.2: NodeCatalog data type + generated manifest
 

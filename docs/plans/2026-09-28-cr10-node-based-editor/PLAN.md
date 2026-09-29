@@ -1,7 +1,7 @@
 # CR-10 Implementation Plan: Node-Based Editor
 
 **Date:** 2026-09-28
-**Status:** Proposed (P0 docs-only slice + P1.6.1.1 + P1.6.1.2 + P1.6.1.3 + P1.6.2.1 all shipped; P1.6.2.2 onwards pending)
+**Status:** Proposed (P0 + P1.6.1.1 + P1.6.1.2 + P1.6.1.3 + P1.6.2.1 + P1.6.2.2 all shipped; P1.6.2.3 onwards pending)
 **Source CR:** [`../../CR-10-NODE-BASED-EDITOR.md`](../../CR-10-NODE-BASED-EDITOR.md)
 **Spec carrier:** [`../../specs/AstroForge_Spec_v1.4.0.md`](../../specs/AstroForge_Spec_v1.4.0.md) §7.7 + Delta from 1.4.0
 **Strategy:** P0 docs-only (this PR), then four sub-milestones (1.6.1 through 1.6.4) decomposed into one-task-per-IPC slices per Decision D-CR-10-10. Each slice is one PR-sized tranche; each tranche is independently reviewable and CI-green before the next starts.
@@ -163,7 +163,7 @@ Canonical-only stages (`stack`, `register`, `debayer`, `background`, `color`, `d
 
 #### P1.6.2.2: Palette mount + search field wiring
 
-Status: ✅ Shipped (PR #414, commit TBD; lands in CR-10 Slice P1.6.2.2).
+Status: ✅ Shipped (PR #414, commit b2e4514; lands in CR-10 Slice P1.6.2.2).
 
 Goal: mount `NodePalette` in `ProcessWorkspace.svelte` and wire the search filter.
 

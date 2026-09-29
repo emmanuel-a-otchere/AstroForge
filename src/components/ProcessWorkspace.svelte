@@ -26,6 +26,13 @@
   layout refactor (P3 slice 2.10+); for now we stack the
   controls vertically above the run list, consistent with the
   recovery / auto-plan / intelligence zones already wired here.
+
+  CR-10 P1.6.2.2 — when the session is in Node mode (read from
+  the new `isNodeMode` store), mount `<NodePalette>` as a
+  left-sidebar via the `sidebar` snippet on `WorkspaceScreen`.
+  In Wizard mode (default), no sidebar is mounted and the
+  workspace renders exactly as before. The toggle UI that
+  writes to the store lands in P1.6.2.3.
 -->
 <script lang="ts">
   import { onDestroy } from "svelte";
@@ -36,12 +43,14 @@
   import AutoPlanPanel from "./AutoPlanPanel.svelte";
   import ProcessingControls from "./ProcessingControls.svelte";
   import SaveAsRecipePanel from "./SaveAsRecipePanel.svelte";
+  import NodePalette from "./NodePalette.svelte";
   import { activeProject } from "../state/project-context";
   import {
     activePlan,
     refreshRecommendations,
   } from "../lib/pipeline-plan-store";
   import { workspaceState } from "../state/workspace";
+  import { isNodeMode } from "../lib/node-graph-store";
 
   // CR-05 P3 slice 2.6 — keep the per-plan recommendation store
   // fresh whenever `activePlan` changes. We subscribe manually
@@ -88,6 +97,11 @@
   icon="auto_fix_high"
   description="Run image-processing pipelines against the project's source data. Every run is durable and recoverable; crash mid-run resumes from the last completed stage."
 >
+  {#snippet sidebar()}
+    {#if $isNodeMode}
+      <NodePalette />
+    {/if}
+  {/snippet}
   {#if $workspaceState.loading}
     <p class="status-line font-body" role="status">Loading pipeline runs…</p>
   {:else if $workspaceState.error}

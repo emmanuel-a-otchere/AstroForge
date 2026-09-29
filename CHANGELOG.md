@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### Slice P1.6.2.2: CR-10 palette mount + node-mode store
+
+**Scope.** Wires the P1.6.2.1 `NodePalette` into `ProcessWorkspace.svelte` via a new `nodeGraphMode` store, and extends `WorkspaceScreen.svelte` with an optional sidebar snippet. Adds the wiring skeleton that P1.6.2.3 (toggle) + P1.6.2.4 (constrained layout + insert IPC) build on. No IPC changes; no persistence (P1.6.2.3 wires that).
+
+**Store.** New `src/lib/node-graph-store.ts`:
+
+- `nodeGraphMode: Writable<NodeGraphMode>` with the union `"wizard" | "node"`. Default = `"wizard"`.
+- `isNodeMode: Readable<boolean>` derived from `nodeGraphMode === "node"`.
+- `isWizardMode: Readable<boolean>` symmetric counterpart.
+- `setNodeGraphMode(mode)`: setter used by P1.6.2.3's toggle.
+- `resetNodeGraphMode()`: returns to default; used by tests.
+
+**WorkspaceScreen extension.** `src/components/WorkspaceScreen.svelte`:
+
+- New optional `sidebar?: Snippet` prop.
+- When supplied, the workspace renders a flex row with `aside.workspace-sidebar` on the left + the existing `div.workspace-body` on the right.
+- The `max-width` widens from 1100 px (single-column) to 1440 px (sidebar + body).
+- When no sidebar is supplied, the rendered HTML is identical to before: the existing `.workspace-body` div is wrapped in `.workspace-layout`, but `.workspace-layout` is a single-child flex container in that case and produces the same visual output. Other workspaces (Import / Enhance / Compare) are unaffected because they do not pass a `sidebar` snippet.
+
+**ProcessWorkspace mount.** `src/components/ProcessWorkspace.svelte`:
+
+- Imports `<NodePalette>` + `isNodeMode`.
+- Adds `{#snippet sidebar()}{#if $isNodeMode}<NodePalette />{/if}{/snippet}` inside the `<WorkspaceScreen>` block.
+- In Wizard mode (default), the snippet returns nothing and the workspace renders exactly as before. Node mode adds the palette on the left.
+
+**Tests.** `src/lib/__tests__/node-graph-store-slice-p-1-6-2-2.test.ts` (7 tests):
+
+- Default mode is `"wizard"`.
+- `isNodeMode` reflects the store state.
+- `isWizardMode` is the logical inverse of `isNodeMode`.
+- `setNodeGraphMode` propagates to the derived stores.
+- `resetNodeGraphMode` returns to the default.
+- Type union guard: only `"wizard" | "node"` accepted.
+- No persistence across resets (P1.6.2.3 owns localStorage).
+
+**Gates.**
+
+- vitest: 100/100 pass (7 new + 93 pre-existing across 6 test files).
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --tests -- -D warnings` clean.
+
+**Honest flags.**
+
+- The mount is invisible until P1.6.2.3 lands the toggle UI. In the meantime, `$isNodeMode` is always false (no toggle exists yet to set it true), so the sidebar snippet returns nothing and the workspace renders as before. This is the intended slice ordering: P1.6.2.2 ships the wiring skeleton so P1.6.2.3 can drop the toggle in without further changes to ProcessWorkspace.
+- No persistence. Reloading the page returns to Wizard mode.
+- The component-layer changes (ProcessWorkspace + WorkspaceScreen) are not directly unit-tested (no Svelte test harness in the project). Manual smoke pass required to confirm the sidebar layout works in dev.
+
 ### Slice P1.6.2.1: CR-10 `NodePalette.svelte` skeleton + IPC
 
 **Scope.** Renders the palette grouped by the seven engine categories (Input / Calibration / Calibration-Free / Stacking / Stretch / Refinement / Output) defined in `AstroForge_Spec_v1.4.0.md §7.7.3`. Adds one new Svelte component (`src/components/NodePalette.svelte`), one shared logic module (`src/lib/node-palette-logic.ts`), and 27 vitest tests pinning the 12-to-7 group mapping, search filter, and root-class composition.

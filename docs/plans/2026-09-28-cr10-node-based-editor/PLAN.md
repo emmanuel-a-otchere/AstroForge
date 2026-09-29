@@ -1,7 +1,7 @@
 # CR-10 Implementation Plan: Node-Based Editor
 
 **Date:** 2026-09-28
-**Status:** Proposed (docs-only slice landed; P1 onwards pending)
+**Status:** Proposed (P0 docs-only slice + P1.6.1.1 + P1.6.1.2 + P1.6.1.3 all shipped; P1.6.2 onwards pending)
 **Source CR:** [`../../CR-10-NODE-BASED-EDITOR.md`](../../CR-10-NODE-BASED-EDITOR.md)
 **Spec carrier:** [`../../specs/AstroForge_Spec_v1.4.0.md`](../../specs/AstroForge_Spec_v1.4.0.md) §7.7 + Delta from 1.4.0
 **Strategy:** P0 docs-only (this PR), then four sub-milestones (1.6.1 through 1.6.4) decomposed into one-task-per-IPC slices per Decision D-CR-10-10. Each slice is one PR-sized tranche; each tranche is independently reviewable and CI-green before the next starts.
@@ -100,7 +100,7 @@ Files touched:
 
 #### P1.6.1.3: Tauri command surface for read-only access
 
-Status: ✅ Shipped (PR #412, commit TBD; lands in CR-10 Slice P1.6.1.3).
+Status: ✅ Shipped (PR #412, commit 3fd01eb; lands in CR-10 Slice P1.6.1.3).
 
 Goal: expose `get_node_catalog` to the frontend so the palette can render.
 
@@ -124,6 +124,8 @@ Goal: ship the NodePalette component + extend `NodeSidebar.svelte` for the const
 
 #### P1.6.2.1: `NodePalette.svelte` skeleton + IPC
 
+Status: ✅ Shipped (PR #413, commit TBD; lands in CR-10 Slice P1.6.2.1).
+
 Goal: render the palette grouped by the six engine categories.
 
 Implementation:
@@ -136,6 +138,28 @@ Implementation:
 Files touched:
 
 - `src/components/NodePalette.svelte` (new)
+
+**Slice detail.** Seven palette groups (PLAN's "six" is a typo; spec §7.7.3 lists seven). The 12 user-facing stages map to the groups per spec §7.7.3:
+
+- **Input**: `ingest`
+- **Calibration**: `crop_rotate`, `background_extraction`
+- **Calibration-Free**: `color_calibration`, `color_wb`, `color_scnr`
+- **Stacking**: (empty at user-facing layer: stack + register happen inside Calibration)
+- **Stretch**: `stretch`
+- **Refinement**: `sharpen_deconvolution`, `denoise`, `star_handling`, `creative_polish`
+- **Output**: `export`
+
+Canonical-only stages (`stack`, `register`, `debayer`, `background`, `color`, `detail`) are filtered out of the palette because they are not user-facing.
+
+**Logic extracted to `src/lib/node-palette-logic.ts`.** The 12→7 mapping + descriptions + order + search filter + root-class composition live in a pure module so the 27 vitest tests can pin the contract without booting Svelte in jsdom. The `.svelte` component only renders the derived state.
+
+**AI badge.** Each entry with `ai_uses_ai === true` renders an "AI" pill on the right of the label (denoise + star_handling + creative_polish + sharpen_deconvolution). Style uses the existing `--tertiary-container` CSS variable.
+
+**Search field.** Case-insensitive substring match against `label`, `description`, and `stage_type`. Whitespace-only search is treated as empty.
+
+**Stub click handler.** `onSelect` callback fires with the `NodeCatalogEntry`. Default stub logs to the console so the click is visible during dev; the actual insert IPC lands in P1.6.2.4 (insert_stage) / P1.6.3.1 (update_graph) / P1.6.4.1 (graph_to_recipe).
+
+**Tests.** 27 new vitest tests in `src/lib/__tests__/node-palette-slice-p-1-6-2-1.test.ts`. Total vitest: 93/93 pass.
 
 #### P1.6.2.2: Palette mount + search field wiring
 

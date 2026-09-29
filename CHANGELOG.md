@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+### Slice P1.6.2.1: CR-10 `NodePalette.svelte` skeleton + IPC
+
+**Scope.** Renders the palette grouped by the seven engine categories (Input / Calibration / Calibration-Free / Stacking / Stretch / Refinement / Output) defined in `AstroForge_Spec_v1.4.0.md §7.7.3`. Adds one new Svelte component (`src/components/NodePalette.svelte`), one shared logic module (`src/lib/node-palette-logic.ts`), and 27 vitest tests pinning the 12-to-7 group mapping, search filter, and root-class composition.
+
+**Component.** `src/components/NodePalette.svelte`:
+
+- Reads the canonical NodeCatalog from the P1.6.1.3 TS bridge (`loadNodeCatalog` / `getCachedNodeCatalog`).
+- Renders the seven groups in spec order; each group is collapsible with a caret + label + entry count badge.
+- Search field at the top: case-insensitive substring match against `label`, `description`, and `stage_type`.
+- Click-to-insert: `onSelect` callback fires with the `NodeCatalogEntry`. Default stub logs the selection to the console so the click is visible during dev. The actual insert IPC lands in P1.6.2.4 (insert_stage) / P1.6.3.1 (update_graph) / P1.6.4.1 (graph_to_recipe).
+- AI badge on entries with `ai_uses_ai === true` (denoise + star_handling + creative_polish + sharpen_deconvolution).
+- Hover tooltip on each entry = the catalog `description` (visible during dev).
+- `disabled` prop fades the palette + disables clicks; useful for "loading" + "session in read-only mode" states.
+- Empty-browser-mode fallback message guides the user to open the AstroForge Tauri shell.
+
+**Logic module.** `src/lib/node-palette-logic.ts`:
+
+- `PALETTE_GROUP_ORDER`: the seven group names in display order.
+- `USER_FACING_STAGE_TO_GROUP`: 12 user-facing stages mapped to their groups. Canonical-only stages (`stack`, `register`, `debayer`, `background`, `color`, `detail`) are intentionally omitted: they are not user-facing.
+- `PALETTE_GROUP_DESCRIPTIONS`: one-line description per group.
+- `PALETTE_GROUP_EMPTY_MESSAGES`: custom empty-state text per group. `Stacking` gets the specific "handled automatically upstream" message.
+- `groupEntriesByPalette(catalog, search)`: returns a `Map<GroupName, NodeCatalogEntry[]>` with all seven groups keyed.
+- `countPaletteEntries(catalog)`: total entries with a group mapping.
+- `paletteRootClassName(userClass, disabled)`: composes the root element's class string (testable in isolation).
+
+**Tests.** `src/lib/__tests__/node-palette-slice-p-1-6-2-1.test.ts` (27 tests):
+
+- Group order: 7 groups in the spec §7.7.3 order.
+- 12-to-7 mapping: every user-facing stage maps to exactly one group; each group's expected stages.
+- Group descriptions: every group has a non-empty description.
+- Empty messages: `Stacking` has its custom message.
+- `groupEntriesByPalette`: all 7 groups present in the result, every entry in the right group, label / description / stage_type substring filters, canonical-only stages dropped, no-match search returns empty arrays for every group, whitespace-only search treated as empty.
+- `countPaletteEntries`: 12 for sample catalog, canonical-only excluded, 0 for empty catalog.
+- `paletteRootClassName`: base + user class + disabled composition.
+
+**Gates.**
+
+- vitest: 93/93 pass (27 new + 66 pre-existing across 5 test files).
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --tests -- -D warnings` clean.
+
+**Slice deviations from PLAN.md.**
+
+- PLAN says "Six collapsible groups" but lists seven names. PLAN is corrected to seven.
+- PLAN listed `src/components/NodePalette.svelte` as the only new file. The slice also adds `src/lib/node-palette-logic.ts` (extracted for testability) and the vitest test file.
+- Click handler: PLAN says "logs the selected type". The slice goes one step further with an `onSelect` callback that callers can wire to the future insert IPC. The default behavior is still a console log, so the PLAN contract is preserved.
+
+**Honest flags.**
+
+- The component is not yet mounted anywhere; mounting + search wiring lands in P1.6.2.2.
+- The click handler is a stub; the actual graph mutation IPC lands in P1.6.2.4 / P1.6.3.1 / P1.6.4.1.
+- The component is tested at the logic-module level (27 tests). Component-level rendering (e.g. clicking a header flips the caret) requires either Svelte's test harness (not installed) or a manual smoke pass. The component itself uses Svelte 4 reactivity patterns that match the existing `NodeSidebar.svelte`.
+
 ### Slice P1.6.1.3: CR-10 Tauri command surface for read-only catalog access
 
 **Scope.** Wires the NodeCatalog (P1.6.1.2) into the Tauri IPC bridge + provides a typed TS bridge for the palette / constrained layout / free-form canvas (P1.6.2.x onwards). The slice adds one Rust Tauri command (`read_node_catalog`) + one TS bridge module (`src/lib/node-catalog.ts`) + 12 vitest tests.

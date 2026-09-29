@@ -79,6 +79,8 @@ Decision: hand-roll a small SVG helper. ADR-0018 records the decision. Benchmark
 
 #### P1.6.1.2: NodeCatalog data type + generated manifest
 
+Status: ✅ Shipped (PR #411, commit TBD; lands in CR-10 Slice P1.6.1.2).
+
 Goal: introduce `NodeCatalog` as a first-class Rust type and emit the tooltip manifest at build time.
 
 Implementation:
@@ -98,6 +100,8 @@ Files touched:
 
 #### P1.6.1.3: Tauri command surface for read-only access
 
+Status: ✅ Shipped (PR #412, commit TBD; lands in CR-10 Slice P1.6.1.3).
+
 Goal: expose `get_node_catalog` to the frontend so the palette can render.
 
 Implementation:
@@ -111,6 +115,8 @@ Files touched:
 - `src-tauri/src/commands_node_graph.rs` (new)
 - `src-tauri/src/main.rs` (register command)
 - `src/lib/astroforge-api.ts` (wrapper)
+
+**Slice deviation note.** The slice landed with the command colocated in `src-tauri/src/main.rs` (next to the other recipe catalog handlers) rather than as a new `commands_node_graph.rs` module. Rationale: one file is cheaper than a new module for a single read-only IPC; the `commands_node_graph.rs` module can split later when P1.6.2.x / P1.6.3.x add their own IPC handlers. The TS-side bridge landed in `src/lib/node-catalog.ts` rather than `astroforge-api.ts` because the catalog is a CR-10 surface (not a generic API extension) and deserves its own module.
 
 ### P1.6.2: Palette + Constrained Layout (4 slices)
 

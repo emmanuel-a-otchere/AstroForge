@@ -41,6 +41,7 @@ pub mod metric_registry;
 pub mod mvp_pipeline;
 pub mod narrowband;
 pub mod narrowband_image;
+pub mod node_catalog;
 pub mod orchestrator;
 pub mod pipeline;
 pub mod pipeline_plan;

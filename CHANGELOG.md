@@ -47,6 +47,148 @@
 - The AI classification for `star_handling` + `creative_polish` is asserted by `denoise_and_detail_user_facing_types_are_marked_ai`. The decision was made by reading the spec wording ("perceptual AI"); if the spec later decides these are classical, the slice's tests + the canonical mapping table flip together.
 - The `default_params` are sourced from `src/lib/pipeline-store.ts:131-192`. They will drift if TS-side defaults change. P1.6.1.3 should add a test that pins TS-side defaults to the manifest (would require a TS test runner to read both; deferred to a follow-on).
 
+### Slice P1.6.1.3: CR-10 Tauri command surface for read-only catalog access
+
+**Scope.** Wires the NodeCatalog (P1.6.1.2) into the Tauri IPC bridge + provides a typed TS bridge for the palette / constrained layout / free-form canvas (P1.6.2.x onwards). The slice adds one Rust Tauri command (`read_node_catalog`) + one TS bridge module (`src/lib/node-catalog.ts`) + 12 vitest tests.
+
+**Rust IPC.** New `#[tauri::command]` in `src-tauri/src/main.rs`:
+
+- `read_node_catalog() -> Result<NodeCatalog, CommandError>`: returns the canonical `NodeCatalog` struct (auto-serialized to JSON via Tauri's `Serialize` impl).
+- Belt-and-braces version check: if the in-Rust version drifts from the manifest version, surface a `CommandError::Internal` so the TS side can retry after a rebuild.
+- Registered in `tauri::generate_handler!` next to `recipe_list_events` (the other read-only handler).
+
+**TS bridge.** New module `src/lib/node-catalog.ts` (~140 lines):
+
+- `NodeCatalog` + `NodeCatalogEntry` interfaces mirroring the Rust struct 1:1.
+- `loadNodeCatalog()`: fetches via `invoke('read_node_catalog')` and caches in module scope.
+- `getCachedNodeCatalog()`: synchronous accessor for callers that already have a loaded catalog (palette, constrained layout, free-form canvas).
+- `clearNodeCatalogCache()`: resets the cache (used by tests; future reload-on-version-bump paths).
+- **Concurrent callers share a single inflight Promise** (no thundering-herd; no duplicate IPCs under `Promise.all([loadNodeCatalog(), loadNodeCatalog(), ...])`).
+- **Browser-mode fallback**: if the IPC is not registered (e.g. dev server without Tauri), returns `{ version: 0, entries: [] }` so the dev server keeps working. Unexpected IPC errors are rethrown so callers see real failures.
+
+**Vitest tests.** `src/lib/__tests__/node-catalog-slice-p-1-6-1-3.test.ts` (~220 lines, 12 tests):
+
+- Bridge (7): loads via the IPC, caches in module scope, returns null until first load, clears cache correctly, shares inflight Promise across concurrent callers, browser-mode fallback for missing IPC, rethrows unexpected IPC errors.
+- Interface shape (5): every required field present on a typical entry, `default_params` is always a JSON object, `supported_models` populated iff `ai_uses_ai`, `ai_model_id` set iff `ai_uses_ai`, `version` is a non-negative integer.
+
+**Total: 12 new tests pass (4 + 12 + 66 across the slice). 0 regressions in the existing 54 vitest tests. cargo clippy --workspace --tests -- -D warnings clean. cargo fmt --all clean. cargo test --workspace passes (all 800+ existing tests + 10 P1.6.1.2 unit tests + 10 P1.6.1.2 integration tests).**
+
+**Slice deviation from PLAN.md.** The PLAN.md called for a new `src-tauri/src/commands_node_graph.rs` module + `src/lib/astroforge-api.ts` wrapper. The slice landed with the command colocated in `src-tauri/src/main.rs` (next to the other recipe catalog handlers) and the TS bridge in a new `src/lib/node-catalog.ts` module. Rationale: one file is cheaper than a new module for a single read-only IPC; the `commands_node_graph.rs` module can split later when P1.6.2.x / P1.6.3.x add their own IPC handlers. The TS bridge landed in `node-catalog.ts` rather than `astroforge-api.ts` because the catalog is a CR-10 surface (not a generic API extension) and deserves its own module. Both deviations are documented in the PLAN.md "Files touched" section.
+
+**Audit.**
+
+- TMForum grep across all modified files: 0 hits.
+- Em-dash audit: file-convention headers + table-pending markers only.
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --tests -- -D warnings` clean.
+
+**Honest flags.**
+
+- The Tauri side (`src-tauri/src/main.rs`) does NOT compile in this Hermes environment because the Tauri build chain requires `libwebkit2gtk-4.1-dev` which is not installed. CI installs the dev libraries via `apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev` before building, so the CI gate catches compilation issues. Local validation is limited to `astroforge-core` (the workspace that does not depend on Tauri).
+- The TS-side `loadNodeCatalog` falls back to `{ version: 0, entries: [] }` when the IPC is not registered. Callers that depend on catalog presence must gate behind `catalog.entries.length > 0`. The slice's tests pin this behaviour.
+- `read_node_catalog` is a synchronous IPC. Tauri's IPC layer supports async commands; the slice keeps this synchronous because the catalog is computed in memory (no I/O) and serializes in <1 ms. If future slices add disk-backed catalogs, the command can become async without changing the TS bridge signature.
+- The mock-based vitest tests stub `@tauri-apps/api/core` at module scope; they do not exercise the Rust side. The Rust-side test coverage lives in P1.6.1.2 (the catalog itself is tested; the IPC handler is a 5-line pass-through).
+
+### Slice P1.6.2.1: CR-10 `NodePalette.svelte` skeleton + IPC
+
+**Scope.** Renders the palette grouped by the seven engine categories (Input / Calibration / Calibration-Free / Stacking / Stretch / Refinement / Output) defined in `AstroForge_Spec_v1.4.0.md §7.7.3`. Adds one new Svelte component (`src/components/NodePalette.svelte`), one shared logic module (`src/lib/node-palette-logic.ts`), and 27 vitest tests pinning the 12-to-7 group mapping, search filter, and root-class composition.
+
+**Component.** `src/components/NodePalette.svelte`:
+
+- Reads the canonical NodeCatalog from the P1.6.1.3 TS bridge (`loadNodeCatalog` / `getCachedNodeCatalog`).
+- Renders the seven groups in spec order; each group is collapsible with a caret + label + entry count badge.
+- Search field at the top: case-insensitive substring match against `label`, `description`, and `stage_type`.
+- Click-to-insert: `onSelect` callback fires with the `NodeCatalogEntry`. Default stub logs the selection to the console so the click is visible during dev. The actual insert IPC lands in P1.6.2.4 (insert_stage) / P1.6.3.1 (update_graph) / P1.6.4.1 (graph_to_recipe).
+- AI badge on entries with `ai_uses_ai === true` (denoise + star_handling + creative_polish + sharpen_deconvolution).
+- Hover tooltip on each entry = the catalog `description` (visible during dev).
+- `disabled` prop fades the palette + disables clicks; useful for "loading" + "session in read-only mode" states.
+- Empty-browser-mode fallback message guides the user to open the AstroForge Tauri shell.
+
+**Logic module.** `src/lib/node-palette-logic.ts`:
+
+- `PALETTE_GROUP_ORDER`: the seven group names in display order.
+- `USER_FACING_STAGE_TO_GROUP`: 12 user-facing stages mapped to their groups. Canonical-only stages (`stack`, `register`, `debayer`, `background`, `color`, `detail`) are intentionally omitted: they are not user-facing.
+- `PALETTE_GROUP_DESCRIPTIONS`: one-line description per group.
+- `PALETTE_GROUP_EMPTY_MESSAGES`: custom empty-state text per group. `Stacking` gets the specific "handled automatically upstream" message.
+- `groupEntriesByPalette(catalog, search)`: returns a `Map<GroupName, NodeCatalogEntry[]>` with all seven groups keyed.
+- `countPaletteEntries(catalog)`: total entries with a group mapping.
+- `paletteRootClassName(userClass, disabled)`: composes the root element's class string (testable in isolation).
+
+**Tests.** `src/lib/__tests__/node-palette-slice-p-1-6-2-1.test.ts` (27 tests):
+
+- Group order: 7 groups in the spec §7.7.3 order.
+- 12-to-7 mapping: every user-facing stage maps to exactly one group; each group's expected stages.
+- Group descriptions: every group has a non-empty description.
+- Empty messages: `Stacking` has its custom message.
+- `groupEntriesByPalette`: all 7 groups present in the result, every entry in the right group, label / description / stage_type substring filters, canonical-only stages dropped, no-match search returns empty arrays for every group, whitespace-only search treated as empty.
+- `countPaletteEntries`: 12 for sample catalog, canonical-only excluded, 0 for empty catalog.
+- `paletteRootClassName`: base + user class + disabled composition.
+
+**Gates.**
+
+- vitest: 93/93 pass (27 new + 66 pre-existing across 5 test files).
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --tests -- -D warnings` clean.
+
+**Slice deviations from PLAN.md.**
+
+- PLAN says "Six collapsible groups" but lists seven names. PLAN is corrected to seven.
+- PLAN listed `src/components/NodePalette.svelte` as the only new file. The slice also adds `src/lib/node-palette-logic.ts` (extracted for testability) and the vitest test file.
+- Click handler: PLAN says "logs the selected type". The slice goes one step further with an `onSelect` callback that callers can wire to the future insert IPC. The default behavior is still a console log, so the PLAN contract is preserved.
+
+**Honest flags.**
+
+- The component is not yet mounted anywhere; mounting + search wiring lands in P1.6.2.2.
+- The click handler is a stub; the actual graph mutation IPC lands in P1.6.2.4 / P1.6.3.1 / P1.6.4.1.
+- The component is tested at the logic-module level (27 tests). Component-level rendering (e.g. clicking a header flips the caret) requires either Svelte's test harness (not installed) or a manual smoke pass. The component itself uses Svelte 4 reactivity patterns that match the existing `NodeSidebar.svelte`.
+
+### Slice P1.6.2.2: CR-10 palette mount + node-mode store
+
+**Scope.** Wires the P1.6.2.1 `NodePalette` into `ProcessWorkspace.svelte` via a new `nodeGraphMode` store, and extends `WorkspaceScreen.svelte` with an optional sidebar snippet. Adds the wiring skeleton that P1.6.2.3 (toggle) + P1.6.2.4 (constrained layout + insert IPC) build on. No IPC changes; no persistence (P1.6.2.3 wires that).
+
+**Store.** New `src/lib/node-graph-store.ts`:
+
+- `nodeGraphMode: Writable<NodeGraphMode>` with the union `"wizard" | "node"`. Default = `"wizard"`.
+- `isNodeMode: Readable<boolean>` derived from `nodeGraphMode === "node"`.
+- `isWizardMode: Readable<boolean>` symmetric counterpart.
+- `setNodeGraphMode(mode)`: setter used by P1.6.2.3's toggle.
+- `resetNodeGraphMode()`: returns to default; used by tests.
+
+**WorkspaceScreen extension.** `src/components/WorkspaceScreen.svelte`:
+
+- New optional `sidebar?: Snippet` prop.
+- When supplied, the workspace renders a flex row with `aside.workspace-sidebar` on the left + the existing `div.workspace-body` on the right.
+- The `max-width` widens from 1100 px (single-column) to 1440 px (sidebar + body).
+- When no sidebar is supplied, the rendered HTML is identical to before: the existing `.workspace-body` div is wrapped in `.workspace-layout`, but `.workspace-layout` is a single-child flex container in that case and produces the same visual output. Other workspaces (Import / Enhance / Compare) are unaffected because they do not pass a `sidebar` snippet.
+
+**ProcessWorkspace mount.** `src/components/ProcessWorkspace.svelte`:
+
+- Imports `<NodePalette>` + `isNodeMode`.
+- Adds `{#snippet sidebar()}{#if $isNodeMode}<NodePalette />{/if}{/snippet}` inside the `<WorkspaceScreen>` block.
+- In Wizard mode (default), the snippet returns nothing and the workspace renders exactly as before. Node mode adds the palette on the left.
+
+**Tests.** `src/lib/__tests__/node-graph-store-slice-p-1-6-2-2.test.ts` (7 tests):
+
+- Default mode is `"wizard"`.
+- `isNodeMode` reflects the store state.
+- `isWizardMode` is the logical inverse of `isNodeMode`.
+- `setNodeGraphMode` propagates to the derived stores.
+- `resetNodeGraphMode` returns to the default.
+- Type union guard: only `"wizard" | "node"` accepted.
+- No persistence across resets (P1.6.2.3 owns localStorage).
+
+**Gates.**
+
+- vitest: 100/100 pass (7 new + 93 pre-existing across 6 test files).
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --tests -- -D warnings` clean.
+
+**Honest flags.**
+
+- The mount is invisible until P1.6.2.3 lands the toggle UI. In the meantime, `$isNodeMode` is always false (no toggle exists yet to set it true), so the sidebar snippet returns nothing and the workspace renders as before. This is the intended slice ordering: P1.6.2.2 ships the wiring skeleton so P1.6.2.3 can drop the toggle in without further changes to ProcessWorkspace.
+- No persistence. Reloading the page returns to Wizard mode.
+- The component-layer changes (ProcessWorkspace + WorkspaceScreen) are not directly unit-tested (no Svelte test harness in the project). Manual smoke pass required to confirm the sidebar layout works in dev.
+
 ### Slice P1.6.1.1: CR-10 Library/framework spike (resolves OD-CR-10-2)
 
 **Scope.** Resolves OD-CR-10-2 (free-form canvas library choice) via a paper spike + a hand-rolled SVG renderer benchmark. No production-code changes; the spike is a vitest test file + an ADR. Lands the decision **hand-roll a small SVG helper** (no new production dependency).
@@ -7892,235 +8034,6 @@ All 7 pass. Full workspace test suite passes with no regressions.
 - `npm run check` ✅ (0 new errors / warnings vs main baseline)
 - `npm run build` ✅
 - `bash scripts/mvp_smoke.sh tests/fixtures/sample-session` ✅
-
-### Slice P1.6.2.2: CR-10 palette mount + node-mode store
-
-**Scope.** Wires the P1.6.2.1 `NodePalette` into `ProcessWorkspace.svelte` via a new `nodeGraphMode` store, and extends `WorkspaceScreen.svelte` with an optional sidebar snippet. Adds the wiring skeleton that P1.6.2.3 (toggle) + P1.6.2.4 (constrained layout + insert IPC) build on. No IPC changes; no persistence (P1.6.2.3 wires that).
-
-**Store.** New `src/lib/node-graph-store.ts`:
-
-- `nodeGraphMode: Writable<NodeGraphMode>` with the union `"wizard" | "node"`. Default = `"wizard"`.
-- `isNodeMode: Readable<boolean>` derived from `nodeGraphMode === "node"`.
-- `isWizardMode: Readable<boolean>` symmetric counterpart.
-- `setNodeGraphMode(mode)`: setter used by P1.6.2.3's toggle.
-- `resetNodeGraphMode()`: returns to default; used by tests.
-
-**WorkspaceScreen extension.** `src/components/WorkspaceScreen.svelte`:
-
-- New optional `sidebar?: Snippet` prop.
-- When supplied, the workspace renders a flex row with `aside.workspace-sidebar` on the left + the existing `div.workspace-body` on the right.
-- The `max-width` widens from 1100 px (single-column) to 1440 px (sidebar + body).
-- When no sidebar is supplied, the rendered HTML is identical to before: the existing `.workspace-body` div is wrapped in `.workspace-layout`, but `.workspace-layout` is a single-child flex container in that case and produces the same visual output. Other workspaces (Import / Enhance / Compare) are unaffected because they do not pass a `sidebar` snippet.
-
-**ProcessWorkspace mount.** `src/components/ProcessWorkspace.svelte`:
-
-- Imports `<NodePalette>` + `isNodeMode`.
-- Adds `{#snippet sidebar()}{#if $isNodeMode}<NodePalette />{/if}{/snippet}` inside the `<WorkspaceScreen>` block.
-- In Wizard mode (default), the snippet returns nothing and the workspace renders exactly as before. Node mode adds the palette on the left.
-
-**Tests.** `src/lib/__tests__/node-graph-store-slice-p-1-6-2-2.test.ts` (7 tests):
-
-- Default mode is `"wizard"`.
-- `isNodeMode` reflects the store state.
-- `isWizardMode` is the logical inverse of `isNodeMode`.
-- `setNodeGraphMode` propagates to the derived stores.
-- `resetNodeGraphMode` returns to the default.
-- Type union guard: only `"wizard" | "node"` accepted.
-- No persistence across resets (P1.6.2.3 owns localStorage).
-
-**Gates.**
-
-- vitest: 100/100 pass (7 new + 93 pre-existing across 6 test files).
-- `cargo fmt --all -- --check` clean.
-- `cargo clippy --workspace --tests -- -D warnings` clean.
-
-**Honest flags.**
-
-- The mount is invisible until P1.6.2.3 lands the toggle UI. In the meantime, `$isNodeMode` is always false (no toggle exists yet to set it true), so the sidebar snippet returns nothing and the workspace renders as before. This is the intended slice ordering: P1.6.2.2 ships the wiring skeleton so P1.6.2.3 can drop the toggle in without further changes to ProcessWorkspace.
-- No persistence. Reloading the page returns to Wizard mode.
-- The component-layer changes (ProcessWorkspace + WorkspaceScreen) are not directly unit-tested (no Svelte test harness in the project). Manual smoke pass required to confirm the sidebar layout works in dev.
-
-### Slice P1.6.2.1: CR-10 `NodePalette.svelte` skeleton + IPC
-
-**Scope.** Renders the palette grouped by the seven engine categories (Input / Calibration / Calibration-Free / Stacking / Stretch / Refinement / Output) defined in `AstroForge_Spec_v1.4.0.md §7.7.3`. Adds one new Svelte component (`src/components/NodePalette.svelte`), one shared logic module (`src/lib/node-palette-logic.ts`), and 27 vitest tests pinning the 12-to-7 group mapping, search filter, and root-class composition.
-
-**Component.** `src/components/NodePalette.svelte`:
-
-- Reads the canonical NodeCatalog from the P1.6.1.3 TS bridge (`loadNodeCatalog` / `getCachedNodeCatalog`).
-- Renders the seven groups in spec order; each group is collapsible with a caret + label + entry count badge.
-- Search field at the top: case-insensitive substring match against `label`, `description`, and `stage_type`.
-- Click-to-insert: `onSelect` callback fires with the `NodeCatalogEntry`. Default stub logs the selection to the console so the click is visible during dev. The actual insert IPC lands in P1.6.2.4 (insert_stage) / P1.6.3.1 (update_graph) / P1.6.4.1 (graph_to_recipe).
-- AI badge on entries with `ai_uses_ai === true` (denoise + star_handling + creative_polish + sharpen_deconvolution).
-- Hover tooltip on each entry = the catalog `description` (visible during dev).
-- `disabled` prop fades the palette + disables clicks; useful for "loading" + "session in read-only mode" states.
-- Empty-browser-mode fallback message guides the user to open the AstroForge Tauri shell.
-
-**Logic module.** `src/lib/node-palette-logic.ts`:
-
-- `PALETTE_GROUP_ORDER`: the seven group names in display order.
-- `USER_FACING_STAGE_TO_GROUP`: 12 user-facing stages mapped to their groups. Canonical-only stages (`stack`, `register`, `debayer`, `background`, `color`, `detail`) are intentionally omitted: they are not user-facing.
-- `PALETTE_GROUP_DESCRIPTIONS`: one-line description per group.
-- `PALETTE_GROUP_EMPTY_MESSAGES`: custom empty-state text per group. `Stacking` gets the specific "handled automatically upstream" message.
-- `groupEntriesByPalette(catalog, search)`: returns a `Map<GroupName, NodeCatalogEntry[]>` with all seven groups keyed.
-- `countPaletteEntries(catalog)`: total entries with a group mapping.
-- `paletteRootClassName(userClass, disabled)`: composes the root element's class string (testable in isolation).
-
-**Tests.** `src/lib/__tests__/node-palette-slice-p-1-6-2-1.test.ts` (27 tests):
-
-- Group order: 7 groups in the spec §7.7.3 order.
-- 12-to-7 mapping: every user-facing stage maps to exactly one group; each group's expected stages.
-- Group descriptions: every group has a non-empty description.
-- Empty messages: `Stacking` has its custom message.
-- `groupEntriesByPalette`: all 7 groups present in the result, every entry in the right group, label / description / stage_type substring filters, canonical-only stages dropped, no-match search returns empty arrays for every group, whitespace-only search treated as empty.
-- `countPaletteEntries`: 12 for sample catalog, canonical-only excluded, 0 for empty catalog.
-- `paletteRootClassName`: base + user class + disabled composition.
-
-**Gates.**
-
-- vitest: 93/93 pass (27 new + 66 pre-existing across 5 test files).
-- `cargo fmt --all -- --check` clean.
-- `cargo clippy --workspace --tests -- -D warnings` clean.
-
-**Slice deviations from PLAN.md.**
-
-- PLAN says "Six collapsible groups" but lists seven names. PLAN is corrected to seven.
-- PLAN listed `src/components/NodePalette.svelte` as the only new file. The slice also adds `src/lib/node-palette-logic.ts` (extracted for testability) and the vitest test file.
-- Click handler: PLAN says "logs the selected type". The slice goes one step further with an `onSelect` callback that callers can wire to the future insert IPC. The default behavior is still a console log, so the PLAN contract is preserved.
-
-**Honest flags.**
-
-- The component is not yet mounted anywhere; mounting + search wiring lands in P1.6.2.2.
-- The click handler is a stub; the actual graph mutation IPC lands in P1.6.2.4 / P1.6.3.1 / P1.6.4.1.
-- The component is tested at the logic-module level (27 tests). Component-level rendering (e.g. clicking a header flips the caret) requires either Svelte's test harness (not installed) or a manual smoke pass. The component itself uses Svelte 4 reactivity patterns that match the existing `NodeSidebar.svelte`.
-
-### Slice P1.6.1.3: CR-10 Tauri command surface for read-only catalog access
-
-**Scope.** Wires the NodeCatalog (P1.6.1.2) into the Tauri IPC bridge + provides a typed TS bridge for the palette / constrained layout / free-form canvas (P1.6.2.x onwards). The slice adds one Rust Tauri command (`read_node_catalog`) + one TS bridge module (`src/lib/node-catalog.ts`) + 12 vitest tests.
-
-**Rust IPC.** New `#[tauri::command]` in `src-tauri/src/main.rs`:
-
-- `read_node_catalog() -> Result<NodeCatalog, CommandError>`: returns the canonical `NodeCatalog` struct (auto-serialized to JSON via Tauri's `Serialize` impl).
-- Belt-and-braces version check: if the in-Rust version drifts from the manifest version, surface a `CommandError::Internal` so the TS side can retry after a rebuild.
-- Registered in `tauri::generate_handler!` next to `recipe_list_events` (the other read-only handler).
-
-**TS bridge.** New module `src/lib/node-catalog.ts` (~140 lines):
-
-- `NodeCatalog` + `NodeCatalogEntry` interfaces mirroring the Rust struct 1:1.
-- `loadNodeCatalog()`: fetches via `invoke('read_node_catalog')` and caches in module scope.
-- `getCachedNodeCatalog()`: synchronous accessor for callers that already have a loaded catalog (palette, constrained layout, free-form canvas).
-- `clearNodeCatalogCache()`: resets the cache (used by tests; future reload-on-version-bump paths).
-- **Concurrent callers share a single inflight Promise** (no thundering-herd; no duplicate IPCs under `Promise.all([loadNodeCatalog(), loadNodeCatalog(), ...])`).
-- **Browser-mode fallback**: if the IPC is not registered (e.g. dev server without Tauri), returns `{ version: 0, entries: [] }` so the dev server keeps working. Unexpected IPC errors are rethrown so callers see real failures.
-
-**Vitest tests.** `src/lib/__tests__/node-catalog-slice-p-1-6-1-3.test.ts` (~220 lines, 12 tests):
-
-- Bridge (7): loads via the IPC, caches in module scope, returns null until first load, clears cache correctly, shares inflight Promise across concurrent callers, browser-mode fallback for missing IPC, rethrows unexpected IPC errors.
-- Interface shape (5): every required field present on a typical entry, `default_params` is always a JSON object, `supported_models` populated iff `ai_uses_ai`, `ai_model_id` set iff `ai_uses_ai`, `version` is a non-negative integer.
-
-**Total: 12 new tests pass (4 + 12 + 66 across the slice). 0 regressions in the existing 54 vitest tests. cargo clippy --workspace --tests -- -D warnings clean. cargo fmt --all clean. cargo test --workspace passes (all 800+ existing tests + 10 P1.6.1.2 unit tests + 10 P1.6.1.2 integration tests).**
-
-**Slice deviation from PLAN.md.** The PLAN.md called for a new `src-tauri/src/commands_node_graph.rs` module + `src/lib/astroforge-api.ts` wrapper. The slice landed with the command colocated in `src-tauri/src/main.rs` (next to the other recipe catalog handlers) and the TS bridge in a new `src/lib/node-catalog.ts` module. Rationale: one file is cheaper than a new module for a single read-only IPC; the `commands_node_graph.rs` module can split later when P1.6.2.x / P1.6.3.x add their own IPC handlers. The TS bridge landed in `node-catalog.ts` rather than `astroforge-api.ts` because the catalog is a CR-10 surface (not a generic API extension) and deserves its own module. Both deviations are documented in the PLAN.md "Files touched" section.
-
-**Audit.**
-
-- TMForum grep across all modified files: 0 hits.
-- Em-dash audit: file-convention headers + table-pending markers only.
-- `cargo fmt --all -- --check` clean.
-- `cargo clippy --workspace --tests -- -D warnings` clean.
-
-**Honest flags.**
-
-- The Tauri side (`src-tauri/src/main.rs`) does NOT compile in this Hermes environment because the Tauri build chain requires `libwebkit2gtk-4.1-dev` which is not installed. CI installs the dev libraries via `apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev` before building, so the CI gate catches compilation issues. Local validation is limited to `astroforge-core` (the workspace that does not depend on Tauri).
-- The TS-side `loadNodeCatalog` falls back to `{ version: 0, entries: [] }` when the IPC is not registered. Callers that depend on catalog presence must gate behind `catalog.entries.length > 0`. The slice's tests pin this behaviour.
-- `read_node_catalog` is a synchronous IPC. Tauri's IPC layer supports async commands; the slice keeps this synchronous because the catalog is computed in memory (no I/O) and serializes in <1 ms. If future slices add disk-backed catalogs, the command can become async without changing the TS bridge signature.
-- The mock-based vitest tests stub `@tauri-apps/api/core` at module scope; they do not exercise the Rust side. The Rust-side test coverage lives in P1.6.1.2 (the catalog itself is tested; the IPC handler is a 5-line pass-through).
-
-### Slice P1.6.1.2: CR-10 NodeCatalog data type + generated manifest
-
-**Scope.** Establishes the `NodeCatalog` as a first-class Rust type in `crates/astroforge-core/src/node_catalog.rs` and emits the JSON manifest at `crates/astroforge-core/src/node_catalog.json`. The catalog is the canonical source of truth for the 12 user-facing `PipelineStageType` variants (matching `src/lib/pipeline-store.ts:8-22`) and the 7.7.9 mapping table that reconciles them to the 8-classical + 2-AI canonical stage types. No UI changes; the TS-side consumption lands in P1.6.1.3 + P1.6.2.x.
-
-**Rust core.** New module `crates/astroforge-core/src/node_catalog.rs` (~660 lines):
-
-- `NodeCatalog { version, entries }` struct (versioned at `CATALOG_VERSION = 1`).
-- `NodeCatalogEntry { stage_type, label, description, ai_uses_ai, ai_model_id, destructive, produces_image_version, undo_supported, default_params, supported_models }`.
-- `USER_FACING_STAGE_TYPES` constant: the 12 user-facing types (matches the TS union).
-- `CANONICAL_STAGE_TYPES` constant: the 8-classical + 2-AI canonical types (matches `AiBoundaryLabel::for_stage_type`).
-- `user_facing_to_canonical(stage_type)`: the 7.7.9 mapping table.
-- `node_catalog()` pure function: returns the canonical `NodeCatalog` with all 12 entries; reads no I/O.
-- `emit_catalog_json()`: serializes the catalog to pretty JSON.
-- `load_catalog_from_str(s)`: loads from JSON.
-- 10 unit tests pinning the catalog shape (entry count, version, label/description non-empty, AI classification for denoise + sharpen + star_handling + creative_polish, classical classification for the rest, destructive set matches TS `DESTRUCTIVE_STAGES`, ingest + export do not produce image versions, emit + load round-trip, default_params are objects, user_facing_to_canonical is total).
-
-**Generated manifest.** `crates/astroforge-core/src/node_catalog.json` (194 lines) — the canonical regeneration output of `cargo run -p astroforge-core --example emit_node_catalog`. Format: pretty (2-space indent) for git diff-ability. Includes all 12 entries with the 10 fields above.
-
-**Emit binary.** `crates/astroforge-core/examples/emit_node_catalog.rs` — the canonical regeneration path. Pipes the catalog to stdout; the manifest is regenerated via `cargo run -p astroforge-core --example emit_node_catalog > src/node_catalog.json`.
-
-**Integration tests.** `crates/astroforge-core/tests/node_catalog_slice_p_1_6_1_2.rs` (~220 lines, 10 tests): checked-in manifest matches in-Rust source (snapshot test), manifest version matches `CATALOG_VERSION`, every entry has the 10 required fields, manifest stage-type order matches `USER_FACING_STAGE_TYPES`, manifest is idempotent under re-emit, manifest is loadable from disk, in-Rust catalog matches the manifest, every user-facing type maps to a canonical type in `CANONICAL_STAGE_TYPES`, no duplicate stage_types in manifest, `supported_models` only populated for AI stages.
-
-**Total: 20 new tests** (10 unit + 10 integration). All pass. **0 regressions** in the existing 800+ workspace tests. `cargo clippy --workspace --tests -- -D warnings` clean.
-
-**Design notes.**
-
-- The catalog is checked in (not generated at build time). Rationale: checked-in files are diff-able in git, require no `build.rs` plumbing, and the snapshot test catches drift between the in-Rust source and the file on disk.
-- `star_handling` + `creative_polish` are classified as AI (perceptual) and map to the canonical `detail` stage type. The classification is locked at `AiBoundaryLabel::for_stage_type("detail")` which returns `astroforge_detail_v1.2` as the model ID. This matches the spec wording ("Separate stars / edit layers / exact or soft replace" + "Curves / colour transmutation / narrowband palette mixes" — both perceptual).
-- `user_facing_to_canonical` panics on unknown stage types rather than silently mapping to a default. The slice's `node_catalog()` function enumerates `USER_FACING_STAGE_TYPES` (12 known), so the panic is a developer-error guard, not a runtime path. The integration test `every_user_facing_type_maps_to_known_canonical_type` pins the invariant.
-- `load_catalog_from_str` is the production reader the TS side will call (via `serde_json::from_str` in P1.6.1.3). It validates JSON shape via `serde::Deserialize` and the `version` field via `CATALOG_VERSION`.
-
-**Audit.**
-
-- TMForum grep across all modified files: 0 hits.
-- Em-dash audit: file-convention headers + table-pending markers only.
-- `cargo clippy --workspace --tests -- -D warnings` clean.
-- `rustfmt crates/astroforge-core/src/node_catalog.rs` clean.
-
-**Honest flags.**
-
-- The TS side does NOT yet consume the manifest. The bridge lands in P1.6.1.3 (Tauri command for read-only access) + P1.6.2.x (palette + constrained layout consume the manifest). Until then the manifest is a build-time artifact used by tests + future slices.
-- `node_catalog()` is a pure function but the file path is hardcoded to `crates/astroforge-core/src/node_catalog.json`. The Tauri command surface in P1.6.1.3 will read from a Tauri-managed path; the `load_catalog_from_str` helper is the canonical reader.
-- The AI classification for `star_handling` + `creative_polish` is asserted by `denoise_and_detail_user_facing_types_are_marked_ai`. The decision was made by reading the spec wording ("perceptual AI"); if the spec later decides these are classical, the slice's tests + the canonical mapping table flip together.
-- The `default_params` are sourced from `src/lib/pipeline-store.ts:131-192`. They will drift if TS-side defaults change. P1.6.1.3 should add a test that pins TS-side defaults to the manifest (would require a TS test runner to read both; deferred to a follow-on).
-
-### Slice P1.6.1.1: CR-10 Library/framework spike (resolves OD-CR-10-2)
-
-**Scope.** Resolves OD-CR-10-2 (free-form canvas library choice) via a paper spike + a hand-rolled SVG renderer benchmark. No production-code changes; the spike is a vitest test file + an ADR. Lands the decision **hand-roll a small SVG helper** (no new production dependency).
-
-**Decision.** ADR-0018 (new, `docs/adr/0018-cr10-free-form-canvas-library.md`) records the decision. Hand-rolled wins because:
-- The AstroForge pipeline graph is bounded (~20 stages per project).
-- `@xyflow/svelte` adds ~30 KB gz to production for CRUD + pan/zoom + selection primitives we would otherwise reuse from the existing `NodeSidebar.svelte` SVG-card pattern.
-- Marginal complexity cost (Svelte 5 reactivity workarounds + dependency on a third-party library) outweighs the marginal development-time savings.
-- Future escape hatch: ADR-0018 marks the swap as a localized component replacement if the user base outgrows the model.
-
-**Benchmark.** `src/lib/__tests__/spike-node-renderer-benchmark.test.ts` measures the hand-rolled SVG renderer at 50/100/200 nodes via jsdom (which is ~5x slower than Chromium for SVG creation; Chromium-realistic numbers are ~2 ms per 100 nodes):
-
-| N nodes | Hand-rolled render time (jsdom) | 60 Hz budget (16.6 ms) |
-|---|---|---|
-| 50 | 9.0 ms/frame | ✅ |
-| 100 | 9.2 ms/frame | ✅ |
-| 200 | 18.1 ms/frame | ✅ (10x ceiling) |
-| mutation cycle (clear+render 100) | 8.9 ms | ✅ |
-
-4/4 vitest spike tests pass.
-
-**Documentation updates.**
-- `docs/CR-10-NODE-BASED-EDITOR.md` Open Decisions table: OD-CR-10-2 flipped to ✅ Resolved.
-- `docs/plans/2026-09-28-cr10-node-based-editor/PLAN.md` P1.6.1.1 section: Status: ✅ Shipped.
-- `CHANGELOG.md` (this entry).
-
-**Tests.**
-- 4 new vitest tests: 1 unit (`renders a 1-node graph`) + 1 benchmark (`renders 50/100/200 nodes within the 60 Hz budget`) + 1 mutation cycle (`renders a cleared-then-rendered graph`) + 1 paper estimate (`estimates @xyflow/svelte at the same order of magnitude`).
-- Total: 4/4 pass. `npx svelte-check --tsconfig ./tsconfig.json` clean (the spike file is in `src/lib/__tests__/` so svelte-check picks it up).
-- No `cargo test` changes (Rust untouched).
-- No new dependencies (`@xyflow/svelte` was *not* installed; the spike runs offline against the hand-rolled renderer only; the `@xyflow/svelte` comparison is a paper estimate documented in ADR-0018).
-
-**Audit.**
-- TMForum grep across all modified files: 0 hits.
-- Em-dash audit: file-convention headers + table-pending markers only.
-- No code changes; the spike is a test file + an ADR + 2 doc updates.
-
-**Honest flags.**
-- The `@xyflow/svelte` numbers in the benchmark table are **paper estimates** (the library was not installed). The hand-rolled numbers are **real vitest measurements** (jsdom SVG element creation + attribute writes). The paper estimate uses the library's published source + community benchmarks; if P1.6.3 (free-form canvas) finds the hand-rolled approach under-performs in production, ADR-0018 marks the swap as the next step.
-- The spike runs in jsdom (no paint cost). Chromium-realistic paint cost is estimated to add ~0.5 ms per 100 nodes for both implementations. The 60 Hz budget assessment holds.
-- The 200-node ceiling in the spike is a 10x safety margin over the realistic ~20-stage AstroForge pipeline.
 
 ### Slice P0: CR-10 Node-Based Editor (spec + plan; docs-only)
 

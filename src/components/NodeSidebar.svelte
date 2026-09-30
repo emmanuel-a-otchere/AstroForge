@@ -9,7 +9,67 @@
     type NodeStatus,
     type PipelineStageType,
   } from "../lib/pipeline-store";
+  import {
+    getCachedNodeCatalog,
+    loadNodeCatalog,
+    shortSummary,
+    type NodeCatalogEntry,
+  } from "../lib/node-catalog";
   import DestructiveConfirmDialog from "./DestructiveConfirmDialog.svelte";
+
+  // CR-10 P1.6.2.4 / Slice P1.6.2.4: per-node tooltip wiring.
+  // Hover tooltips on each node card surface the catalog's
+  // description for the stage_type, capped at the first 7
+  // words per the PLAN.md P1.6.2.4 spec ("Hover tooltip reads
+  // the first 3 to 7 words of description from the catalog").
+  // The catalog is loaded lazily on first mount; if the IPC
+  // is not registered (browser-mode dev server), the tooltip
+  // degrades gracefully to the node's own label.
+  let catalogByStageType: Map<string, NodeCatalogEntry> = new Map();
+  let catalogLoadAttempted = false;
+
+  // First mount: try the cache, then fall back to the IPC.
+  // Idempotent so subsequent palette mounts that have already
+  // populated the cache are a no-op.
+  async function ensureCatalogLoaded(): Promise<void> {
+    if (catalogLoadAttempted) return;
+    catalogLoadAttempted = true;
+    const cached = getCachedNodeCatalog();
+    if (cached !== null) {
+      catalogByStageType = new Map(cached.entries.map((e) => [e.stage_type, e]));
+      return;
+    }
+    try {
+      const catalog = await loadNodeCatalog();
+      catalogByStageType = new Map(catalog.entries.map((e) => [e.stage_type, e]));
+    } catch {
+      // Browser-mode dev fallback: catalogByStageType stays
+      // empty and tooltips degrade to node.label. Not an
+      // error worth surfacing.
+    }
+  }
+
+  ensureCatalogLoaded();
+
+  // Reactive: if another component (e.g. palette) loads the
+  // catalog after our mount, mirror its cache into our local map.
+  $: {
+    const cached = getCachedNodeCatalog();
+    if (cached !== null && catalogByStageType.size === 0) {
+      catalogByStageType = new Map(cached.entries.map((e) => [e.stage_type, e]));
+    }
+  }
+
+  /**
+   * Tooltip helper: pull a catalog entry for `node.type` and
+   * build the short summary from its description. Degrades to
+   * the node's own label when no entry is available.
+   */
+  function tooltipFor(node: PipelineNode): string {
+    const entry = catalogByStageType.get(node.type);
+    if (entry === undefined) return node.label;
+    return shortSummary(entry.description, node.label);
+  }
 
   $: nodes = $pipelineGraph.nodes;
   $: edges = $pipelineGraph.edges;
@@ -132,6 +192,8 @@
           class:active={i === activeIdx}
           class:completed={node.status === "completed"}
           style="--node-color: {statusColors[node.status]}"
+          title={tooltipFor(node)}
+          aria-label={tooltipFor(node)}
           onclick={() => handleNodeClick(i)}
           oncontextmenu={(e) => openMenu(node.id, e)}
           type="button"

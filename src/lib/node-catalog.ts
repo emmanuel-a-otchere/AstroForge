@@ -116,3 +116,28 @@ export function clearNodeCatalogCache(): void {
   cached = null;
   inflight = null;
 }
+
+/**
+ * CR-10 P1.6.2.4 / Slice P1.6.2.4:
+ * Build a short tooltip summary from a catalog description.
+ *
+ * Returns the description verbatim when it is 7 words or
+ * fewer, else returns the first 7 words followed by an
+ * ellipsis. Returns the supplied `fallback` string when
+ * the description is null, empty, or whitespace-only.
+ *
+ * Lives here (and not in the Svelte component) so the
+ * truncation policy is testable in pure-vitest without a
+ * Svelte render harness.
+ */
+export function shortSummary(
+  description: string | null,
+  fallback: string,
+): string {
+  if (description === null || description.trim().length === 0) {
+    return fallback;
+  }
+  const words = description.trim().split(/\s+/);
+  if (words.length <= 7) return words.join(" ");
+  return words.slice(0, 7).join(" ") + "...";
+}

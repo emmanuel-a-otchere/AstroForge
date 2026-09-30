@@ -51,6 +51,11 @@
   } from "../lib/pipeline-plan-store";
   import { workspaceState } from "../state/workspace";
   import { isNodeMode } from "../lib/node-graph-store";
+  import {
+    insertStage,
+    type PipelinePlanDto,
+  } from "../lib/astroforge-api";
+  import type { NodeCatalogEntry } from "../lib/node-catalog";
 
   // CR-05 P3 slice 2.6 — keep the per-plan recommendation store
   // fresh whenever `activePlan` changes. We subscribe manually
@@ -78,6 +83,49 @@
   $: sessionId = project?.active_session_id ?? null;
   $: canGenerateAutoPlan = Boolean(project && sessionId);
 
+  // CR-10 P1.6.2.4 / Slice P1.6.2.4: palette insert wiring.
+  // When the user clicks an entry in the node palette, append
+  // a new stage to the currently-active plan via the
+  // `insert_stage` IPC, then refresh the local `activePlan`
+  // store with the returned plan so the canvas re-renders.
+  //
+  // We keep the handler defensive: if no plan is active, the
+  // click is a no-op (the parent of NodeSidebar is responsible
+  // for surfacing "create a plan first" affordances).
+  let insertError: string | null = null;
+  let insertInFlight = false;
+
+  async function handlePaletteSelect(entry: NodeCatalogEntry): Promise<void> {
+    const current = getActivePlanSnapshot();
+    if (current === null) {
+      insertError = "Create or activate a plan before inserting stages.";
+      return;
+    }
+    if (insertInFlight) return;
+    insertInFlight = true;
+    insertError = null;
+    try {
+      const updated: PipelinePlanDto = await insertStage({
+        plan_id: current.plan_id,
+        stage_type: entry.stage_type,
+      });
+      activePlan.set(updated);
+    } catch (err) {
+      insertError = err instanceof Error ? err.message : String(err);
+    } finally {
+      insertInFlight = false;
+    }
+  }
+
+  function getActivePlanSnapshot(): PipelinePlanDto | null {
+    let snapshot: PipelinePlanDto | null = null;
+    const unsubscribe = activePlan.subscribe((value) => {
+      snapshot = value;
+    });
+    unsubscribe();
+    return snapshot;
+  }
+
   function formatTime(iso: string | null): string {
     if (!iso) return "—";
     const d = new Date(iso);
@@ -99,7 +147,7 @@
 >
   {#snippet sidebar()}
     {#if $isNodeMode}
-      <NodePalette />
+      <NodePalette onSelect={handlePaletteSelect} />
     {/if}
   {/snippet}
   {#if $workspaceState.loading}

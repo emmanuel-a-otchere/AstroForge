@@ -2374,3 +2374,49 @@ export function provenanceLabel(
       return "User correction applied";
   }
 }
+
+
+// ─── CR-10 P1.6.2.4 / Slice P1.6.2.4 : Node-Based Editor mutation IPCs ──
+//
+// Houses the TS-side wrappers for the node-graph Tauri commands
+// added in P1.6.2.4. The Rust side is in `commands_node_graph.rs`
+// (sibling of the read-only `read_node_catalog` it absorbed from
+// `main.rs` in this slice). Future slices will add the remaining
+// mutation primitives (P1.6.3.1: `update_graph` / `remove_stage` /
+//`reorder_stage` / `set_stage_enabled`) + the free-form layout
+// state query (P1.6.3.3).
+//
+// Pattern note: the wrappers mirror the existing
+// `pipelinePlanGet` / `createPipelinePlan` shape : a thin call
+// to `invoke()` with a request object.
+
+/**
+ * Request payload for `insert_stage`. Mirrors the Rust-side
+ * `InsertStageRequest` struct in `src-tauri/src/commands_node_graph.rs`.
+ */
+export interface InsertStageRequest {
+  plan_id: string;
+  stage_type: string;
+}
+
+/**
+ * Append a new stage to the end of the plan's `stages` Vec.
+ *
+ * The Rust primitive (`astroforge_core::node_graph::mutation::insert_stage`)
+ * looks up default params + label + image-version / undo flags from
+ * the canonical `NodeCatalog`; the TS side does NOT pass those in.
+ *
+ * Returns the updated `PipelinePlanDto` so the TS-side
+ * `pipeline-store` mirror can refresh its `stages` array.
+ *
+ * Errors:
+ * - `"unknown stage_type '...'"` => the user (or a stale-frontend
+ *   cache) supplied a stage_type not in the canonical NodeCatalog.
+ *   Refresh the catalog and re-prompt.
+ * - `"plan not found: ..."` => the supplied `plan_id` does not
+ *   exist in the store.
+ */
+export const insertStage = (
+  request: InsertStageRequest,
+): Promise<PipelinePlanDto> =>
+  invoke("insert_stage", { request });

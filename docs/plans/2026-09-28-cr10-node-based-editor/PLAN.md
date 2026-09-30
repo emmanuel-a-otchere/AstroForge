@@ -1,7 +1,7 @@
 # CR-10 Implementation Plan: Node-Based Editor
 
 **Date:** 2026-09-28
-**Status:** Proposed (P0 + P1.6.1.1 + P1.6.1.3 + P1.6.2.1 + P1.6.2.2 all shipped; P1.6.1.2 awaiting PR #411 merge [rebased onto current main, 6/6 CI green as of 2026-09-29T17:02Z]; P1.6.2.3 onwards pending)
+**Status:** Proposed (P0 + P1.6.1.1 + P1.6.1.2 + P1.6.1.3 + P1.6.2.1 + P1.6.2.2 all shipped; P1.6.2.3 onwards pending)
 **Source CR:** [`../../CR-10-NODE-BASED-EDITOR.md`](../../CR-10-NODE-BASED-EDITOR.md)
 **Spec carrier:** [`../../specs/AstroForge_Spec_v1.4.0.md`](../../specs/AstroForge_Spec_v1.4.0.md) §7.7 + Delta from 1.4.0
 **Strategy:** P0 docs-only (this PR), then four sub-milestones (1.6.1 through 1.6.4) decomposed into one-task-per-IPC slices per Decision D-CR-10-10. Each slice is one PR-sized tranche; each tranche is independently reviewable and CI-green before the next starts.
@@ -79,7 +79,7 @@ Decision: hand-roll a small SVG helper. ADR-0018 records the decision. Benchmark
 
 #### P1.6.1.2: NodeCatalog data type + generated manifest
 
-Status: ✅ Shipped (PR #411, commit TBD; lands in CR-10 Slice P1.6.1.2).
+Status: ✅ Shipped (PR #411, commit 6100e3c; lands in CR-10 Slice P1.6.1.2).
 
 Goal: introduce `NodeCatalog` as a first-class Rust type and emit the tooltip manifest at build time.
 
@@ -193,6 +193,8 @@ Files touched:
 
 #### P1.6.2.3: Mode toggle (Wizard / Node)
 
+Status: ✅ Shipped (PR #415, commit TBD; lands in CR-10 Slice P1.6.2.3).
+
 Goal: top-bar toggle between Wizard and Node modes.
 
 Implementation:
@@ -204,6 +206,21 @@ Implementation:
 Files touched:
 
 - `src/App.svelte` (toggle + persistence)
+
+**Slice detail.**
+
+- New `src/components/NodeGraphModeToggle.svelte`: two-segment toggle (Wizard / Node) with Material Symbols icons + labels. Hides labels under 640 px to save header space. Reads `$nodeGraphMode` reactively; clicks write to the store + `localStorage`.
+- `src/lib/node-graph-store.ts` extended with `NODE_GRAPH_MODE_STORAGE_KEY = "astroforge.session.mode"` + `readPersistedNodeGraphMode(storage)` + `writePersistedNodeGraphMode(storage, mode)` + `hydrateNodeGraphModeFromStorage(storage)`. All three are no-op-safe on null storage (SSR / non-browser environments).
+- `src/components/ApplicationShell.svelte` extended with an optional `projectTools?: Snippet` prop. The toggle is mounted via this prop by `App.svelte` ONLY when a project is open (`$studioViewport.project` truthy); otherwise no project tools render and the header is unchanged.
+- `src/App.svelte` calls `hydrateNodeGraphModeFromStorage(...)` in `onMount` so the user's choice survives a reload.
+
+**Tests.** 10 new vitest tests in `src/lib/__tests__/node-graph-store-slice-p-1-6-2-2.test.ts` (persistence round-trip + null-storage safety + malformed-JSON fallback). Total vitest: 110/110 pass.
+
+**Honest flags.**
+
+- Toggle is hidden when no project is open. This is the intended UX: a project is the unit of mode choice.
+- Persistence is best-effort: storage quota / privacy-mode failures are silently swallowed so the in-memory toggle keeps working.
+- A storage key collision (something else at `astroforge.session.mode`) is tolerated by the type guard (anything other than `"wizard" | "node"` falls back to default).
 
 #### P1.6.2.4: Constrained layout + per-node tooltip wiring
 

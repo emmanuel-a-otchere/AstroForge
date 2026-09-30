@@ -19,6 +19,7 @@
 -->
 <script lang="ts">
   import ApplicationShell from "./components/ApplicationShell.svelte";
+  import NodeGraphModeToggle from "./components/NodeGraphModeToggle.svelte";
   import HomeScreen from "./components/HomeScreen.svelte";
   import ProjectsScreen from "./components/ProjectsScreen.svelte";
   import ProjectDialog from "./components/ProjectDialog.svelte";
@@ -44,9 +45,11 @@
   } from "./state/project-lifecycle";
   import { dialogOpen as dialogOpenStore, deleteDialogOpen as deleteDialogOpenStore } from "./state/dialog-state";
   import { useKeyboardShortcuts } from "./state/keyboard-shortcuts";
+  import { hydrateNodeGraphModeFromStorage } from "./lib/node-graph-store";
   import { projectsStore } from "./state/projects";
   import type { ProjectAction } from "./state/projects";
   import type { ProjectSummary } from "./lib/astroforge-api";
+  import { onMount } from "svelte";
   import * as api from "./lib/astroforge-api";
   import { fly } from "svelte/transition";
 
@@ -75,6 +78,19 @@
       dialogProject = null;
       dialogOpen = true;
     },
+  });
+
+  // CR-10 P1.6.2.3 — hydrate the persisted
+  // node-graph mode (Wizard / Node) at app boot
+  // so the user's choice survives a reload. SSR /
+  // non-browser environments (no `window`) no-op
+  // via the null check.
+  onMount(() => {
+    hydrateNodeGraphModeFromStorage(
+      typeof window !== "undefined" && window.localStorage
+        ? window.localStorage
+        : null,
+    );
   });
 
   function handleProjectAction(action: ProjectAction, project?: ProjectSummary) {
@@ -153,6 +169,11 @@
 </script>
 
 <ApplicationShell projectLabel={$studioViewport.project?.name ?? "No project open"}>
+  {#snippet projectTools()}
+    {#if $studioViewport.project}
+      <NodeGraphModeToggle />
+    {/if}
+  {/snippet}
   {#if $studioViewport.project}
   <StudioShell>
     {#snippet overview()}

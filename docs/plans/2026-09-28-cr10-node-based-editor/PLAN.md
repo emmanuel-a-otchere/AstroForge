@@ -193,6 +193,8 @@ Files touched:
 
 #### P1.6.2.3: Mode toggle (Wizard / Node)
 
+Status: ✅ Shipped (PR #415, commit TBD; lands in CR-10 Slice P1.6.2.3).
+
 Goal: top-bar toggle between Wizard and Node modes.
 
 Implementation:
@@ -204,6 +206,21 @@ Implementation:
 Files touched:
 
 - `src/App.svelte` (toggle + persistence)
+
+**Slice detail.**
+
+- New `src/components/NodeGraphModeToggle.svelte`: two-segment toggle (Wizard / Node) with Material Symbols icons + labels. Hides labels under 640 px to save header space. Reads `$nodeGraphMode` reactively; clicks write to the store + `localStorage`.
+- `src/lib/node-graph-store.ts` extended with `NODE_GRAPH_MODE_STORAGE_KEY = "astroforge.session.mode"` + `readPersistedNodeGraphMode(storage)` + `writePersistedNodeGraphMode(storage, mode)` + `hydrateNodeGraphModeFromStorage(storage)`. All three are no-op-safe on null storage (SSR / non-browser environments).
+- `src/components/ApplicationShell.svelte` extended with an optional `projectTools?: Snippet` prop. The toggle is mounted via this prop by `App.svelte` ONLY when a project is open (`$studioViewport.project` truthy); otherwise no project tools render and the header is unchanged.
+- `src/App.svelte` calls `hydrateNodeGraphModeFromStorage(...)` in `onMount` so the user's choice survives a reload.
+
+**Tests.** 10 new vitest tests in `src/lib/__tests__/node-graph-store-slice-p-1-6-2-2.test.ts` (persistence round-trip + null-storage safety + malformed-JSON fallback). Total vitest: 110/110 pass.
+
+**Honest flags.**
+
+- Toggle is hidden when no project is open. This is the intended UX: a project is the unit of mode choice.
+- Persistence is best-effort: storage quota / privacy-mode failures are silently swallowed so the in-memory toggle keeps working.
+- A storage key collision (something else at `astroforge.session.mode`) is tolerated by the type guard (anything other than `"wizard" | "node"` falls back to default).
 
 #### P1.6.2.4: Constrained layout + per-node tooltip wiring
 

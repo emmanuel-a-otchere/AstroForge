@@ -189,6 +189,43 @@
 - No persistence. Reloading the page returns to Wizard mode.
 - The component-layer changes (ProcessWorkspace + WorkspaceScreen) are not directly unit-tested (no Svelte test harness in the project). Manual smoke pass required to confirm the sidebar layout works in dev.
 
+### Slice P1.6.2.3: CR-10 mode toggle (Wizard / Node) + localStorage persistence
+
+**Scope.** Mounts the `<NodeGraphModeToggle />` in the top app header (between the project label and the SaveIndicator) and wires localStorage round-trip so the user's choice survives a reload. Toggle is hidden when no project is open. Adds one new Svelte component + extends `node-graph-store.ts` with persistence helpers.
+
+**Toggle.** `src/components/NodeGraphModeToggle.svelte`:
+
+- Two-segment toggle (Wizard / Node) with Material Symbols icons + labels.
+- Hides labels under 640 px viewport width to save header space.
+- Reads `$nodeGraphMode` reactively; clicks call `setNodeGraphMode(mode)` + `writePersistedNodeGraphMode(storage, mode)`.
+- `aria-pressed` reflects the active segment; `role="group"` + `aria-label="Pipeline mode"` for accessibility.
+
+**Store extensions.** `src/lib/node-graph-store.ts`:
+
+- `NODE_GRAPH_MODE_STORAGE_KEY = "astroforge.session.mode"`.
+- `readPersistedNodeGraphMode(storage)`: reads + JSON-parses + type-guards the stored value; returns default on null storage / missing key / parse error / unrecognized value.
+- `writePersistedNodeGraphMode(storage, mode)`: writes JSON-encoded mode; swallows storage failures so the in-memory toggle keeps working.
+- `hydrateNodeGraphModeFromStorage(storage)`: one-shot boot helper.
+
+**ApplicationShell extension.** New optional `projectTools?: Snippet` prop. Renders between the project label and the `header-spacer` when supplied.
+
+**App.svelte wiring.** Imports `<NodeGraphModeToggle />`. Passes a `{#snippet projectTools()}{#if $studioViewport.project}<NodeGraphModeToggle />{/if}{/snippet}`. Calls `hydrateNodeGraphModeFromStorage(window.localStorage ?? null)` in `onMount`.
+
+**Tests.** 10 new vitest tests added to `src/lib/__tests__/node-graph-store-slice-p-1-6-2-2.test.ts` (persistence round-trip + null-storage safety + malformed-JSON fallback).
+
+**Gates.**
+
+- vitest: 110/110 pass (10 new + 100 pre-existing across 6 test files).
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --tests -- -D warnings` clean.
+
+**Honest flags.**
+
+- The toggle is a visual component not covered by unit tests (no Svelte test harness in the project). The store round-trip is tested; the click-to-store wiring is exercised by the toggle's inline handler.
+- Persistence is best-effort. Storage quota / privacy-mode failures are silently swallowed.
+- A storage key collision is tolerated by the type guard: any value other than `"wizard" | "node"` falls back to default.
+- Default mode on first ever visit is `"wizard"`. Node mode is opt-in.
+
 ### Slice P1.6.1.1: CR-10 Library/framework spike (resolves OD-CR-10-2)
 
 **Scope.** Resolves OD-CR-10-2 (free-form canvas library choice) via a paper spike + a hand-rolled SVG renderer benchmark. No production-code changes; the spike is a vitest test file + an ADR. Lands the decision **hand-roll a small SVG helper** (no new production dependency).

@@ -25,9 +25,17 @@
     children,
     /** Project identity slot for P3. P1 ships it as a fixed placeholder. */
     projectLabel = "No project open",
+    /**
+     * Optional snippet rendered next to the project
+     * label. CR-10 P1.6.2.3 passes the
+     * `<NodeGraphModeToggle />` here so the toggle
+     * only appears when a project is open.
+     */
+    projectTools,
   }: {
     children?: Snippet;
     projectLabel?: string;
+    projectTools?: Snippet;
   } = $props();
 
   let navOpen = $state(true);
@@ -55,6 +63,11 @@
     <span class="project-slot font-body" data-testid="project-slot">
       {projectLabel}
     </span>
+    {#if projectTools !== undefined}
+      <span class="project-tools" data-testid="project-tools">
+        {@render projectTools()}
+      </span>
+    {/if}
     <span class="header-spacer"></span>
     <SaveIndicator />
   </header>

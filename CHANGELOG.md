@@ -226,6 +226,83 @@
 - A storage key collision is tolerated by the type guard: any value other than `"wizard" | "node"` falls back to default.
 - Default mode on first ever visit is `"wizard"`. Node mode is opt-in.
 
+### Slice P1.6.2.4: CR-10 constrained layout + per-node tooltips + palette insert
+
+**Scope.** Adds the first end-to-end mutation path in the node-based editor: a user in Node mode can now hover a node card to see its catalog-derived tooltip, click an entry in the Node Palette to append a new stage to the active plan, and see the canvas re-render with the inserted stage. All edits are persisted via the new `insert_stage` IPC and routed through the canonical `NodeCatalog` so default params + label + image-version flags stay in lock-step.
+
+**Rust core.** New module `crates/astroforge-core/src/node_graph/`:
+
+- `mod.rs`: declares `pub mod mutation;`.
+- `mutation.rs` (~222 lines):
+  - `NodeGraphMutationError` enum (Debug-only; no `PartialEq`/`Eq`/`Clone` because `PipelinePlanStoreError` wraps `rusqlite::Error`). Variants: `InvalidStageType(String)`, `Store(PipelinePlanStoreError)`, `NoStagesError`.
+  - `insert_stage(store, plan_id, stage_type) -> Result<PipelinePlan, NodeGraphMutationError>`: append-only primitive. Looks up default params + label + `produces_image_version` + `undo_supported` from `node_catalog::node_catalog()`. Computes `sequence = max(stages.sequence) + 1` (or `0` for empty plans). Generates `stage_id = format!("stage_{}_{}", short_hash(plan_id), sequence)` per the existing `pipeline_plan/plan.rs:261` pattern. `required` defaults to `true` for mandatory pipeline stages (calibrate, stack, export), `false` otherwise. `enabled = true`. Looks up `produces_image_version` from the catalog (e.g. `true` for stretch / denoise / detail / color_calibration / color_wb / color_scnr / sharpen_deconvolution / creative_polish / star_handling).
+  - `mandatory_for(stage_type) -> bool`: pure helper, true for the three must-have stages.
+  - `node_graph_stage_id(plan_id, sequence) -> String`: pure helper.
+  - `list_known_stage_types() -> Vec<String>`: returns the 12 catalog entries in canonical order.
+
+**Tests.** `crates/astroforge-core/tests/node_graph_mutation_slice_p_1_6_2_4.rs` (~230 lines, 8 tests):
+
+- `insert_appends_with_correct_metadata`: appends to a plan with one stage and asserts the new stage has `sequence = 1`, `enabled = true`, `stage_type = "color_calibration"`, label matches catalog.
+- `insert_persists_through_store`: reloads the plan from the store after insert and verifies the new stage survives.
+- `insert_unknown_stage_returns_invalid`: `"nonexistent_stage"` returns `NodeGraphMutationError::InvalidStageType`.
+- `insert_into_unknown_plan_returns_store_error`: non-existent `plan_id` returns the store error.
+- `insert_appends_sequence_one_past_max`: with a plan whose stages have `sequence = [0, 1, 2]`, new stage gets `sequence = 3`.
+- `insert_increments_max_sequence_on_repeated_calls`: three inserts in a row produce sequences 1, 2, 3.
+- `insert_with_existing_calibrate_plan_uses_catalog_defaults`: existing calibrate plan has `required = true` per `mandatory_for`; new stretch stage gets `required = false`.
+- `insert_empty_plan_starts_sequence_at_zero`: empty plan gets its first stage at `sequence = 0`.
+
+**Tauri IPC.** `src-tauri/src/commands_node_graph.rs` (~120 lines):
+
+- `read_node_catalog()`: moved from `main.rs` (where P1.6.1.3 added it inline) into this sibling module per the `commands_pipeline_plan.rs`/`commands_comparison.rs` pattern. Identical wire shape; just relocated.
+- `insert_stage(state, plan_id, stage_type) -> Result<DomainPipelinePlan, String>`: locks the `PipelinePlanStore`, calls `core::node_graph::mutation::insert_stage`, maps errors to user-facing strings (`"unknown stage_type '...'"`, `"plan not found: ..."`, `"plan has no stages: ..."`).
+
+**main.rs refactor.** `src-tauri/src/main.rs`:
+
+- Removed the inline `read_node_catalog` definition (lines 1771-1807 of the pre-PR tree).
+- Added `mod commands_node_graph;` near the other `mod commands_*` declarations.
+- Updated the `invoke_handler!` macro to register `commands_node_graph::read_node_catalog` + `commands_node_graph::insert_stage` in place of the inline `read_node_catalog`.
+- Dropped now-unused `use astroforge_core::node_catalog::{NodeCatalog, CATALOG_VERSION};` (these were only used by the moved function).
+
+**TypeScript bridge.** `src/lib/astroforge-api.ts`:
+
+- New `InsertStageRequest` interface + `insertStage(request)` wrapper mirroring the existing `pipelinePlanGet` / `createPipelinePlan` shape. Calls `invoke("insert_stage", { request })`.
+
+**Catalog helper.** `src/lib/node-catalog.ts`:
+
+- New `shortSummary(description, fallback)` pure function. Truncates descriptions to the first 7 words with an ellipsis; falls back to the supplied string for null/empty/whitespace-only descriptions. Lifted out of the Svelte component so the truncation policy is testable in pure vitest without a Svelte render harness.
+
+**Tooltip wiring.** `src/components/NodeSidebar.svelte`:
+
+- Imports `getCachedNodeCatalog` + `loadNodeCatalog` + `shortSummary` from `node-catalog.ts`.
+- Adds a `catalogByStageType` map keyed by `stage_type` so per-node lookups are O(1).
+- Adds `ensureCatalogLoaded()` that runs once on mount: checks the cache, falls back to the `loadNodeCatalog` IPC, swallows IPC errors so the canvas still renders in browser-mode dev.
+- Adds a `tooltipFor(node)` helper that returns the catalog description (truncated via `shortSummary`) or falls back to `node.label` if no catalog entry exists.
+- Wires `title={tooltipFor(node)}` + `aria-label={tooltipFor(node)}` on each `.node-card` button. Native HTML `title` attribute gives a free cross-browser tooltip.
+
+**Palette insert wiring.** `src/components/ProcessWorkspace.svelte`:
+
+- Imports `insertStage` + `PipelinePlanDto` from `astroforge-api.ts` and `NodeCatalogEntry` from `node-catalog.ts`.
+- Adds `handlePaletteSelect(entry)` async function that calls `insertStage({ plan_id, stage_type })` then `activePlan.set(updated)`. Surfaces IPC errors in `insertError`. Defensive against no-active-plan (`insertError = "Create or activate a plan before inserting stages."`).
+- Wires `<NodePalette onSelect={handlePaletteSelect} />` in the workspace sidebar mount when `$isNodeMode` is true.
+
+**Tests.** `src/lib/__tests__/node-graph-slice-p-1-6-2-4.test.ts` (~100 lines, 10 tests):
+
+- `shortSummary` returns fallback for null/empty/whitespace descriptions.
+- Returns description verbatim when 7 words or fewer.
+- Truncates to 7 words + ellipsis when over the limit.
+- 8-word descriptions become 7 words + ellipsis.
+- Repeated whitespace is collapsed to single spaces.
+- Trims leading/trailing whitespace before counting words.
+- Very long descriptions (500 words) truncate cleanly without glitches.
+- Empty fallback passes through verbatim.
+
+**Honest flags.**
+
+- src-tauri does not compile on this host (missing `javascriptcoregtk-4.1` + `libsoup-3.0` system libs). Rust core tests + format + clippy pass; the Tauri IPC layer's correctness is validated by CI on the GitHub runner.
+- The palette insert flow assumes the user has an active plan. `Create or activate a plan` guidance is shown via `insertError` text only; the dedicated empty-state UI lands in P1.6.2.5 alongside the auto-plan generator integration.
+- Tooltips use the native HTML `title` attribute (no custom Svelte tooltip component). A polished tool-card with the catalog's full description + collapse controls lands in P1.6.3.1 alongside `set_stage_enabled`.
+- Insert order is append-only (`sequence = max + 1`). Insert-before / insert-after lands in P1.6.3.2 alongside the free-form layout state query (`update_graph` IPC).
+
 ### Slice P1.6.1.1: CR-10 Library/framework spike (resolves OD-CR-10-2)
 
 **Scope.** Resolves OD-CR-10-2 (free-form canvas library choice) via a paper spike + a hand-rolled SVG renderer benchmark. No production-code changes; the spike is a vitest test file + an ADR. Lands the decision **hand-roll a small SVG helper** (no new production dependency).

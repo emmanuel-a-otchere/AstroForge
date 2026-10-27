@@ -42,6 +42,7 @@ pub mod mvp_pipeline;
 pub mod narrowband;
 pub mod narrowband_image;
 pub mod node_catalog;
+pub mod node_graph;
 pub mod orchestrator;
 pub mod pipeline;
 pub mod pipeline_plan;

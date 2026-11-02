@@ -43,10 +43,22 @@ fn manifest_path() -> std::path::PathBuf {
     Path::new(&crate_dir).join("src/node_catalog.json")
 }
 
+/// RT-1 (#419): read the manifest with CRLF normalized to LF.
+///
+/// On Windows checkouts with `core.autocrlf` enabled, git converts the
+/// checked-in LF line endings to CRLF in the working tree, which would
+/// otherwise break the byte-identity snapshot tests below. Normalizing
+/// keeps the snapshot check meaningful (it still pins the JSON content)
+/// while making it platform-independent.
+fn read_manifest_normalized() -> String {
+    std::fs::read_to_string(manifest_path())
+        .expect("checked-in manifest exists at crates/astroforge-core/src/node_catalog.json")
+        .replace("\r\n", "\n")
+}
+
 #[test]
 fn checked_in_manifest_matches_in_rust_source() {
-    let from_disk_raw = std::fs::read_to_string(manifest_path())
-        .expect("checked-in manifest exists at crates/astroforge-core/src/node_catalog.json");
+    let from_disk_raw = read_manifest_normalized();
     let from_source_raw = emit_catalog_json();
     // Strip trailing whitespace so a final-newline
     // difference (the `cargo run > file` redirect
@@ -66,7 +78,7 @@ fn checked_in_manifest_matches_in_rust_source() {
 
 #[test]
 fn manifest_has_current_version() {
-    let raw = std::fs::read_to_string(manifest_path()).expect("manifest exists");
+    let raw = read_manifest_normalized();
     let parsed: serde_json::Value = serde_json::from_str(&raw).expect("manifest parses as JSON");
     let version = parsed
         .get("version")
@@ -81,7 +93,7 @@ fn manifest_has_current_version() {
 
 #[test]
 fn every_manifest_entry_has_required_fields() {
-    let raw = std::fs::read_to_string(manifest_path()).expect("manifest exists");
+    let raw = read_manifest_normalized();
     let parsed: serde_json::Value = serde_json::from_str(&raw).expect("manifest parses as JSON");
     let entries = parsed
         .get("entries")
@@ -121,7 +133,7 @@ fn every_manifest_entry_has_required_fields() {
 
 #[test]
 fn manifest_stage_types_match_user_facing_constant() {
-    let raw = std::fs::read_to_string(manifest_path()).expect("manifest exists");
+    let raw = read_manifest_normalized();
     let parsed: serde_json::Value = serde_json::from_str(&raw).expect("manifest parses as JSON");
     let entries = parsed
         .get("entries")
@@ -144,7 +156,7 @@ fn manifest_stage_types_match_user_facing_constant() {
 
 #[test]
 fn manifest_is_idempotent_under_re_emit() {
-    let raw = std::fs::read_to_string(manifest_path()).expect("manifest exists");
+    let raw = read_manifest_normalized();
     let parsed = load_catalog_from_str(&raw).expect("manifest loads");
     let re_emitted = serde_json::to_string_pretty(&parsed).expect("re-emit");
     let raw_trimmed = raw.trim_end();
@@ -154,7 +166,7 @@ fn manifest_is_idempotent_under_re_emit() {
 
 #[test]
 fn manifest_is_loadable_from_disk() {
-    let raw = std::fs::read_to_string(manifest_path()).expect("manifest exists");
+    let raw = read_manifest_normalized();
     let parsed = load_catalog_from_str(&raw).expect("manifest loads");
     assert!(!parsed.entries.is_empty());
     assert!(parsed.entries.iter().all(|e| !e.stage_type.is_empty()));
@@ -162,7 +174,7 @@ fn manifest_is_loadable_from_disk() {
 
 #[test]
 fn catalog_in_rust_matches_manifest() {
-    let raw = std::fs::read_to_string(manifest_path()).expect("manifest exists");
+    let raw = read_manifest_normalized();
     let from_disk = load_catalog_from_str(&raw).expect("manifest loads");
     let from_source = node_catalog();
     assert_eq!(
@@ -188,7 +200,7 @@ fn every_user_facing_type_maps_to_known_canonical_type() {
 
 #[test]
 fn no_duplicate_stage_types_in_manifest() {
-    let raw = std::fs::read_to_string(manifest_path()).expect("manifest exists");
+    let raw = read_manifest_normalized();
     let parsed: serde_json::Value = serde_json::from_str(&raw).expect("manifest parses as JSON");
     let entries = parsed
         .get("entries")
@@ -206,7 +218,7 @@ fn no_duplicate_stage_types_in_manifest() {
 
 #[test]
 fn supported_models_only_populated_for_ai_stages() {
-    let raw = std::fs::read_to_string(manifest_path()).expect("manifest exists");
+    let raw = read_manifest_normalized();
     let parsed = load_catalog_from_str(&raw).expect("manifest loads");
     for entry in &parsed.entries {
         if entry.ai_uses_ai {

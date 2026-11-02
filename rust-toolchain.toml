@@ -1,4 +1,7 @@
 [toolchain]
 channel = "1.98.1"
 components = ["rustfmt", "clippy"]
-targets = ["x86_64-pc-windows-msvc", "aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
+# Cross-compile targets are intentionally NOT pinned here. CI installs them
+# explicitly (dtolnay/rust-toolchain `targets:` input in release.yml), and
+# pinning them locally forces every contributor's rustup to sync targets for
+# all three OSes on every cargo invocation.

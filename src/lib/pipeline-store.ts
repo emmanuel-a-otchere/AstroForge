@@ -1,9 +1,25 @@
 import { writable, derived, get } from "svelte/store";
-import type { PreviewParams } from "./gl-renderer";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type ProcessingMode = "automagic" | "automagic_expert" | "pure_expert";
+
+// RT-5 / HOUSE-1 (#424): inlined from the deleted `gl-renderer.ts` —
+// this store (kept live via ProfileManager / RecipesScreen) is the
+// sole consumer of this type. The wizard GL preview path is gone.
+export interface PreviewParams {
+  blackPoint: number;
+  midtones: number;
+  highlights: number;
+  strength: number;
+  scnrStrength: number;
+  scnrMethod: number; // 0 = min, 1 = average
+  denoiseStrength?: number;
+  denoiseThreshold?: number;
+  colorSaturation?: number;
+  sharpenStrength?: number;
+  sharpenRadius?: number;
+}
 
 export type PipelineStageType =
   | "ingest"

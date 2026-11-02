@@ -101,4 +101,6 @@ CI runs all of the above on Linux, macOS, and Windows ([`ci.yml`](.github/workfl
 - Housekeeping items suitable for standalone PRs are listed in [`docs/HOUSEKEEPING.md`](docs/HOUSEKEEPING.md).
 
 ## License
-*(To be determined; targeting a permissive open-source license such as MIT or Apache 2.0 to ensure free distribution and community adoption.)*
+Licensed under **MIT OR Apache-2.0** at your option — see [`LICENSE-MIT`](LICENSE-MIT) and [`LICENSE-APACHE`](LICENSE-APACHE). This matches the `license` field already declared in the Rust workspace manifest.
+
+**Bundled AI models:** the builtin ONNX kernels shipped under `crates/astroforge-ai/models/builtin/` are generated in-repo by `scripts/generate_builtin_models.py` and carry the same dual license; their SHA-256 digests and per-model license are pinned in [`MANIFEST.json`](crates/astroforge-ai/models/builtin/MANIFEST.json) and verified in CI. Any third-party model added to the bundle must be recorded there with a permissive license and a pinned digest before release.

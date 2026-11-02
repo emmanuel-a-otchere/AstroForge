@@ -45,7 +45,30 @@ A running log of clean-up work that should land as standalone PRs. Each item bel
 
 ## Closed tickets
 
-_(empty; tickets move here when the housekeeping PR lands.)_
+### HOUSE-1 — Wizard sidebars + dead code (closed, RT-5 / #424)
+
+**Outcome (post-audit, diverges from the original file list):** the original
+list was stale — two of its files were re-adopted by live surfaces after the
+list was written:
+
+- `ProfileManager.svelte` — **kept**: live import + render in
+  `RecipesScreen.svelte` (the recipe Expert tier).
+- `src/lib/pipeline-store.ts` — **kept**: live import in
+  `ProfileManager.svelte` (`sessionStore`). Its `PreviewParams` type was
+  inlined (moved out of the deleted `gl-renderer.ts`).
+- `src/state/pipeline-store.ts` — does not exist under `src/state/` (the
+  original list's path was wrong; the live store is `src/lib/pipeline-store.ts`).
+
+Deleted (zero importers verified by consumer-graph walk):
+`NodeSidebar.svelte`, `ParameterSidebar.svelte`, `ScreenCard.svelte`,
+`InitialDialog.svelte`, `ReceiptsPanel.svelte`, `DestructiveConfirmDialog.svelte`
+(its only importer was the deleted NodeSidebar), `src/lib/gl-renderer.ts`,
+`src/lib/pipeline.ts`, `src/lib/session.ts`. `gl-renderer.ts` was deleted
+because the anticipated P5a consumer never materialized: the Compare
+workspace uses `image-canvas-webgl.ts`, which does not import it.
+
+Verification: `npm run check` 0 errors, `npm run build` succeeds,
+`npm run test` 120/120, no residual imports in `src/`.
 
 ## Backlog tickets
 

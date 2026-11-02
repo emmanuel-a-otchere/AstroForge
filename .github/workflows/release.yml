@@ -29,9 +29,11 @@ jobs:
           - platform: "macos-latest"
             args: "--target aarch64-apple-darwin"
             rust-target: "aarch64-apple-darwin"
-          - platform: "macos-latest"
-            args: "--target x86_64-apple-darwin"
-            rust-target: "x86_64-apple-darwin"
+          # macOS x86_64 is intentionally not in the matrix: ort-sys
+          # 2.0.0-rc.13 ships no prebuilt ONNX Runtime for
+          # x86_64-apple-darwin, so the AI-enabled app cannot link there
+          # without a source build of ort (follow-up on #420). Linux,
+          # Windows and macOS arm64 are covered.
           - platform: "ubuntu-24.04"
             args: ""
             rust-target: ""

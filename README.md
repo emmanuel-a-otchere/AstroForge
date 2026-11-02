@@ -58,7 +58,47 @@ For the durable data model, the application shell, the intelligent import, and t
 For small clean-up work that should land as standalone PRs (wizard dead code, ingest/import-scan consolidation): `docs/HOUSEKEEPING.md`.
 
 ## Getting Started
-*(Build instructions, dependency lists, and contribution guidelines will be added here as the repository structure is finalized.)*
+
+AstroForge is a [Tauri 2](https://tauri.app) app: a Rust workspace (three crates) behind a Svelte 5 + TypeScript frontend.
+
+### Prerequisites
+
+- **Rust 1.98.1** — the repo pins the toolchain in [`rust-toolchain.toml`](rust-toolchain.toml); install via [rustup](https://rustup.rs) and it will be picked up automatically.
+- **Node.js 22+** with npm.
+- Platform webview dependencies:
+  - **Linux (Debian/Ubuntu):** `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev` (the same list CI installs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml))
+  - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
+  - **Windows:** [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (pre-installed on Windows 10/11) and the MSVC build tools (bundled with Visual Studio Build Tools / rustup's default `x86_64-pc-windows-msvc` target)
+
+### Build & run
+
+```bash
+npm install        # frontend dependencies
+npm run tauri dev  # launch the desktop app in dev mode (Vite on port 1420 + Rust shell)
+```
+
+For a production build (installers land in `src-tauri/target/release/bundle/`):
+
+```bash
+npm run tauri build
+```
+
+### Tests
+
+```bash
+npm run test             # frontend unit tests (vitest)
+npm run check            # Svelte/TypeScript type check
+cargo test --workspace   # Rust unit + integration tests
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+CI runs all of the above on Linux, macOS, and Windows ([`ci.yml`](.github/workflows/ci.yml)).
+
+### Orientation for contributors
+
+- Start with [`docs/ORIENTATION.md`](docs/ORIENTATION.md) for the plain-language architecture summary, and [`CONTRIBUTING.md`](CONTRIBUTING.md) for the spec-driven workflow.
+- Work happens in one-slice-per-PR tranches (see the `docs/plans/` CR plans for the pattern). Good first slices are small, CI-green, and reference an issue or plan doc.
+- Housekeeping items suitable for standalone PRs are listed in [`docs/HOUSEKEEPING.md`](docs/HOUSEKEEPING.md).
 
 ## License
 *(To be determined; targeting a permissive open-source license such as MIT or Apache 2.0 to ensure free distribution and community adoption.)*

@@ -326,7 +326,7 @@
       </header>
       <div class="canvas-mount" data-testid="studio-canvas">
         {#if imageVersionId}
-          <ImageCanvas {imageVersionId} />
+          <ImageCanvas versionId={imageVersionId} />
         {:else}
           <p class="empty">No active Image Version.</p>
         {/if}

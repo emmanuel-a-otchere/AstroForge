@@ -25,7 +25,43 @@ jobs:
         run: npm run build
 
       - name: Type check
-        run: npm run check || true
+        run: npm run check
+
+      # RT-1 (#419): frontend unit tests are a required CI gate.
+      - name: Unit tests (vitest)
+        run: npm run test
+
+  # RT-1 (#419): the full Rust test suite previously ran only on Linux;
+  # image math and Tauri-adjacent code differ per platform, so the core
+  # crate's tests + clippy now run on all three target OSes.
+  rust-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-matrix-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Clippy (astroforge-core)
+        run: cargo clippy -p astroforge-core --all-targets -- -D warnings
+
+      - name: Test (astroforge-core)
+        run: cargo test -p astroforge-core
 
   rust:
     runs-on: ubuntu-latest

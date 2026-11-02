@@ -4,6 +4,7 @@ members = [
     "crates/astroforge-core",
     "crates/astroforge-ai",
     "crates/astroforge-app",
+    "src-tauri",
 ]
 
 [workspace.package]

@@ -14,7 +14,9 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use astroforge_core::domain::{PipelineRun, PipelineRunStatus, Project, ProjectStatus, StageRunRecord};
+use astroforge_core::domain::{
+    PipelineRun, PipelineRunStatus, Project, ProjectStatus, StageRunRecord,
+};
 use astroforge_core::domain_store::{DomainStore, DomainStoreError};
 use astroforge_core::project::{OpenedProject, ProjectError, ProjectManager};
 use serde::Serialize;
@@ -74,7 +76,7 @@ pub struct PipelineRunSummary {
 impl From<&PipelineRun> for PipelineRunSummary {
     fn from(r: &PipelineRun) -> Self {
         Self {
-            run_id: r.id.clone(),
+            run_id: r.run_id.clone(),
             project_id: r.project_id.clone(),
             status: r.status,
             recipe_id: r.recipe_id.clone(),
@@ -124,9 +126,7 @@ pub(crate) fn store_err_to_string(e: DomainStoreError) -> String {
 // ─── Project lifecycle commands ────────────────────────────────────────────
 
 #[tauri::command]
-pub fn project_list(
-    state: State<'_, ProjectState>,
-) -> Result<Vec<ProjectSummary>, String> {
+pub fn project_list(state: State<'_, ProjectState>) -> Result<Vec<ProjectSummary>, String> {
     let store = state.store.lock().map_err(lock_err)?;
     let projects = store.list_projects().map_err(store_err_to_string)?;
     Ok(projects.iter().map(ProjectSummary::from).collect())
@@ -138,7 +138,9 @@ pub fn project_get(
     project_id: String,
 ) -> Result<ProjectSummary, String> {
     let store = state.store.lock().map_err(lock_err)?;
-    let p = store.get_project(&project_id).map_err(store_err_to_string)?;
+    let p = store
+        .get_project(&project_id)
+        .map_err(store_err_to_string)?;
     Ok(ProjectSummary::from(&p))
 }
 
@@ -193,10 +195,7 @@ pub fn project_rename(
 }
 
 #[tauri::command]
-pub fn project_archive(
-    state: State<'_, ProjectState>,
-    slug: String,
-) -> Result<(), String> {
+pub fn project_archive(state: State<'_, ProjectState>, slug: String) -> Result<(), String> {
     let mgr = state.manager.lock().map_err(lock_err)?;
     mgr.archive_project(&slug).map_err(project_err_to_string)?;
     Ok(())
@@ -220,9 +219,7 @@ pub fn project_recover(
     slug: String,
 ) -> Result<RecoverSummary, String> {
     let mgr = state.manager.lock().map_err(lock_err)?;
-    let report = mgr
-        .recover_project(&slug)
-        .map_err(project_err_to_string)?;
+    let report = mgr.recover_project(&slug).map_err(project_err_to_string)?;
     Ok(RecoverSummary {
         project_id: report.project_id,
         status: report.status,
@@ -257,7 +254,9 @@ pub fn pipeline_run_get(
     run_id: String,
 ) -> Result<PipelineRunSummary, String> {
     let store = state.store.lock().map_err(lock_err)?;
-    let r = store.get_pipeline_run(&run_id).map_err(store_err_to_string)?;
+    let r = store
+        .get_pipeline_run(&run_id)
+        .map_err(store_err_to_string)?;
     Ok(PipelineRunSummary::from(&r))
 }
 
@@ -267,7 +266,9 @@ pub fn pipeline_run_list_stages(
     run_id: String,
 ) -> Result<Vec<StageRunSummary>, String> {
     let store = state.store.lock().map_err(lock_err)?;
-    let rows = store.list_stage_runs(&run_id).map_err(store_err_to_string)?;
+    let rows = store
+        .list_stage_runs(&run_id)
+        .map_err(store_err_to_string)?;
     Ok(rows.iter().map(StageRunSummary::from).collect())
 }
 
@@ -358,7 +359,9 @@ pub fn project_overview(
     // durable signal; the per-table lookups below are belt-and-
     // suspenders in case legacy data was written before the event
     // log was populated.
-    let events = store.list_events(&project_id).map_err(store_err_to_string)?;
+    let events = store
+        .list_events(&project_id)
+        .map_err(store_err_to_string)?;
     let mut source_imported = false;
     let mut analysis_completed = false;
     let mut version_created = false;
@@ -393,7 +396,9 @@ pub fn project_overview(
     // (e.g. legacy data, or events table not yet written for a
     // session import). Treat any source asset in any of the
     // project's sessions as `imported = true`.
-    let sessions = store.list_sessions(&project_id).map_err(store_err_to_string)?;
+    let sessions = store
+        .list_sessions(&project_id)
+        .map_err(store_err_to_string)?;
     let mut any_source_asset = false;
     for session in &sessions {
         let assets = store
@@ -411,9 +416,12 @@ pub fn project_overview(
     let runs = store
         .list_pipeline_runs(&project_id)
         .map_err(store_err_to_string)?;
-    let any_completed_run = runs
-        .iter()
-        .any(|r| matches!(r.status, astroforge_core::domain::PipelineRunStatus::Completed));
+    let any_completed_run = runs.iter().any(|r| {
+        matches!(
+            r.status,
+            astroforge_core::domain::PipelineRunStatus::Completed
+        )
+    });
 
     // Belt-and-suspenders export check: list exports for the most
     // recent completed run if any. We don't have a `list_exports`

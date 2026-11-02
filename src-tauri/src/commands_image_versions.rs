@@ -12,6 +12,7 @@
 //! Svelte side can render the same shape it already accepts.
 
 use astroforge_core::domain::ImageVersion;
+use tauri::State;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ImageVersionDto {
@@ -59,7 +60,10 @@ pub fn image_version_list(
 ) -> Result<ImageVersionListResponse, String> {
     use astroforge_core::domain::ProjectEventKind;
 
-    let store = state.store.lock().map_err(crate::commands_project::lock_err)?;
+    let store = state
+        .store
+        .lock()
+        .map_err(crate::commands_project::lock_err)?;
     // Touch the project so an unknown id errors with a clear
     // "project not found" path rather than an empty list.
     let project = store

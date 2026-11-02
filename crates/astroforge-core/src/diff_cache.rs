@@ -89,7 +89,7 @@ impl DiffCacheKey {
 }
 
 /// Stats counters for the cache.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DiffCacheStats {
     pub hits: u64,
     pub misses: u64,

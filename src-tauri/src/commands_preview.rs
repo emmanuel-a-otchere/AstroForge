@@ -118,10 +118,7 @@ pub fn create_preview_run(
     // 1. Resolve the stage execution → plan → stage so the preview
     //    runs the *actual* stage type with the *actual* parameters.
     let (stage, session_id) = {
-        let plan_store = state
-            .store
-            .lock()
-            .map_err(|_| "plan store lock poisoned".to_string())?;
+        let plan_store = &*state.store;
         let exec = plan_store
             .get_stage_execution(&request.stage_execution_id)
             .map_err(|e| format!("resolve stage execution: {e}"))?;
@@ -345,9 +342,9 @@ fn persist_preview_png(
         producer_stage: Some(stage_execution_id.to_string()),
         pipeline_run_id: Some(preview_id.to_string()),
         parent_artifact_ids: vec![],
-        width: Some(image.width() as i64),
-        height: Some(image.height() as i64),
-        channels: Some(image.channels() as i64),
+        width: Some(image.width() as u32),
+        height: Some(image.height() as u32),
+        channels: Some(image.channels() as u32),
         bit_depth: Some(8),
         color_space: Some("srgb".into()),
         linear_or_nonlinear: Some(false),

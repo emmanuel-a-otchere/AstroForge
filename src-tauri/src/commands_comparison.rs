@@ -112,7 +112,8 @@ pub fn apply_image_decision(
             request.reason,
             request.quality_profile,
         )
-    })
+        .map_err(|e| e.to_string())
+    })?
 }
 
 // ─── Comparison set commands ───────────────────────────────────────────────
@@ -150,8 +151,7 @@ pub fn list_comparison_sets_for_project(
     with_store(&state, |s| {
         s.get_project(&project_id)
             .map_err(crate::commands_project::store_err_to_string)?;
-        decision_store::list_comparison_sets_for_project(s, &project_id)
-            .map_err(|e| e.to_string())
+        decision_store::list_comparison_sets_for_project(s, &project_id).map_err(|e| e.to_string())
     })?
 }
 
@@ -310,11 +310,12 @@ pub async fn get_version_fwhm_distribution(
     version_id: String,
     state: tauri::State<'_, ProjectState>,
 ) -> Result<FwhmDistributionDto, String> {
-    let project_root = lock_err(&state)?;
+    let project_root = state.projects_root.clone();
     let project_root_for_block = project_root.clone();
     let version_id_for_block = version_id.clone();
-    let (histogram, width, height) = tokio::task::spawn_blocking(move || {
-        let store = DomainStore::open(&project_root_for_block)?;
+    let (histogram, width, height) = tauri::async_runtime::spawn_blocking(move || {
+        let store = DomainStore::new(&project_root_for_block.join("projects.db"))
+            .map_err(crate::commands_project::store_err_to_string)?;
         let img = load_pixels(&store, &version_id_for_block)?;
         let w = img.width() as u32;
         let h = img.height() as u32;
@@ -350,11 +351,12 @@ pub async fn get_version_noise_map(
     version_id: String,
     state: tauri::State<'_, ProjectState>,
 ) -> Result<NoiseMapDto, String> {
-    let project_root = lock_err(&state)?;
+    let project_root = state.projects_root.clone();
     let project_root_for_block = project_root.clone();
     let version_id_for_block = version_id.clone();
-    let (map, width, height) = tokio::task::spawn_blocking(move || {
-        let store = DomainStore::open(&project_root_for_block)?;
+    let (map, width, height) = tauri::async_runtime::spawn_blocking(move || {
+        let store = DomainStore::new(&project_root_for_block.join("projects.db"))
+            .map_err(crate::commands_project::store_err_to_string)?;
         let img = load_pixels(&store, &version_id_for_block)?;
         let w = img.width() as u32;
         let h = img.height() as u32;
@@ -392,11 +394,12 @@ pub async fn get_version_clipping_masks(
     version_id: String,
     state: tauri::State<'_, ProjectState>,
 ) -> Result<ClippingMasksDto, String> {
-    let project_root = lock_err(&state)?;
+    let project_root = state.projects_root.clone();
     let project_root_for_block = project_root.clone();
     let version_id_for_block = version_id.clone();
-    let (masks, width, height) = tokio::task::spawn_blocking(move || {
-        let store = DomainStore::open(&project_root_for_block)?;
+    let (masks, width, height) = tauri::async_runtime::spawn_blocking(move || {
+        let store = DomainStore::new(&project_root_for_block.join("projects.db"))
+            .map_err(crate::commands_project::store_err_to_string)?;
         let img = load_pixels(&store, &version_id_for_block)?;
         let w = img.width() as u32;
         let h = img.height() as u32;

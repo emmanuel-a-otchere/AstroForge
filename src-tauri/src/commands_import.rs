@@ -24,10 +24,9 @@
 
 use crate::commands_project::ProjectState;
 use astroforge_core::domain::{ClassificationProvenance, ImportState};
-use astroforge_core::domain_store::DomainStore;
-use astroforge_core::import_understanding;
 use astroforge_core::import_scan::ExtractedMetadata;
-use astroforge_core::SessionAnalysis;
+use astroforge_core::import_understanding;
+use astroforge_core::import_understanding::SessionAnalysis;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -71,8 +70,7 @@ pub fn import_analyse_session(
     }
 
     // Compose the orchestrator input from the IPC payload.
-    let metadata_refs: Vec<&ExtractedMetadata> =
-        assets.iter().map(|a| &a.metadata).collect();
+    let metadata_refs: Vec<&ExtractedMetadata> = assets.iter().map(|a| &a.metadata).collect();
     let paths: Vec<String> = assets.iter().map(|a| a.path.clone()).collect();
 
     // P4 target intelligence: if the caller supplied a
@@ -89,10 +87,7 @@ pub fn import_analyse_session(
         target: target_intel.as_ref(),
     };
     let analysis = import_understanding::analyse_session(&input);
-    let classification = import_understanding::classification_from_analysis(
-        &session_id,
-        &analysis,
-    );
+    let classification = import_understanding::classification_from_analysis(&session_id, &analysis);
     store
         .set_session_classification(&session_id, &classification)
         .map_err(|e| e.to_string())?;
@@ -130,7 +125,7 @@ pub fn import_confirm(
         .get_session_classification(&session_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| {
-            "no classification recorded; call import_analyse_session first".into()
+            "no classification recorded; call import_analyse_session first".to_string()
         })?;
     classification.import_state = ImportState::Confirmed;
     store
@@ -156,7 +151,7 @@ pub fn import_override_classification(
     let mut classification = store
         .get_session_classification(&session_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "no classification recorded".into())?;
+        .ok_or_else(|| "no classification recorded".to_string())?;
     if let Some(kind) = capture_kind {
         classification.capture_kind = Some(kind);
     }
@@ -194,7 +189,7 @@ pub fn import_get_target_provenance(
     let classification = store
         .get_session_classification(&session_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "no classification recorded".into())?;
+        .ok_or_else(|| "no classification recorded".to_string())?;
     let provenance = classification.target_provenance.as_str().to_string();
     let reasoning = match classification.target_provenance {
         ClassificationProvenance::Deterministic => {
@@ -228,7 +223,7 @@ pub fn import_set_materialised(
     let mut classification = store
         .get_session_classification(&session_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "no classification recorded".into())?;
+        .ok_or_else(|| "no classification recorded".to_string())?;
     classification.import_state = ImportState::Materialised;
     store
         .set_session_classification(&session_id, &classification)
@@ -250,7 +245,6 @@ pub struct AssetMetadataInput {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn asset_format_from_path_handles_common_extensions() {
@@ -289,15 +283,15 @@ mod tests {
         ));
     }
 
-    fn asset_format_for_test(
-        path: &str,
-    ) -> astroforge_core::import_scan::AssetFormat {
+    fn asset_format_for_test(path: &str) -> astroforge_core::import_scan::AssetFormat {
         let ext = std::path::Path::new(path)
             .extension()
             .and_then(|s| s.to_str())
             .map(|s| s.to_lowercase());
         match ext.as_deref() {
-            Some("fits") | Some("fit") | Some("fts") => astroforge_core::import_scan::AssetFormat::Fits,
+            Some("fits") | Some("fit") | Some("fts") => {
+                astroforge_core::import_scan::AssetFormat::Fits
+            }
             Some("png") => astroforge_core::import_scan::AssetFormat::Png,
             Some("jpg") | Some("jpeg") => astroforge_core::import_scan::AssetFormat::Jpeg,
             Some("dng") => astroforge_core::import_scan::AssetFormat::Dng,

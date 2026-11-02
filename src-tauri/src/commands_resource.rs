@@ -6,9 +6,7 @@
 //! Stateless: the snapshot is recomputed on demand so it always reflects
 //! current memory pressure, and nothing here touches the domain store.
 
-use astroforge_core::resource::{
-    BackendCapability, ExecutionBudget, ResourceSnapshot,
-};
+use astroforge_core::resource::{BackendCapability, ExecutionBudget, ResourceSnapshot};
 
 /// Detect the current device and return the snapshot with the derived
 /// execution recommendation. Infallible by design — individual probes
@@ -46,9 +44,8 @@ pub fn derive_execution_budget(dataset_size_bytes: u64) -> ExecutionBudget {
 #[tauri::command]
 pub fn stage_execution_budget(parameters_json: Option<String>) -> ExecutionBudget {
     let snap = ResourceSnapshot::detect();
-    let dataset_size_bytes = parameters_json
-        .as_deref()
-        .and_then(astroforge_core::resource::parse_dataset_size_bytes)
-        .unwrap_or(astroforge_core::resource::UNKNOWN_DATASET_SIZE_BYTES);
+    let dataset_size_bytes =
+        astroforge_core::resource::parse_dataset_size_bytes(parameters_json.as_deref())
+            .unwrap_or(astroforge_core::resource::UNKNOWN_DATASET_SIZE_BYTES);
     astroforge_core::resource::derive_stage_budget(&snap, dataset_size_bytes)
 }

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Recon Tranche 2026-10 — Wave 1: ship readiness (RT-1..RT-5, #419-#424, #442)
+
+**Scope.** Hygiene + release engineering wave of the ship-readiness tranche.
+The headline: the project is now **installable and release-testable** —
+`v0.1.0-rc.7` attaches a draft release with installers for Linux
+(AppImage/deb/rpm), Windows (NSIS/MSI) and macOS arm64 (dmg), produced by
+`tauri-action` on tag push (`.github/workflows/release.yml`), and
+release-tested on macOS arm64 (mount → launch → clean quit).
+
+- **RT-1 (#419):** honest frontend type checks (no `|| true`), vitest job,
+  3-OS Rust test matrix; CRLF-normalized snapshot tests.
+- **RT-2 (#420):** tauri-action release workflow + app icon set; per-model
+  license manifest follow-through; release fixes across rc.1-rc.7 —
+  npm optional-deps lockfile restoration (#440, #441 + 37 @rollup/@esbuild
+  platform entries), `src-tauri` joined to the workspace with its 89-diagnostic
+  API drift re-aligned and 5 lost `#[tauri::command]` attributes restored
+  (#442/#443), npm/crate tauri version alignment (#444), Linux installer job
+  moved to ubuntu-24.04 for ort-sys glibc 2.38+ linkage (#445), explicit
+  `rustup target add` for cross targets (#446), macOS x86_64 installers
+  dropped (ort-sys rc.13 has no prebuilt runtime there; follow-up on #420).
+  Latent bug fixed en route: `read_tiff_dimensions` swapped TIFF tags
+  258/277 against the TIFF 6.0 spec.
+- **RT-3 (#421):** project license (MIT OR Apache-2.0) + per-model manifest.
+- **RT-4 (#422):** README Getting Started.
+- **RT-5 (#424):** HOUSE-1 wizard dead-code removal (~2,700 LOC).
+
+**Gates.** `cargo fmt --all --check` clean; `cargo clippy --workspace
+--all-targets -D warnings` clean (now including astroforge-tauri);
+`cargo test --workspace` 1,462 passed / 0 failed.
+
 ### Slice P1.6.1.2: CR-10 NodeCatalog data type + generated manifest
 
 **Scope.** Establishes the `NodeCatalog` as a first-class Rust type in `crates/astroforge-core/src/node_catalog.rs` and emits the JSON manifest at `crates/astroforge-core/src/node_catalog.json`. The catalog is the canonical source of truth for the 12 user-facing `PipelineStageType` variants (matching `src/lib/pipeline-store.ts:8-22`) and the 7.7.9 mapping table that reconciles them to the 8-classical + 2-AI canonical stage types. No UI changes; the TS-side consumption lands in P1.6.1.3 + P1.6.2.x.

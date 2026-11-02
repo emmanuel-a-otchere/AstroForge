@@ -1,7 +1,11 @@
 # AstroForge — Recon Tranche 2026-10: Ship-Readiness Plan
 
 **Date:** 2026-10 (post-recon)
-**Status:** Proposed
+**Status:** Wave 1 complete (RT-1 #419, RT-2 #420, RT-3 #421, RT-4 #422,
+RT-5 #424 closed); RT-2 ship acceptance verified by v0.1.0-rc.7 (draft
+release with installers for Linux/Windows/macOS-arm64, release-tested on
+macOS arm64). Waves 2-5 pending. macOS x86_64 installers deferred:
+ort-sys rc.13 ships no prebuilt ONNX Runtime for that target (#420).
 **Milestone:** "Recon Tranche 2026-10 — Ship Readiness" (milestone #4)
 **Scope:** Concrete plan for the gaps, improvements, and enrichment ideas identified
 in the 2026-10 repository recon. Each workstream below is tracked by a GitHub
@@ -160,10 +164,11 @@ keyboard/screen-reader support per #131–132. Only after v0.1 ships.
 Each tracked issue carries `roadmap-recon` + a priority label mapping to the
 kanban columns: `status:planned` → Backlog; assignee + in-progress label →
 In Progress; linked PR → In Review; closed → Done. The GitHub Projects board
-("Roadmap") can be created with Status = Todo/In Progress/In Review/Done and
-Priority = P0/P1/P2/P3 fields; `gh`-based automation is blocked for the current
-token scope (Projects v2 GraphQL not accessible), so issues are structured for
-one-command board ingestion once a project exists.
+("AstroForge Development", project #11) carries Status (Backlog / Ready /
+In progress / In review / Done), Priority (P0-P3) and Size (XS-XL) fields.
+Projects v2 GraphQL automation works via `gh api graphql` (the 2026-10 token
+scope note is obsolete): items are added per PR, statuses follow the
+opened → In review, merged → Done, started → In progress rhythm.
 
 ## 7. Definition of done (tranche)
 

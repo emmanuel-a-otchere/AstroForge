@@ -922,11 +922,8 @@ fn recipe_import(
         );
         return Err(CommandError {
             message: format!(
-                "validation: {}",
-                format!(
-                    "imported recipe failed security validation: {}",
-                    kinds.join(", ")
-                )
+                "validation: imported recipe failed security validation: {}",
+                kinds.join(", ")
             ),
         });
     }

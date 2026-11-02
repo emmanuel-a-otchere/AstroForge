@@ -1,0 +1,42 @@
+{
+  "manifest_version": 1,
+  "provenance": "All builtin models are generated in-repo by scripts/generate_builtin_models.py (deterministic classical kernels; no third-party weights). They are original works of the AstroForge project.",
+  "default_license": "MIT OR Apache-2.0",
+  "models": [
+    {
+      "file": "builtin-blur-blend.onnx",
+      "sha256": "30b4c3729513f54802d00680ae6793016719f4cc40a00a7f231d220ccb1ae4f3",
+      "size_bytes": 523,
+      "license": "MIT OR Apache-2.0",
+      "provenance": "generated in-repo (scripts/generate_builtin_models.py)"
+    },
+    {
+      "file": "builtin-hotpixel.onnx",
+      "sha256": "07589c4d911fd4820ebcd7454d04c43cb926adad2bc75786c3bcb9cc496fba97",
+      "size_bytes": 422,
+      "license": "MIT OR Apache-2.0",
+      "provenance": "generated in-repo (scripts/generate_builtin_models.py)"
+    },
+    {
+      "file": "builtin-masked-fill.onnx",
+      "sha256": "d1646db8b65d2fb02a6badffd596f1cb255b0cef53edfa5086fc77f077b012ea",
+      "size_bytes": 507,
+      "license": "MIT OR Apache-2.0",
+      "provenance": "generated in-repo (scripts/generate_builtin_models.py)"
+    },
+    {
+      "file": "builtin-sharpen-blend.onnx",
+      "sha256": "34d34e9e75febfb3db84a5cc9ff4e1177ab003d2a9247cc8977845602c86cd85",
+      "size_bytes": 451,
+      "license": "MIT OR Apache-2.0",
+      "provenance": "generated in-repo (scripts/generate_builtin_models.py)"
+    },
+    {
+      "file": "builtin-upscale-2x.onnx",
+      "sha256": "195850f85b9661fe7b3361b5c02c7b1a9ca5f453ae639082691f675ee075b7f1",
+      "size_bytes": 369,
+      "license": "MIT OR Apache-2.0",
+      "provenance": "generated in-repo (scripts/generate_builtin_models.py)"
+    }
+  ]
+}

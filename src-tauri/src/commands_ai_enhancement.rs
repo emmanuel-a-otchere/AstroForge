@@ -21,22 +21,15 @@
 //! profile so the frontend can render the observations
 //! without a second IPC round-trip.
 
-use astroforge_core::domain_store::DomainStore;
-use astroforge_core::ai_engine::Analyzer;
-use astroforge_core::ai_engine::analyzer;
-use astroforge_core::ai_engine::recommendation;
-use astroforge_core::domain::{
-    AiMask, AiOperation, AiRecommendation, EnhancementStack, ImageAnalysis,
-    ImageRegion, ImageVersion, ProjectEvent, ProjectEventKind, OperationLog,
-};
-use crate::enhancement as enhancement_engine;
-use crate::image::F32Image;
-use crate::image_analysis;
 use astroforge_ai::operations as ai_operations;
 use astroforge_ai::recommendations as ai_recommendations;
+use astroforge_core::domain_store::DomainStore;
+use astroforge_core::enhancement as enhancement_engine;
+use astroforge_core::image::F32Image;
+use astroforge_core::image_analysis;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tauri::State;
 
 use crate::commands_project::{lock_err, ProjectState};
@@ -87,9 +80,18 @@ fn legacy_path() -> Option<PathBuf> {
     }
 }
 
+/// Locate the user's home directory (`HOME`, falling back to
+/// `USERPROFILE` on Windows). Returns None when neither is
+/// set.
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+}
+
 /// Open the legacy SQLite file via `DomainStore` (read-only
 /// is fine; we only INSERT OR IGNORE from it).
-fn open_legacy_store(path: &PathBuf) -> Result<DomainStore, String> {
+fn open_legacy_store(path: &Path) -> Result<DomainStore, String> {
     DomainStore::new(path).map_err(|e| e.to_string())
 }
 
@@ -100,10 +102,7 @@ fn open_legacy_store(path: &PathBuf) -> Result<DomainStore, String> {
 /// enhancement_stacks. Each row carries its own
 /// `project_id`, so once the rows land in the target DB they
 /// are naturally scoped per project.
-fn migrate_legacy_db(
-    legacy: &DomainStore,
-    target: &DomainStore,
-) -> Result<usize, String> {
+fn migrate_legacy_db(legacy: &DomainStore, target: &DomainStore) -> Result<usize, String> {
     let mut migrated = 0usize;
 
     // image_versions
@@ -164,38 +163,43 @@ fn with_store<R>(
 /// Response envelope for list commands so the frontend can
 /// distinguish "no rows" from "error". P2+ will move real
 /// content here; P1 returns empty vectors.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AiEnhancementListResponse<T> {
     pub items: Vec<T>,
 }
 
-pub fn ai_operation_get(operation_id: String,
-    state: State<'_, ProjectState>) -> Result<serde_json::Value, String> {
+#[tauri::command]
+pub fn ai_operation_get(
+    operation_id: String,
+    state: State<'_, ProjectState>,
+) -> Result<serde_json::Value, String> {
     with_store(&state, |s| match s.get_ai_operation(&operation_id) {
         Ok(op) => Ok(serde_json::to_value(&op).map_err(|e| e.to_string())?),
         Err(_) => Ok(serde_json::Value::Null),
-    })
+    })?
 }
 
 #[tauri::command]
 pub fn ai_operation_list_for_stage(
     stage_run_id: String,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
     with_store(&state, |s| {
-        let rows = s.list_ai_operations_for_stage(&stage_run_id).unwrap_or_default();
+        let rows = s
+            .list_ai_operations_for_stage(&stage_run_id)
+            .unwrap_or_default();
         let items: Vec<serde_json::Value> = rows
             .iter()
             .filter_map(|op| serde_json::to_value(op).ok())
             .collect();
         Ok(AiEnhancementListResponse { items })
-    })
+    })?
 }
 
 #[tauri::command]
 pub fn image_analysis_latest(
     image_version_id: String,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<serde_json::Value, String> {
     with_store(&state, |s| {
         match s.latest_image_analysis_for_version(&image_version_id) {
@@ -203,13 +207,13 @@ pub fn image_analysis_latest(
             Ok(None) => Ok(serde_json::Value::Null),
             Err(e) => Err(e.to_string()),
         }
-    })
+    })?
 }
 
 #[tauri::command]
 pub fn image_region_list(
     image_version_id: String,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
     with_store(&state, |s| {
         let rows = s.list_image_regions(&image_version_id).unwrap_or_default();
@@ -218,28 +222,30 @@ pub fn image_region_list(
             .filter_map(|row| serde_json::to_value(row).ok())
             .collect();
         Ok(AiEnhancementListResponse { items })
-    })
+    })?
 }
 
 #[tauri::command]
 pub fn ai_recommendation_list_for_version(
     image_version_id: String,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
     with_store(&state, |s| {
-        let rows = s.list_ai_recommendations_for_version(&image_version_id).unwrap_or_default();
+        let rows = s
+            .list_ai_recommendations_for_version(&image_version_id)
+            .unwrap_or_default();
         let items: Vec<serde_json::Value> = rows
             .iter()
             .filter_map(|row| serde_json::to_value(row).ok())
             .collect();
         Ok(AiEnhancementListResponse { items })
-    })
+    })?
 }
 
 #[tauri::command]
 pub fn ai_mask_list(
     image_version_id: String,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
     with_store(&state, |s| {
         let rows = s.list_ai_masks(&image_version_id).unwrap_or_default();
@@ -248,37 +254,41 @@ pub fn ai_mask_list(
             .filter_map(|row| serde_json::to_value(row).ok())
             .collect();
         Ok(AiEnhancementListResponse { items })
-    })
+    })?
 }
 
 #[tauri::command]
 pub fn enhancement_stack_list_for_source(
     image_version_id: String,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
     with_store(&state, |s| {
-        let rows = s.list_enhancement_stacks_for_source(&image_version_id).unwrap_or_default();
+        let rows = s
+            .list_enhancement_stacks_for_source(&image_version_id)
+            .unwrap_or_default();
         let items: Vec<serde_json::Value> = rows
             .iter()
             .filter_map(|row| serde_json::to_value(row).ok())
             .collect();
         Ok(AiEnhancementListResponse { items })
-    })
+    })?
 }
 
 #[tauri::command]
 pub fn enhancement_preview_list_for_operation(
     operation_id: String,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
     with_store(&state, |s| {
-        let rows = s.list_enhancement_previews_for_operation(&operation_id).unwrap_or_default();
+        let rows = s
+            .list_enhancement_previews_for_operation(&operation_id)
+            .unwrap_or_default();
         let items: Vec<serde_json::Value> = rows
             .iter()
             .filter_map(|row| serde_json::to_value(row).ok())
             .collect();
         Ok(AiEnhancementListResponse { items })
-    })
+    })?
 }
 
 /// Marker so the `State` import isn't flagged unused on a
@@ -317,8 +327,10 @@ pub struct AnalyzeImageResponse {
 /// values are clamped so the analyzer stays robust to
 /// pre-multiplied inputs.
 #[tauri::command]
-pub fn analyze_image(request: AnalyzeImageRequest,
-    state: State<'_, ProjectState>) -> Result<AnalyzeImageResponse, String> {
+pub fn analyze_image(
+    request: AnalyzeImageRequest,
+    state: State<'_, ProjectState>,
+) -> Result<AnalyzeImageResponse, String> {
     let AnalyzeImageRequest {
         image_version_id,
         width,
@@ -360,7 +372,7 @@ pub fn analyze_image(request: AnalyzeImageRequest,
     let analysis_id = format!("ana_{}", new_id_suffix());
     // Persist the report.
     with_store(&state, |s| {
-        s.upsert_image_analysis(&crate::domain::ImageAnalysis {
+        s.upsert_image_analysis(&astroforge_core::domain::ImageAnalysis {
             analysis_id: analysis_id.clone(),
             project_id: String::new(),
             image_version_id: image_version_id.clone(),
@@ -368,7 +380,7 @@ pub fn analyze_image(request: AnalyzeImageRequest,
             created_at: report.created_at.clone(),
         })
         .map_err(|e| e.to_string())
-    })?;
+    })??;
     Ok(AnalyzeImageResponse {
         analysis_id,
         profile_json,
@@ -429,7 +441,7 @@ pub struct GenerateRecommendationsResponse {
 #[tauri::command]
 pub fn generate_ai_recommendations(
     request: GenerateRecommendationsRequest,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<GenerateRecommendationsResponse, String> {
     let GenerateRecommendationsRequest {
         project_id,
@@ -445,15 +457,17 @@ pub fn generate_ai_recommendations(
     } else {
         project_id
     };
-    let report_json = with_store(&state, |s| {
+    let report_json = with_store(&state, |s| -> Result<String, String> {
         let analysis_row = s
             .latest_image_analysis_for_version(&image_version_id)
             .map_err(|e| e.to_string())?;
         let Some(row) = analysis_row else {
             return Ok(String::new());
         };
-        let report = crate::image_analysis::report::ImageAnalysisReport::from_json(&row.profile_json)
-            .map_err(|e| format!("analysis profile malformed: {e}"))?;
+        let report = astroforge_core::image_analysis::report::ImageAnalysisReport::from_json(
+            &row.profile_json,
+        )
+        .map_err(|e| format!("analysis profile malformed: {e}"))?;
         let engine_report = ai_recommendations::analyze(&report, &project_id);
         let out_json = engine_report.to_json().map_err(|e| e.to_string())?;
         let rows = ai_recommendations::flatten_for_store(&engine_report);
@@ -461,7 +475,7 @@ pub fn generate_ai_recommendations(
             s.upsert_ai_recommendation(r).map_err(|e| e.to_string())?;
         }
         Ok(out_json)
-    })?;
+    })??;
     if report_json.is_empty() {
         return Ok(GenerateRecommendationsResponse {
             report_json: String::new(),
@@ -476,8 +490,8 @@ pub fn generate_ai_recommendations(
             .iter()
             .filter_map(|row| serde_json::to_value(row).ok())
             .collect();
-        Ok(AiEnhancementListResponse { items })
-    })?;
+        Ok::<_, String>(AiEnhancementListResponse { items })
+    })??;
     Ok(GenerateRecommendationsResponse {
         report_json,
         recommendations: stored,
@@ -507,12 +521,13 @@ pub struct EnhancementStackDto {
 #[tauri::command]
 pub fn enhancement_stack_create(
     request: CreateEnhancementStackRequest,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<EnhancementStackDto, String> {
     let now_iso = now_iso_string();
     let stack_id = format!("stk_{}", new_id_suffix());
-    let op_json = enhancement_engine::EnhancementStackRecord::operations_to_json(&request.operations);
-    let record = crate::domain::EnhancementStack {
+    let op_json =
+        enhancement_engine::EnhancementStackRecord::operations_to_json(&request.operations);
+    let record = astroforge_core::domain::EnhancementStack {
         stack_id: stack_id.clone(),
         project_id: request.project_id,
         source_image_version_id: request.source_image_version_id.clone(),
@@ -520,7 +535,10 @@ pub fn enhancement_stack_create(
         branched_from_version_id: None,
         created_at: now_iso,
     };
-    with_store(&state, |s| s.upsert_enhancement_stack(&record).map_err(|e| e.to_string()))?;
+    with_store(&state, |s| {
+        s.upsert_enhancement_stack(&record)
+            .map_err(|e| e.to_string())
+    })??;
     let stack_record = enhancement_engine::EnhancementStackRecord {
         stack_id,
         project_id: record.project_id,
@@ -535,8 +553,11 @@ pub fn enhancement_stack_create(
 }
 
 /// CR-06 P4 — fetch a stack by id.
-pub fn enhancement_stack_get(stack_id: String,
-    state: State<'_, ProjectState>) -> Result<serde_json::Value, String> {
+#[tauri::command]
+pub fn enhancement_stack_get(
+    stack_id: String,
+    state: State<'_, ProjectState>,
+) -> Result<serde_json::Value, String> {
     with_store(&state, |s| match s.get_enhancement_stack(&stack_id) {
         Ok(Some(row)) => {
             let ops = enhancement_engine::EnhancementStackRecord::operations_from_json(
@@ -554,7 +575,7 @@ pub fn enhancement_stack_get(stack_id: String,
         }
         Ok(None) => Ok(serde_json::Value::Null),
         Err(e) => Err(e.to_string()),
-    })
+    })?
 }
 
 /// CR-06 P4 — apply a `StackMutation` (reorder, set enabled,
@@ -564,7 +585,7 @@ pub fn enhancement_stack_get(stack_id: String,
 pub fn enhancement_stack_apply_mutation(
     stack_id: String,
     mutation: enhancement_engine::StackMutation,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<serde_json::Value, String> {
     with_store(&state, |s| {
         let row = s
@@ -581,11 +602,10 @@ pub fn enhancement_stack_apply_mutation(
             branched_from_version_id: row.branched_from_version_id.clone(),
             created_at: row.created_at.clone(),
         };
-        record = enhancement_engine::apply_mutation(record, mutation)
-            .map_err(|e| e.to_string())?;
+        record = enhancement_engine::apply_mutation(record, mutation).map_err(|e| e.to_string())?;
         let op_json =
             enhancement_engine::EnhancementStackRecord::operations_to_json(&record.operations);
-        let updated = crate::domain::EnhancementStack {
+        let updated = astroforge_core::domain::EnhancementStack {
             stack_id: record.stack_id.clone(),
             project_id: record.project_id.clone(),
             source_image_version_id: record.source_image_version_id.clone(),
@@ -593,9 +613,10 @@ pub fn enhancement_stack_apply_mutation(
             branched_from_version_id: record.branched_from_version_id.clone(),
             created_at: record.created_at.clone(),
         };
-        s.upsert_enhancement_stack(&updated).map_err(|e| e.to_string())?;
-        Ok(serde_json::to_value(&record).map_err(|e| e.to_string())?)
-    })
+        s.upsert_enhancement_stack(&updated)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_value(&record).map_err(|e| e.to_string())
+    })?
 }
 
 /// CR-06 P4 — create a branch from a stack at the given
@@ -613,7 +634,7 @@ pub struct BranchEnhancementStackRequest {
 #[tauri::command]
 pub fn enhancement_stack_branch(
     request: BranchEnhancementStackRequest,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<serde_json::Value, String> {
     let now_iso = now_iso_string();
     let new_stack_id = format!("stk_{}", new_id_suffix());
@@ -621,9 +642,7 @@ pub fn enhancement_stack_branch(
         let source = s
             .get_enhancement_stack(&request.source_stack_id)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| {
-                format!("source stack not found: {}", request.source_stack_id)
-            })?;
+            .ok_or_else(|| format!("source stack not found: {}", request.source_stack_id))?;
         let source_record = enhancement_engine::EnhancementStackRecord {
             stack_id: source.stack_id,
             project_id: source.project_id,
@@ -641,10 +660,9 @@ pub fn enhancement_stack_branch(
             request.new_image_version_id.clone(),
             now_iso.clone(),
         );
-        let op_json = enhancement_engine::EnhancementStackRecord::operations_to_json(
-            &branched.operations,
-        );
-        let row = crate::domain::EnhancementStack {
+        let op_json =
+            enhancement_engine::EnhancementStackRecord::operations_to_json(&branched.operations);
+        let row = astroforge_core::domain::EnhancementStack {
             stack_id: branched.stack_id.clone(),
             project_id: branched.project_id.clone(),
             source_image_version_id: branched.source_image_version_id.clone(),
@@ -652,16 +670,20 @@ pub fn enhancement_stack_branch(
             branched_from_version_id: branched.branched_from_version_id.clone(),
             created_at: branched.created_at.clone(),
         };
-        s.upsert_enhancement_stack(&row).map_err(|e| e.to_string())?;
-        Ok(serde_json::to_value(&branched).map_err(|e| e.to_string())?)
-    })
+        s.upsert_enhancement_stack(&row)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_value(&branched).map_err(|e| e.to_string())
+    })?
 }
 
 /// CR-06 P4 — list the canonical operations registry so the
 /// UI can render the operation picker without hard-coding
 /// the list. The Tauri command shape matches the
 /// `astroforge_ai::operations::OperationInfo` JSON form.
-pub fn operations_registry_list(state: State<'_, ProjectState>) -> Result<Vec<serde_json::Value>, String> {
+#[tauri::command]
+pub fn operations_registry_list(
+    _state: State<'_, ProjectState>,
+) -> Result<Vec<serde_json::Value>, String> {
     Ok(ai_operations::registry()
         .into_iter()
         .map(|op| serde_json::to_value(&op).unwrap_or(serde_json::Value::Null))
@@ -672,7 +694,7 @@ pub fn operations_registry_list(state: State<'_, ProjectState>) -> Result<Vec<se
 #[tauri::command]
 pub fn image_version_list_for_project(
     project_id: String,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
     with_store(&state, |s| {
         let rows = s
@@ -683,17 +705,20 @@ pub fn image_version_list_for_project(
             .filter_map(|row| serde_json::to_value(row).ok())
             .collect();
         Ok(AiEnhancementListResponse { items })
-    })
+    })?
 }
 
 /// CR-06 P4 — fetch a single Image Version by id.
-pub fn image_version_get(version_id: String,
-    state: State<'_, ProjectState>) -> Result<serde_json::Value, String> {
+#[tauri::command]
+pub fn image_version_get(
+    version_id: String,
+    state: State<'_, ProjectState>,
+) -> Result<serde_json::Value, String> {
     with_store(&state, |s| match s.get_image_version(&version_id) {
         Ok(Some(row)) => Ok(serde_json::to_value(&row).map_err(|e| e.to_string())?),
         Ok(None) => Ok(serde_json::Value::Null),
         Err(e) => Err(e.to_string()),
-    })
+    })?
 }
 
 /// CR-06 P4 — request payload for `enhancement_apply_operation`.
@@ -774,7 +799,7 @@ pub struct ApplyAiOperationResponse {
 #[tauri::command]
 pub fn enhancement_apply_operation(
     request: ApplyAiOperationRequest,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<ApplyAiOperationResponse, String> {
     use astroforge_ai::dispatch_operation;
     use astroforge_ai::{DispatchInputs, HardwareProbe, ModelRegistry};
@@ -782,7 +807,6 @@ pub fn enhancement_apply_operation(
     use astroforge_core::masks::encoding::from_json as mask_from_json;
     use astroforge_core::quality_gates::report::run as run_quality_gates;
     use astroforge_core::quality_gates::GateThresholds;
-    use std::sync::Arc;
 
     let now_iso = now_iso_string();
     let result_version_id = format!("ver_{}", new_id_suffix());
@@ -799,14 +823,15 @@ pub fn enhancement_apply_operation(
     // dispatcher. The Studio always carries real pixels
     // through the operation, so the stub branch is a
     // safe degraded default.
-    let source_pixels = load_or_stub_pixels(&request.source_image_version_id)?;
+    let source_pixels = load_or_stub_pixels(&state, &request.source_image_version_id)?;
     let source_mask = match request.mask_id.as_deref() {
-        Some(mask_id) => with_store(&state, |s| match s.get_ai_mask(mask_id) {
-            Ok(Some(row)) => mask_from_json(&row.mask_json)
-                .map_err(|e| format!("mask {mask_id}: {e}")),
+        Some(mask_id) => Some(with_store(&state, |s| match s.get_ai_mask(mask_id) {
+            Ok(Some(row)) => {
+                mask_from_json(&row.mask_json).map_err(|e| format!("mask {mask_id}: {e}"))
+            }
             Ok(None) => Err(format!("mask {mask_id} not found")),
             Err(e) => Err(e.to_string()),
-        })?,
+        })??),
         None => None,
     };
 
@@ -815,13 +840,12 @@ pub fn enhancement_apply_operation(
     // hashes) supersede the builtin graphs. The dir is
     // created lazily; absence is non-fatal.
     let probe = HardwareProbe::detect();
-    let models_dir = dirs_home()
-        .map(|mut p| {
-            p.push(".astroforge");
-            p.push("models");
-            let _ = std::fs::create_dir_all(&p);
-            p
-        });
+    let models_dir = dirs_home().map(|mut p| {
+        p.push(".astroforge");
+        p.push("models");
+        let _ = std::fs::create_dir_all(&p);
+        p
+    });
     let dispatch = dispatch_operation(
         &request.operation_id,
         &request.parameters_json,
@@ -842,9 +866,9 @@ pub fn enhancement_apply_operation(
     let sequence = with_store(&state, |s| {
         s.next_image_version_sequence(&request.project_id)
             .map_err(|e| e.to_string())
-    })?;
+    })??;
     let artifact_id = format!("art_{}", new_id_suffix());
-    let version = crate::domain::ImageVersion {
+    let version = astroforge_core::domain::ImageVersion {
         version_id: result_version_id.clone(),
         project_id: request.project_id.clone(),
         label: request.operation_id.clone(),
@@ -875,7 +899,9 @@ pub fn enhancement_apply_operation(
         recipe_version: request.recipe_version,
         recipe_hash: request.recipe_hash.clone(),
     };
-    with_store(&state, |s| s.upsert_image_version(&version).map_err(|e| e.to_string()))?;
+    with_store(&state, |s| {
+        s.upsert_image_version(&version).map_err(|e| e.to_string())
+    })??;
     let ai_op_id = format!("op_{}", new_id_suffix());
     let safety_str = match outcome.safety_classification {
         ai_operations::SafetyClassification::Deterministic => "deterministic",
@@ -883,8 +909,8 @@ pub fn enhancement_apply_operation(
         ai_operations::SafetyClassification::Generative => "generative",
     };
     let safety_cls = parse_safety(safety_str);
-    let ai_op_row = crate::domain::AiOperation {
-        operation_id: ai_op_id,
+    let ai_op_row = astroforge_core::domain::AiOperation {
+        operation_id: ai_op_id.clone(),
         stage_run_id: String::new(),
         model_id: dispatch.model_id.clone(),
         model_version: dispatch.model_version.clone(),
@@ -898,7 +924,10 @@ pub fn enhancement_apply_operation(
         precision: None,
         parameters_json: Some(request.parameters_json.clone()),
         seed: None,
-        deterministic: matches!(safety_cls, crate::domain::AiSafetyClassification::Deterministic),
+        deterministic: matches!(
+            safety_cls,
+            astroforge_core::domain::AiSafetyClassification::Deterministic
+        ),
         safety_classification: safety_cls,
         experimental: false,
         input_artifact_id: Some(request.source_image_version_id.clone()),
@@ -909,7 +938,9 @@ pub fn enhancement_apply_operation(
             serde_json::json!({ "duration_ms": dispatch.duration_ms }).to_string(),
         ),
     };
-    with_store(&state, |s| s.upsert_ai_operation(&ai_op_row).map_err(|e| e.to_string()))?;
+    with_store(&state, |s| {
+        s.upsert_ai_operation(&ai_op_row).map_err(|e| e.to_string())
+    })??;
 
     // Persist the produced pixels as a 16-bit TIFF
     // artifact under the project's `applied/` directory
@@ -923,16 +954,14 @@ pub fn enhancement_apply_operation(
         let path = parent.join(format!("{result_version_id}.tif"));
         if let Ok(mut f) = std::fs::File::create(&path) {
             if export_tiff_16bit(&result_image, &mut f).is_ok() {
-                let mut registry = ModelRegistry::new(std::path::PathBuf::from(
-                    models_dir.clone().unwrap_or_default(),
-                ));
+                let registry = ModelRegistry::new(models_dir.clone().unwrap_or_default());
                 // Touch the registry so the import compiles
                 // (the apply round doesn't mutate it).
                 let _ = registry.info_for_stage(&request.operation_id);
-                let artifact = crate::domain::Artifact {
+                let artifact = astroforge_core::domain::Artifact {
                     artifact_id: artifact_id.clone(),
                     artifact_hash: String::new(),
-                    artifact_type: crate::domain::ArtifactCategory::Derived,
+                    artifact_type: astroforge_core::domain::ArtifactCategory::Derived,
                     format: ExportFormat::Tiff16.extension().into(),
                     path: path.to_string_lossy().to_string(),
                     size: 0,
@@ -947,7 +976,9 @@ pub fn enhancement_apply_operation(
                     color_space: Some("srgb".into()),
                     linear_or_nonlinear: Some(false),
                 };
-                let _ = with_store(&state, |s| s.record_artifact(&artifact).map_err(|e| e.to_string()));
+                let _ = with_store(&state, |s| {
+                    s.record_artifact(&artifact).map_err(|e| e.to_string())
+                });
             }
         }
     }
@@ -966,7 +997,7 @@ pub fn enhancement_apply_operation(
         result_version_id.clone(),
         request.operation_id.clone(),
     );
-    let report_row = crate::domain::AiQualityReport {
+    let report_row = astroforge_core::domain::AiQualityReport {
         report_id: format!("qr_{}", new_id_suffix()),
         operation_id: ai_op_id.clone(),
         source_image_version_id: request.source_image_version_id.clone(),
@@ -975,7 +1006,10 @@ pub fn enhancement_apply_operation(
         report_json: serde_json::to_string(&gate_report).map_err(|e| e.to_string())?,
         created_at: now_iso.clone(),
     };
-    with_store(&state, |s| s.record_ai_quality_report(&report_row).map_err(|e| e.to_string()))?;
+    with_store(&state, |s| {
+        s.record_ai_quality_report(&report_row)
+            .map_err(|e| e.to_string())
+    })??;
 
     Ok(ApplyAiOperationResponse {
         image_version: serde_json::to_value(&version).map_err(|e| e.to_string())?,
@@ -992,14 +1026,21 @@ pub fn enhancement_apply_operation(
 /// P5.1 reads the on-disk TIFF when one is present
 /// and falls back to a synthetic stub otherwise so
 /// the dispatcher path is always exercised.
-fn load_or_stub_pixels(version_id: &str) -> Result<F32Image, String> {
+fn load_or_stub_pixels(
+    state: &State<'_, ProjectState>,
+    version_id: &str,
+) -> Result<F32Image, String> {
     use astroforge_core::decoders::ImageDecodeError;
-    let path_opt: Option<std::path::PathBuf> = with_store(&state, |s| {
+    let path_opt: Option<std::path::PathBuf> = with_store(state, |s| {
         let ver = s.get_image_version(version_id).map_err(|e| e.to_string())?;
-        let Some(ver) = ver else { return Ok::<_, String>(None) };
-        let art = s.get_artifact(&ver.primary_artifact_id).map_err(|e| e.to_string())?;
-        Ok(art.map(|a| std::path::PathBuf::from(a.path)))
-    })?;
+        let Some(ver) = ver else {
+            return Ok::<_, String>(None);
+        };
+        let art = s
+            .get_artifact(&ver.primary_artifact_id)
+            .map_err(|e| e.to_string())?;
+        Ok(Some(std::path::PathBuf::from(art.path)))
+    })??;
     if let Some(path) = path_opt {
         if path.exists() {
             let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
@@ -1041,11 +1082,11 @@ fn _ref_arc<T>(t: T) -> Arc<T> {
     Arc::new(t)
 }
 
-fn parse_safety(s: &str) -> crate::domain::AiSafetyClassification {
+fn parse_safety(s: &str) -> astroforge_core::domain::AiSafetyClassification {
     match s {
-        "perceptual" => crate::domain::AiSafetyClassification::Perceptual,
-        "generative" => crate::domain::AiSafetyClassification::Generative,
-        _ => crate::domain::AiSafetyClassification::Deterministic,
+        "perceptual" => astroforge_core::domain::AiSafetyClassification::Perceptual,
+        "generative" => astroforge_core::domain::AiSafetyClassification::Generative,
+        _ => astroforge_core::domain::AiSafetyClassification::Deterministic,
     }
 }
 
@@ -1078,8 +1119,13 @@ fn to_registry_entry(op: &ai_operations::OperationInfo) -> OperationRegistryEntr
 /// list. The Tauri command keeps the wire shape stable so
 /// consumers do not have to handle serde `Value`.
 #[tauri::command]
-pub fn enhancement_operations_list(state: State<'_, ProjectState>) -> Result<Vec<OperationRegistryEntry>, String> {
-    Ok(ai_operations::registry().iter().map(to_registry_entry).collect())
+pub fn enhancement_operations_list(
+    _state: State<'_, ProjectState>,
+) -> Result<Vec<OperationRegistryEntry>, String> {
+    Ok(ai_operations::registry()
+        .iter()
+        .map(to_registry_entry)
+        .collect())
 }
 
 /// CR-06 P4 — ISO-8601 timestamp helper used by every
@@ -1123,13 +1169,15 @@ pub struct AiMaskDto {
 /// before persisting so the store never holds a
 /// malformed row.
 #[tauri::command]
-pub fn create_ai_mask(request: CreateAiMaskRequest,
-    state: State<'_, ProjectState>) -> Result<AiMaskDto, String> {
-    use crate::masks::encoding;
+pub fn create_ai_mask(
+    request: CreateAiMaskRequest,
+    state: State<'_, ProjectState>,
+) -> Result<AiMaskDto, String> {
+    use astroforge_core::masks::encoding;
     let _ = encoding::from_json(&request.mask_json)
         .map_err(|e| format!("invalid mask encoding: {e}"))?;
     let mask_id = format!("msk_{}", new_id_suffix());
-    let row = crate::domain::AiMask {
+    let row = astroforge_core::domain::AiMask {
         mask_id,
         project_id: request.project_id,
         image_version_id: request.image_version_id,
@@ -1138,7 +1186,9 @@ pub fn create_ai_mask(request: CreateAiMaskRequest,
         mask_json: request.mask_json,
         created_at: now_iso_string(),
     };
-    with_store(&state, |s| s.upsert_ai_mask(&row).map_err(|e| e.to_string()))?;
+    with_store(&state, |s| {
+        s.upsert_ai_mask(&row).map_err(|e| e.to_string())
+    })??;
     Ok(AiMaskDto {
         mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
     })
@@ -1155,9 +1205,11 @@ pub struct UpdateAiMaskRequest {
 }
 
 #[tauri::command]
-pub fn update_ai_mask(request: UpdateAiMaskRequest,
-    state: State<'_, ProjectState>) -> Result<AiMaskDto, String> {
-    use crate::masks::encoding;
+pub fn update_ai_mask(
+    request: UpdateAiMaskRequest,
+    state: State<'_, ProjectState>,
+) -> Result<AiMaskDto, String> {
+    use astroforge_core::masks::encoding;
     let _ = encoding::from_json(&request.mask_json)
         .map_err(|e| format!("invalid mask encoding: {e}"))?;
     let row = with_store(&state, |s| {
@@ -1168,8 +1220,8 @@ pub fn update_ai_mask(request: UpdateAiMaskRequest,
         existing.mask_json = request.mask_json.clone();
         existing.created_at = now_iso_string();
         s.upsert_ai_mask(&existing).map_err(|e| e.to_string())?;
-        Ok(existing)
-    })?;
+        Ok::<_, String>(existing)
+    })??;
     Ok(AiMaskDto {
         mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
     })
@@ -1181,7 +1233,7 @@ pub fn update_ai_mask(request: UpdateAiMaskRequest,
 #[tauri::command]
 pub fn ai_mask_list_for_version(
     image_version_id: String,
-    state: State<'_, ProjectState>
+    state: State<'_, ProjectState>,
 ) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
     with_store(&state, |s| {
         let rows = s
@@ -1192,17 +1244,20 @@ pub fn ai_mask_list_for_version(
             .filter_map(|row| serde_json::to_value(row).ok())
             .collect();
         Ok(AiEnhancementListResponse { items })
-    })
+    })?
 }
 
 /// CR-06 P5 — fetch a single mask row.
-pub fn ai_mask_get(mask_id: String,
-    state: State<'_, ProjectState>) -> Result<serde_json::Value, String> {
+#[tauri::command]
+pub fn ai_mask_get(
+    mask_id: String,
+    state: State<'_, ProjectState>,
+) -> Result<serde_json::Value, String> {
     with_store(&state, |s| match s.get_ai_mask(&mask_id) {
         Ok(Some(row)) => Ok(serde_json::to_value(&row).map_err(|e| e.to_string())?),
         Ok(None) => Ok(serde_json::Value::Null),
         Err(e) => Err(e.to_string()),
-    })
+    })?
 }
 
 /// CR-06 P5 — build an auto mask on the server from
@@ -1212,6 +1267,8 @@ pub fn ai_mask_get(mask_id: String,
 /// builder, encodes the result, and returns the JSON.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuildAutoMaskRequest {
+    /// Carried for frontend-payload compatibility; pixels arrive inline.
+    #[allow(dead_code)]
     pub image_version_id: String,
     pub width: u32,
     pub height: u32,
@@ -1229,9 +1286,11 @@ pub struct BuildAutoMaskResponse {
 }
 
 #[tauri::command]
-pub fn build_auto_mask(request: BuildAutoMaskRequest,
-    state: State<'_, ProjectState>) -> Result<BuildAutoMaskResponse, String> {
-    use crate::masks::auto::{build as auto_build, AutoTarget};
+pub fn build_auto_mask(
+    request: BuildAutoMaskRequest,
+    _state: State<'_, ProjectState>,
+) -> Result<BuildAutoMaskResponse, String> {
+    use astroforge_core::masks::auto::{build as auto_build, AutoTarget};
     let BuildAutoMaskRequest {
         image_version_id: _,
         width,
@@ -1268,7 +1327,7 @@ pub fn build_auto_mask(request: BuildAutoMaskRequest,
     }
     let mask = auto_build(&img, target).map_err(|e| e.to_string())?;
     let provenance = mask.provenance.clone();
-    let json = crate::masks::encoding::to_json(&mask).map_err(|e| e.to_string())?;
+    let json = astroforge_core::masks::encoding::to_json(&mask).map_err(|e| e.to_string())?;
     Ok(BuildAutoMaskResponse {
         mask_json: json,
         provenance,
@@ -1298,10 +1357,12 @@ pub struct ComposeMaskResponse {
 }
 
 #[tauri::command]
-pub fn compose_mask(request: ComposeMaskRequest,
-    state: State<'_, ProjectState>) -> Result<ComposeMaskResponse, String> {
-    use crate::masks::composite::{apply, CompositeOp};
-    use crate::masks::encoding::{from_json, to_json};
+pub fn compose_mask(
+    request: ComposeMaskRequest,
+    state: State<'_, ProjectState>,
+) -> Result<ComposeMaskResponse, String> {
+    use astroforge_core::masks::composite::{apply, CompositeOp};
+    use astroforge_core::masks::encoding::{from_json, to_json};
     let op = match request.op.as_str() {
         "union" => CompositeOp::Union,
         "intersect" => CompositeOp::Intersect,
@@ -1320,11 +1381,11 @@ pub fn compose_mask(request: ComposeMaskRequest,
         let a_mask = from_json(&a_row.mask_json).map_err(|e| e.to_string())?;
         let b_mask = from_json(&b_row.mask_json).map_err(|e| e.to_string())?;
         let composite = apply(&a_mask, &b_mask, op).map_err(|e| e.to_string())?;
-        Ok(composite)
-    })?;
+        Ok::<_, String>(composite)
+    })??;
     let composite_json = to_json(&composite).map_err(|e| e.to_string())?;
     let mask_id = format!("msk_{}", new_id_suffix());
-    let row = crate::domain::AiMask {
+    let row = astroforge_core::domain::AiMask {
         mask_id,
         project_id: request.project_id,
         image_version_id: request.image_version_id,
@@ -1339,7 +1400,9 @@ pub fn compose_mask(request: ComposeMaskRequest,
         mask_json: composite_json,
         created_at: now_iso_string(),
     };
-    with_store(&state, |s| s.upsert_ai_mask(&row).map_err(|e| e.to_string()))?;
+    with_store(&state, |s| {
+        s.upsert_ai_mask(&row).map_err(|e| e.to_string())
+    })??;
     Ok(ComposeMaskResponse {
         mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
     })
@@ -1377,13 +1440,10 @@ pub struct RunAiQualityReportResponse {
 pub fn run_ai_quality_report(
     request: RunAiQualityReportRequest,
 ) -> Result<RunAiQualityReportResponse, String> {
-    use crate::image::F32Image;
-    use crate::quality_gates::report::run;
-    use crate::quality_gates::GateThresholds;
+    use astroforge_core::quality_gates::report::run;
+    use astroforge_core::quality_gates::GateThresholds;
 
-    let n = (request.width as usize)
-        * (request.height as usize)
-        * (request.channels as usize);
+    let n = (request.width as usize) * (request.height as usize) * (request.channels as usize);
     if request.source_pixels.len() != n {
         return Err(format!(
             "source pixel count mismatch: got {}, expected {}",
@@ -1428,12 +1488,7 @@ pub fn run_ai_quality_report(
     })
 }
 
-fn pixels_to_f32image(
-    pixels: &[f64],
-    width: usize,
-    height: usize,
-    channels: usize,
-) -> F32Image {
+fn pixels_to_f32image(pixels: &[f64], width: usize, height: usize, channels: usize) -> F32Image {
     let mut img = F32Image::new(width, height, channels);
     let plane = width * height;
     for (i, v) in pixels.iter().enumerate() {
@@ -1478,7 +1533,7 @@ pub struct ImageArtifactResponse {
 /// project_id on the version row must match the active project.
 #[tauri::command]
 pub fn read_image_artifact(
-    state: State<'_, crate::PipelinePlanState>,
+    state: State<'_, crate::commands_pipeline_plan::PipelinePlanState>,
     version_id: String,
 ) -> Result<ImageArtifactResponse, String> {
     let domain_store = state
@@ -1498,8 +1553,8 @@ pub fn read_image_artifact(
     // Defense-in-depth: the artifact path must canonicalize inside the
     // applied/<project_id>/ directory. Absolute paths, ../ traversal,
     // and symlinks pointing outside are all refused.
-    let canonical = std::fs::canonicalize(path)
-        .map_err(|e| format!("canonicalize artifact path: {e}"))?;
+    let canonical =
+        std::fs::canonicalize(path).map_err(|e| format!("canonicalize artifact path: {e}"))?;
     let canonical_root = std::fs::canonicalize(&applied_root)
         .map_err(|e| format!("canonicalize applied dir: {e}"))?;
     if !canonical.starts_with(&canonical_root) {
@@ -1508,10 +1563,9 @@ pub fn read_image_artifact(
             canonical.display()
         ));
     }
-    let bytes = std::fs::read(&canonical)
-        .map_err(|e| format!("read artifact file: {e}"))?;
-    let (width, height, channels) = read_tiff_dimensions(&bytes)
-        .ok_or_else(|| "artifact is not a 16-bit TIFF".to_string())?;
+    let bytes = std::fs::read(&canonical).map_err(|e| format!("read artifact file: {e}"))?;
+    let (width, height, channels) =
+        read_tiff_dimensions(&bytes).ok_or_else(|| "artifact is not a 16-bit TIFF".to_string())?;
     Ok(ImageArtifactResponse {
         base64_data: base64::engine::general_purpose::STANDARD.encode(&bytes),
         mime_type: "image/tiff".to_string(),
@@ -1560,15 +1614,26 @@ fn read_tiff_dimensions(bytes: &[u8]) -> Option<(usize, usize, usize)> {
             u16::from_be_bytes([bytes[entry], bytes[entry + 1]])
         };
         let value = if little {
-            u32::from_le_bytes([bytes[entry + 8], bytes[entry + 9], bytes[entry + 10], bytes[entry + 11]])
+            u32::from_le_bytes([
+                bytes[entry + 8],
+                bytes[entry + 9],
+                bytes[entry + 10],
+                bytes[entry + 11],
+            ])
         } else {
-            u32::from_be_bytes([bytes[entry + 8], bytes[entry + 9], bytes[entry + 10], bytes[entry + 11]])
+            u32::from_be_bytes([
+                bytes[entry + 8],
+                bytes[entry + 9],
+                bytes[entry + 10],
+                bytes[entry + 11],
+            ])
         };
         match tag {
             256 => width = Some(value as usize),
             257 => height = Some(value as usize),
-            258 => samples = Some(value as usize),
-            277 => bits_per_sample = Some(value as usize),
+            // TIFF 6.0 spec: 258 = BitsPerSample, 277 = SamplesPerPixel.
+            258 => bits_per_sample = Some(value as usize),
+            277 => samples = Some(value as usize),
             _ => {}
         }
     }
@@ -1608,16 +1673,16 @@ mod tests {
         bytes.extend_from_slice(&3u16.to_le_bytes());
         bytes.extend_from_slice(&1u32.to_le_bytes());
         bytes.extend_from_slice(&height.to_le_bytes());
-        // SamplesPerPixel tag (258).
+        // BitsPerSample tag (258) — 16-bit (TIFF 6.0 tag numbering).
         bytes.extend_from_slice(&258u16.to_le_bytes());
         bytes.extend_from_slice(&3u16.to_le_bytes());
         bytes.extend_from_slice(&1u32.to_le_bytes());
-        bytes.extend_from_slice(&samples.to_le_bytes());
-        // BitsPerSample tag (277).
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        // SamplesPerPixel tag (277).
         bytes.extend_from_slice(&277u16.to_le_bytes());
         bytes.extend_from_slice(&3u16.to_le_bytes());
         bytes.extend_from_slice(&1u32.to_le_bytes());
-        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&samples.to_le_bytes());
         // Next-IFD offset (zero — single IFD).
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes
@@ -1637,30 +1702,26 @@ mod tests {
 
     #[test]
     fn reads_big_endian_dimensions() {
-        // Swap endianness throughout.
-        let mut tiff = minimal_tiff_le(32, 24, 1);
-        // Header "MM" instead of "II".
-        tiff[0] = b'M';
-        tiff[1] = b'M';
-        // Magic 42 in big-endian.
-        tiff[2] = 0;
-        tiff[3] = 42;
-        // IFD offset 8 in big-endian.
-        tiff[4] = 0;
-        tiff[5] = 0;
-        tiff[6] = 0;
-        tiff[7] = 8;
-        // n_entries in big-endian.
-        tiff[8] = 0;
-        tiff[9] = 4;
-        // Reswap the rest.
-        let len = tiff.len();
-        for i in 10..len {
-            // Mirror bytes pairwise.
-            if i % 2 == 0 {
-                tiff.swap(i, i + 1);
-            }
-        }
+        // Build the same minimal 16-bit TIFF in big-endian ("MM") form.
+        // A pairwise byte mirror is not valid here: the 32-bit IFD fields
+        // need full reversal, so construct the bytes endianness-first.
+        let mut tiff = vec![b'M', b'M', 0, 42, 0, 0, 0, 8];
+        // 4 IFD entries, big-endian.
+        tiff.extend_from_slice(&4u16.to_be_bytes());
+        let entry = |tag: u16, value: u32| -> Vec<u8> {
+            let mut e = Vec::with_capacity(12);
+            e.extend_from_slice(&tag.to_be_bytes());
+            e.extend_from_slice(&3u16.to_be_bytes()); // SHORT
+            e.extend_from_slice(&1u32.to_be_bytes());
+            e.extend_from_slice(&value.to_be_bytes());
+            e
+        };
+        tiff.extend_from_slice(&entry(256, 32)); // ImageWidth
+        tiff.extend_from_slice(&entry(257, 24)); // ImageLength
+        tiff.extend_from_slice(&entry(258, 16)); // BitsPerSample
+        tiff.extend_from_slice(&entry(277, 1)); // SamplesPerPixel
+                                                // Next-IFD offset (zero — single IFD).
+        tiff.extend_from_slice(&0u32.to_be_bytes());
         assert_eq!(read_tiff_dimensions(&tiff), Some((32, 24, 1)));
     }
 
@@ -1673,10 +1734,12 @@ mod tests {
     #[test]
     fn rejects_8bit() {
         let mut tiff = minimal_tiff_le(16, 16, 1);
-        // Find the BitsPerSample entry (last one) and overwrite
-        // its value field (offset 12+3*12+8 = 56..60) with 8.
+        // Overwrite the BitsPerSample value (16 as u32 LE) with 8; the
+        // reader must reject the non-16-bit buffer. Scan from the back:
+        // width/height (16x16) also encode 16, and BitsPerSample is the
+        // last such field in the IFD.
         let len = tiff.len();
-        for i in (56..len - 4).step_by(1) {
+        for i in (0..len - 4).rev() {
             if tiff[i..i + 4] == 16u32.to_le_bytes() {
                 tiff[i..i + 4].copy_from_slice(&8u32.to_le_bytes());
                 break;

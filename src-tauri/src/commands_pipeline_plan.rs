@@ -12,25 +12,23 @@
 
 use std::sync::{Arc, Mutex};
 
+use astroforge_core::adaptive::AdaptiveParameterSet;
 use astroforge_core::domain::{ObjectType, PipelinePlan, PipelinePlanStatus};
 use astroforge_core::pipeline_plan::{
     builtin::deep_sky_osc_balanced,
-    dispatch::{
-        BackgroundHandler, CalibrateHandler, DebayerHandler, DenoiseHandler, ExportHandler,
-        HandlerRegistry, RegisterHandler, StackHandler, StretchHandler,
-    },
     plan::{generate_plan as generate_plan_inner, GenerationContext, SessionUnderstanding},
     runner::{CancelHandle, PauseHandle, PipelineRunner, RetryKind, RunOutcome},
     AcquisitionMode, CalibrationAvailability,
 };
-use astroforge_core::adaptive::AdaptiveParameterSet;
 use astroforge_core::pipeline_plans_store::{PipelinePlanStore, PipelinePlanStoreError};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 /// CR-05 P1 — Tauri-managed state for the PipelinePlan store.
 pub struct PipelinePlanState {
-    pub store: Arc<Mutex<PipelinePlanStore>>,
+    /// `PipelinePlanStore` is internally synchronised (its connection
+    /// sits behind a `Mutex`), so it is shared as a plain `Arc`.
+    pub store: Arc<PipelinePlanStore>,
     /// P2 slice 1 — per-plan cancel handles. Keyed by plan_id so the
     /// UI can request cancel after start has returned.
     pub cancel_handles: Mutex<std::collections::HashMap<String, CancelHandle>>,
@@ -225,7 +223,7 @@ pub fn create_pipeline_plan(
     let plan = generate_plan_inner(&ctx, &recipe_stages, recipe_target)
         .map_err(|e| format!("plan generation failed: {e}"))?;
 
-    let store = state.store.lock().map_err(lock_err)?;
+    let store = &*state.store;
     store.insert_plan(&plan).map_err(store_err_to_string)?;
 
     Ok(PipelinePlanDto::from(&plan))
@@ -236,7 +234,7 @@ pub fn pipeline_plan_list_for_project(
     state: State<'_, PipelinePlanState>,
     project_id: String,
 ) -> Result<Vec<astroforge_core::pipeline_plans_store::PipelinePlanSummary>, String> {
-    let store = state.store.lock().map_err(lock_err)?;
+    let store = &*state.store;
     store
         .list_plans_for_project(&project_id)
         .map_err(store_err_to_string)
@@ -247,7 +245,7 @@ pub fn pipeline_plan_get(
     state: State<'_, PipelinePlanState>,
     plan_id: String,
 ) -> Result<PipelinePlanDto, String> {
-    let store = state.store.lock().map_err(lock_err)?;
+    let store = &*state.store;
     let plan = store.load_plan(&plan_id).map_err(store_err_to_string)?;
     Ok(PipelinePlanDto::from(&plan))
 }
@@ -375,7 +373,7 @@ pub fn pipeline_plan_list_resumable_for_project(
     state: State<'_, PipelinePlanState>,
     project_id: String,
 ) -> Result<Vec<astroforge_core::pipeline_plans_store::PipelinePlanSummary>, String> {
-    let store = state.store.lock().map_err(lock_err)?;
+    let store = &*state.store;
     store
         .list_resumable_plans_for_project(&project_id)
         .map_err(store_err_to_string)
@@ -456,7 +454,7 @@ pub fn pipeline_plan_list_stage_executions(
     state: State<'_, PipelinePlanState>,
     plan_id: String,
 ) -> Result<Vec<StageExecutionSummary>, String> {
-    let store = state.store.lock().map_err(lock_err)?;
+    let store = &*state.store;
     let execs = store
         .list_stage_executions_for_plan(&plan_id)
         .map_err(store_err_to_string)?;
@@ -552,7 +550,7 @@ pub fn get_recommendations_for_stage_execution(
     state: State<'_, PipelinePlanState>,
     stage_execution_id: String,
 ) -> Result<Vec<RecommendationDto>, String> {
-    let store = state.store.lock().map_err(lock_err)?;
+    let store = &*state.store;
     let recs = store
         .list_recommendations_for_stage_execution(&stage_execution_id)
         .map_err(store_err_to_string)?;
@@ -568,7 +566,7 @@ pub fn get_recommendations_for_plan(
     state: State<'_, PipelinePlanState>,
     plan_id: String,
 ) -> Result<Vec<RecommendationDto>, String> {
-    let store = state.store.lock().map_err(lock_err)?;
+    let store = &*state.store;
     let recs = store
         .list_recommendations_for_plan(&plan_id)
         .map_err(store_err_to_string)?;
@@ -613,7 +611,8 @@ fn now_unix_ms_string() -> String {
 /// Returns `None` for any other shape (defensive — we don't want
 /// the gate to silently bypass on bad input).
 fn parse_unix_ms(s: &str) -> Option<i64> {
-    s.strip_prefix("unix_ms:").and_then(|tail| tail.parse().ok())
+    s.strip_prefix("unix_ms:")
+        .and_then(|tail| tail.parse().ok())
 }
 
 #[tauri::command]
@@ -638,7 +637,7 @@ pub fn apply_recommendation(
     // the UI can surface "preview required" instead of allowing
     // a blind apply.
     let stage_execution_id = {
-        let store = state.store.lock().map_err(lock_err)?;
+        let store = &*state.store;
         store
             .stage_execution_id_for_recommendation(&recommendation_id)
             .map_err(store_err_to_string)?
@@ -649,15 +648,18 @@ pub fn apply_recommendation(
             .domain_store
             .clone()
             .ok_or_else(|| "domain store is unavailable".to_string())?;
-        let store = state.store.lock().map_err(lock_err)?;
+        let store = &*state.store;
         let rec = store
             .get_recommendation_by_id(&recommendation_id)
             .map_err(store_err_to_string)?;
-        drop(store);
         // The recommendation.created_at is `unix_ms:<ms>`; extract
         // the integer part for the cutoff comparison.
-        let cutoff_ms = parse_unix_ms(&rec.created_at)
-            .ok_or_else(|| format!("recommendation has malformed created_at: {}", rec.created_at))?;
+        let cutoff_ms = parse_unix_ms(&rec.created_at).ok_or_else(|| {
+            format!(
+                "recommendation has malformed created_at: {}",
+                rec.created_at
+            )
+        })?;
         domain_store
             .latest_completed_preview_for_stage_execution(&stage_execution_id, cutoff_ms)
             .map_err(|e| format!("preview gate lookup failed: {e}"))?
@@ -676,13 +678,13 @@ pub fn apply_recommendation(
     // state. The lock is released between passes so the
     // re-read path stays simple.
     let applied_stage_id = {
-        let store = state.store.lock().map_err(lock_err)?;
+        let store = &*state.store;
         let (_id, applied_stage_id) = store
             .apply_recommendation(&recommendation_id, &timestamp, &preview_id)
             .map_err(store_err_to_string)?;
         applied_stage_id
     };
-    let store = state.store.lock().map_err(lock_err)?;
+    let store = &*state.store;
     let recs = store
         .list_recommendations_for_stage_execution(&stage_execution_id)
         .map_err(store_err_to_string)?;
@@ -715,13 +717,13 @@ pub fn dismiss_recommendation(
 ) -> Result<RecommendationUpdateResult, String> {
     let timestamp = now_unix_ms_string();
     {
-        let store = state.store.lock().map_err(lock_err)?;
+        let store = &*state.store;
         store
             .dismiss_recommendation(&recommendation_id, &timestamp)
             .map_err(store_err_to_string)?;
     }
-    let store = state.store.lock().map_err(lock_err)?;
-    let stage_execution_id = stage_execution_id_for_recommendation(&store, &recommendation_id)
+    let store = &*state.store;
+    let stage_execution_id = stage_execution_id_for_recommendation(store, &recommendation_id)
         .map_err(store_err_to_string)?;
     let recs = store
         .list_recommendations_for_stage_execution(&stage_execution_id)
@@ -733,13 +735,6 @@ pub fn dismiss_recommendation(
     Ok(RecommendationUpdateResult {
         recommendation: RecommendationDto::from(&rec),
         applied_stage_id: rec.applied_stage_id.clone(),
-        // The DTO `From<&Recommendation>` constructor populates
-        // `applied_with_preview_id`, so a manual `rec.clone()` or
-        // `RecommendationDto::from(&rec)` would be safer here. The
-        // direct field-by-field copy below predates slice 6; the
-        // missing field is filled in to keep the DTO consistent
-        // with `RecommendationDto::from`.
-        applied_with_preview_id: rec.applied_with_preview_id.clone(),
     })
 }
 
@@ -749,13 +744,13 @@ pub fn reset_recommendation(
     recommendation_id: String,
 ) -> Result<RecommendationUpdateResult, String> {
     {
-        let store = state.store.lock().map_err(lock_err)?;
+        let store = &*state.store;
         store
             .reset_recommendation(&recommendation_id)
             .map_err(store_err_to_string)?;
     }
-    let store = state.store.lock().map_err(lock_err)?;
-    let stage_execution_id = stage_execution_id_for_recommendation(&store, &recommendation_id)
+    let store = &*state.store;
+    let stage_execution_id = stage_execution_id_for_recommendation(store, &recommendation_id)
         .map_err(store_err_to_string)?;
     let recs = store
         .list_recommendations_for_stage_execution(&stage_execution_id)
@@ -833,10 +828,8 @@ pub fn get_processing_metrics(
     state: State<'_, PipelinePlanState>,
     plan_id: String,
 ) -> Result<ProcessingMetricsDto, String> {
-    let store = state.store.lock().map_err(lock_err)?;
-    let plan = store
-        .get_pipeline_plan(&plan_id)
-        .map_err(store_err_to_string)?;
+    let store = &*state.store;
+    let plan = store.load_plan(&plan_id).map_err(store_err_to_string)?;
     let execs = store
         .list_stage_executions_for_plan(&plan_id)
         .map_err(store_err_to_string)?;
@@ -860,10 +853,8 @@ pub fn get_processing_timeline(
     state: State<'_, PipelinePlanState>,
     plan_id: String,
 ) -> Result<ProcessingTimelineDto, String> {
-    let store = state.store.lock().map_err(lock_err)?;
-    let plan = store
-        .get_pipeline_plan(&plan_id)
-        .map_err(store_err_to_string)?;
+    let store = &*state.store;
+    let plan = store.load_plan(&plan_id).map_err(store_err_to_string)?;
     let execs = store
         .list_stage_executions_for_plan(&plan_id)
         .map_err(store_err_to_string)?;

@@ -90,25 +90,21 @@ pub fn insert_stage(
     state: State<'_, PipelinePlanState>,
     request: InsertStageRequest,
 ) -> Result<DomainPipelinePlan, String> {
-    let store = state.store.lock().map_err(lock_err)?;
-    core_insert_stage(&store, &request.plan_id, &request.stage_type)
+    let store = &*state.store;
+    core_insert_stage(store, &request.plan_id, &request.stage_type)
         .map_err(node_graph_err_to_string)
-}
-
-fn lock_err<T>(_: std::sync::PoisonError<T>) -> String {
-    "pipeline-plan store mutex poisoned".into()
 }
 
 /// Map the slice's error enum to a `String` for the IPC layer.
 ///
 /// The prefix conventions mirror the existing
 /// `commands_pipeline_plan::store_err_to_string`:
-/// - `InvalidStageType` => `"unknown stage_type '...'"` (so the
-///     TS side can pattern-match and surface a clear error).
-/// - `Store(NotFound)` => `"plan not found: ..."` (same prefix
-///     the existing store surfaces).
-/// - `Store(other)`     => `"pipeline-plan store error: ..."`
-///     (catch-all that preserves the underlying message).
+/// - `InvalidStageType` => `"unknown stage_type '...'"` (TS-side
+///   pattern-matchable).
+/// - `Store(NotFound)` => `"plan not found: ..."` (same prefix the
+///   existing store surfaces).
+/// - `Store(other)` => `"pipeline-plan store error: ..."` (catch-all
+///   that preserves the underlying message).
 fn node_graph_err_to_string(e: NodeGraphMutationError) -> String {
     match e {
         NodeGraphMutationError::InvalidStageType(s) => {

@@ -144,7 +144,7 @@ fn gallery_list(
     state: State<'_, GalleryState>,
 ) -> Result<Vec<astroforge_core::gallery::GalleryItem>, CommandError> {
     let store = state.0.lock().expect("gallery store mutex poisoned");
-    store.list().map_err(Into::into)
+    store.list().map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -153,13 +153,13 @@ fn gallery_upsert(
     update: GalleryItemUpdate,
 ) -> Result<astroforge_core::gallery::GalleryItem, CommandError> {
     let store = state.0.lock().expect("gallery store mutex poisoned");
-    store.upsert(update).map_err(Into::into)
+    store.upsert(update).map_err(CommandError::from)
 }
 
 #[tauri::command]
 fn gallery_delete(state: State<'_, GalleryState>, id: String) -> Result<(), CommandError> {
     let store = state.0.lock().expect("gallery store mutex poisoned");
-    store.delete(&id).map_err(Into::into)
+    store.delete(&id).map_err(CommandError::from)
 }
 
 // ─ ─── Session autosave IPC ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
@@ -177,7 +177,7 @@ fn session_create_project(
     let store = state.0.lock().expect("session store mutex poisoned");
     store
         .create_project(&name, target_type.as_deref())
-        .map_err(Into::into)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -190,7 +190,7 @@ fn session_create(
     let store = state.0.lock().expect("session store mutex poisoned");
     store
         .create_session(&project_id, source_dir.as_deref(), &verbosity)
-        .map_err(Into::into)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -403,7 +403,7 @@ fn pipeline_run_session(
 #[tauri::command]
 fn recipe_list(state: State<'_, RecipeState>) -> Result<Vec<RecipeSummary>, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    store.list().map_err(Into::into)
+    store.list().map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -412,7 +412,7 @@ fn recipe_list_versions(
     profile_id: String,
 ) -> Result<Vec<RecipeVersion>, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    store.list_versions(&profile_id).map_err(Into::into)
+    store.list_versions(&profile_id).map_err(CommandError::from)
 }
 
 // CR-07 §22: QualityProfile catalog. Mirrors the
@@ -445,7 +445,7 @@ fn recipe_get(
     version: u32,
 ) -> Result<Recipe, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    store.get(&profile_id, version).map_err(Into::into)
+    store.get(&profile_id, version).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -454,7 +454,7 @@ fn recipe_get_head(
     profile_id: String,
 ) -> Result<Recipe, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    store.get_head(&profile_id).map_err(Into::into)
+    store.get_head(&profile_id).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -487,7 +487,7 @@ fn recipe_save(
     // passing a hash that doesn't match the staged
     // content.
     owned.content_hash = owned.pipeline_plan_hash();
-    let summary = store.save(&owned).map_err(Into::into)?;
+    let summary = store.save(&owned).map_err(CommandError::from)?;
 
     // CR-08 §23 / Slice F: emit the Recipe lifecycle
     // event. The event kind branches on whether the
@@ -552,13 +552,12 @@ fn recipe_get_for_image_version(
     version_id: String,
 ) -> Result<Option<Recipe>, CommandError> {
     use commands_ai_enhancement::image_version_get;
-    use commands_project::store_err_to_string;
 
     // Step 1: read the version row from the active
     // project's store. `image_version_get` returns
     // `Value::Null` for "not found" (see
     // commands_ai_enhancement::image_version_get).
-    let raw = image_version_get(version_id, project_state).map_err(store_err_to_string)?;
+    let raw = image_version_get(version_id, project_state)?;
     let version_value = match raw {
         serde_json::Value::Null => return Ok(None),
         v => v,
@@ -643,10 +642,8 @@ fn recipe_apply(
     let store = state.0.lock().expect("recipe store mutex poisoned");
     let recipe = store.get(&profile_id, version)?;
     let models_slice: &[String] = available_models.as_deref().unwrap_or(&[]);
-    let stages = apply_recipe(&recipe, models_slice).map_err(|e| {
-        CommandError::Invalid(format!(
-            "recipe {profile_id:?} v{version} is not applicable: {e}"
-        ))
+    let stages = apply_recipe(&recipe, models_slice).map_err(|e| CommandError {
+        message: format!("recipe {profile_id:?} v{version} is not applicable: {e}"),
     })?;
     // CR-08 §15: stamp `last_used_at` so the Recently Used
     // tab surfaces this recipe at the top after the apply.
@@ -768,7 +765,7 @@ fn recipe_duplicate(
         .map_err(CommandError::from)?;
     owned.version = if next_version == 0 { 1 } else { next_version };
     owned.parent_version = None;
-    store.save(&owned).map_err(Into::into)
+    store.save(&owned).map_err(CommandError::from)
 }
 
 /// Helper for `recipe_duplicate`: does a profile with the
@@ -873,16 +870,14 @@ fn recipe_import(
 
     let mut recipe = Recipe::from_json_migrated(&json).map_err(CommandError::from)?;
     if recipe.name.trim().is_empty() {
-        return Err(CommandError::new(
-            "validation",
-            "imported recipe has an empty name",
-        ));
+        return Err(CommandError {
+            message: format!("validation: {}", "imported recipe has an empty name"),
+        });
     }
     if recipe.target_type.trim().is_empty() {
-        return Err(CommandError::new(
-            "validation",
-            "imported recipe has an empty target_type",
-        ));
+        return Err(CommandError {
+            message: format!("validation: {}", "imported recipe has an empty target_type"),
+        });
     }
     // CR-08 §28 / Slice H: strict import validation.
     // Reject the import (before persist) when the
@@ -925,13 +920,15 @@ fn recipe_import(
             )),
             &recipe_events_now_iso(),
         );
-        return Err(CommandError::new(
-            "validation",
-            format!(
-                "imported recipe failed security validation: {}",
-                kinds.join(", ")
+        return Err(CommandError {
+            message: format!(
+                "validation: {}",
+                format!(
+                    "imported recipe failed security validation: {}",
+                    kinds.join(", ")
+                )
             ),
-        ));
+        });
     }
     // §22 round 1 compatibility validator: the
     // imported Recipe must be applicable against
@@ -957,10 +954,12 @@ fn recipe_import(
             ),
             &recipe_events_now_iso(),
         );
-        return Err(CommandError::new(
-            "validation",
-            "imported recipe failed compatibility validation",
-        ));
+        return Err(CommandError {
+            message: format!(
+                "validation: {}",
+                "imported recipe failed compatibility validation"
+            ),
+        });
     }
     let store = state.0.lock().expect("recipe store mutex poisoned");
     let profile_id = astroforge_core::recipe_store::RecipeStore::profile_id_for(
@@ -1054,10 +1053,7 @@ fn recipe_save_from_pipeline_plan(
     // Load the plan (clone-then-release pattern so we
     // don't hold both locks at once).
     let plan = {
-        let store = pipeline_state
-            .store
-            .lock()
-            .map_err(|_| "pipeline plan store mutex poisoned".to_string())?;
+        let store = &*pipeline_state.store;
         store
             .load_plan(&plan_id)
             .map_err(|e| format!("failed to load pipeline plan: {e}"))?
@@ -1079,7 +1075,7 @@ fn recipe_save_from_pipeline_plan(
     };
     recipe.version = version;
     let store = recipe_state.0.lock().expect("recipe store mutex poisoned");
-    let summary = store.save(&recipe).map_err(Into::into)?;
+    let summary = store.save(&recipe).map_err(CommandError::from)?;
 
     // CR-08 §23 / Slice F: emit the PipelineSavedAsRecipe
     // event with `source = "plan"` so consumers can
@@ -1167,7 +1163,7 @@ fn recipe_save_from_stage_runs(
     };
     recipe.version = version;
     let store = recipe_state.0.lock().expect("recipe store mutex poisoned");
-    let summary = store.save(&recipe).map_err(Into::into)?;
+    let summary = store.save(&recipe).map_err(CommandError::from)?;
 
     // CR-08 §23 / Slice F: emit the PipelineSavedAsRecipe
     // event with `source = "stage_runs"` so consumers can
@@ -1205,7 +1201,9 @@ fn recipe_mark_as_system(
     profile_id: String,
 ) -> Result<bool, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    store.mark_as_system(&profile_id).map_err(Into::into)
+    store
+        .mark_as_system(&profile_id)
+        .map_err(CommandError::from)
 }
 
 /// CR-08 §3.1: read whether any version of a profile is
@@ -1218,7 +1216,9 @@ fn recipe_is_system(
     profile_id: String,
 ) -> Result<bool, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    store.is_system_profile(&profile_id).map_err(Into::into)
+    store
+        .is_system_profile(&profile_id)
+        .map_err(CommandError::from)
 }
 
 /// CR-08 §22.4: archive a Recipe profile. Archived
@@ -1230,7 +1230,9 @@ fn recipe_is_system(
 #[tauri::command]
 fn recipe_archive(state: State<'_, RecipeState>, profile_id: String) -> Result<bool, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    store.archive_profile(&profile_id).map_err(Into::into)
+    store
+        .archive_profile(&profile_id)
+        .map_err(CommandError::from)
 }
 
 /// CR-08 §22.4: unarchive a Recipe profile. Returns
@@ -1241,7 +1243,9 @@ fn recipe_unarchive(
     profile_id: String,
 ) -> Result<bool, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    store.unarchive_profile(&profile_id).map_err(Into::into)
+    store
+        .unarchive_profile(&profile_id)
+        .map_err(CommandError::from)
 }
 
 /// CR-08 §22.4: read whether any version of a profile
@@ -1253,7 +1257,9 @@ fn recipe_is_archived(
     profile_id: String,
 ) -> Result<bool, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    store.is_archived_profile(&profile_id).map_err(Into::into)
+    store
+        .is_archived_profile(&profile_id)
+        .map_err(CommandError::from)
 }
 
 /// CR-08 §22.2: delete a Recipe profile (every version,
@@ -1581,7 +1587,7 @@ fn recipe_accept_adaptation(
     proposed: astroforge_core::recipe::Recipe,
 ) -> Result<astroforge_core::recipe_store::RecipeSummary, CommandError> {
     let store = state.0.lock().expect("recipe store mutex poisoned");
-    let summary = store.save(&proposed).map_err(Into::into)?;
+    let summary = store.save(&proposed).map_err(CommandError::from)?;
 
     // CR-08 §23 / Slice F: emit
     // `RecipeAdaptationAccepted` once the persist
@@ -1640,7 +1646,7 @@ fn recipe_accept_adaptation(
 /// either way).
 #[tauri::command]
 fn recipe_get_reproducibility_report(
-    domain_state: State<'_, DomainState>,
+    domain_state: State<'_, commands_project::ProjectState>,
     _recipe_state: State<'_, RecipeState>,
     event_state: State<'_, RecipeEventState>,
     version_id: String,
@@ -1663,7 +1669,10 @@ fn recipe_get_reproducibility_report(
     // Recipe resolution by persisting the Recipe
     // version on the ImageVersion.
     let (image_version, pipeline_run, ai_ops) = {
-        let store = domain_state.0.lock().expect("domain store mutex poisoned");
+        let store = domain_state
+            .store
+            .lock()
+            .expect("domain store mutex poisoned");
         let image_version = store
             .get_image_version(&version_id)?
             .ok_or_else(|| CommandError {
@@ -1674,10 +1683,7 @@ fn recipe_get_reproducibility_report(
         // PipelineRun.
         let pipeline_run = match store.get_artifact(&image_version.primary_artifact_id) {
             Ok(artifact) => match artifact.pipeline_run_id {
-                Some(run_id) => match store.get_pipeline_run(&run_id) {
-                    Ok(run) => Some(run),
-                    Err(_) => None,
-                },
+                Some(run_id) => store.get_pipeline_run(&run_id).ok(),
                 None => None,
             },
             Err(_) => None,
@@ -1764,9 +1770,8 @@ fn recipe_list_events(
     filter: RecipeEventFilter,
 ) -> Result<Vec<RecipeEvent>, CommandError> {
     let store = state.0.lock().expect("recipe events db mutex poisoned");
-    store.list_events(&filter).map_err(Into::into)
+    store.list_events(&filter).map_err(CommandError::from)
 }
-
 
 /// CR-08 §20: validate a Recipe against the
 /// §20 stage-spec table for the five risk classes
@@ -1798,6 +1803,7 @@ fn recipe_security_validate(
 /// `version_a_id` + `version_b_id` are opaque strings
 /// (typically the ImageVersion row id from the IPC layer).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // flat IPC args mirror the cache key
 fn diff_cache_get_or_compute(
     state: State<'_, DiffCacheState>,
     version_a_id: String,
@@ -1989,17 +1995,17 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            let gallery_path = gallery_db_path(&app.handle())?;
+            let gallery_path = gallery_db_path(app.handle())?;
             let gallery = GalleryStore::new(&gallery_path)
                 .map_err(|e| format!("failed to open gallery store: {e}"))?;
             app.manage(GalleryState(Mutex::new(gallery)));
 
-            let session_path = session_db_path(&app.handle())?;
+            let session_path = session_db_path(app.handle())?;
             let sessions = SessionStore::new(&session_path)
                 .map_err(|e| format!("failed to open session store: {e}"))?;
             app.manage(SessionState(Mutex::new(sessions)));
 
-            let recipe_path = recipe_db_path(&app.handle())?;
+            let recipe_path = recipe_db_path(app.handle())?;
             let recipes = RecipeStore::new(&recipe_path)
                 .map_err(|e| format!("failed to open recipe store: {e}"))?;
             // CR-08 §3.2: seed DwarfII v1 + M42-Natural-v1 on
@@ -2030,7 +2036,7 @@ fn main() {
             // CR-02.6 — durable project state (additive; no existing
             // reader is touched). One global DomainStore for cross-project
             // queries, plus a ProjectManager over the projects_root.
-            let projects_root = projects_root_path(&app.handle())?;
+            let projects_root = projects_root_path(app.handle())?;
             std::fs::create_dir_all(&projects_root)
                 .map_err(|e| format!("failed to create projects root: {e}"))?;
             let project_db = projects_root.join("projects.db");
@@ -2045,9 +2051,9 @@ fn main() {
             });
 
             // CR-05 P1 — PipelinePlan store (additive; P1 only).
-            let pipeline_plans_db = pipeline_plans_db_path(&app.handle())?;
+            let pipeline_plans_db = pipeline_plans_db_path(app.handle())?;
             let pipeline_plans_store =
-                astroforge_core::pipeline_plans_store::PipelinePlanStore::new(&pipeline_plans_db)
+                astroforge_core::pipeline_plans_store::PipelinePlanStore::new(pipeline_plans_db)
                     .map_err(|e| format!("failed to open pipeline plans store: {e}"))?;
 
             // CR-05 P2.6 — the Stack handler needs the DomainStore so
@@ -2060,7 +2066,7 @@ fn main() {
                 .map_err(|e| format!("failed to open domain store for handler: {e}"))?;
 
             app.manage(commands_pipeline_plan::PipelinePlanState {
-                store: std::sync::Arc::new(Mutex::new(pipeline_plans_store)),
+                store: std::sync::Arc::new(pipeline_plans_store),
                 cancel_handles: Mutex::new(std::collections::HashMap::new()),
                 // CR-05 P2.5 — per-plan pause handles (independent of
                 // cancel handles; cancel wins if both flip).

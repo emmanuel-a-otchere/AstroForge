@@ -54,6 +54,13 @@ jobs:
         with:
           targets: ${{ matrix.rust-target }}
 
+      # Belt-and-braces: the x86_64-apple-darwin release job needs the
+      # non-host target explicitly added (rc.5 showed the toolchain
+      # action's `targets:` input is not always honoured).
+      - name: Add Rust cross-compile target
+        if: matrix.rust-target != ''
+        run: rustup target add ${{ matrix.rust-target }}
+
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |

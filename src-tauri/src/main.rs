@@ -8,7 +8,7 @@ use astroforge_core::difference::DiffKind;
 use astroforge_core::domain_store::DomainStore;
 use astroforge_core::fits;
 use astroforge_core::gallery::{GalleryItemUpdate, GalleryStore};
-use astroforge_core::ingest::{self, FrameInfo};
+use astroforge_core::import_scan::{self, FrameInfo};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig, PipelineResult, Verbosity};
 use astroforge_core::project::ProjectManager;
 use astroforge_core::recipe::{apply_recipe, QualityProfile, Recipe, RecipeAiDiffSummary};
@@ -313,7 +313,7 @@ impl From<FrameInfo> for IngestFrameDto {
 #[tauri::command]
 fn ingest_scan_directory(dir_path: String) -> Result<Vec<IngestFrameDto>, CommandError> {
     let dir = PathBuf::from(&dir_path);
-    let paths = ingest::scan_directory(&dir).map_err(CommandError::from)?;
+    let paths = import_scan::scan_fits_directory(&dir).map_err(CommandError::from)?;
     let mut out = Vec::with_capacity(paths.len());
     for p in paths {
         let bytes = match std::fs::read(&p) {
@@ -325,7 +325,7 @@ fn ingest_scan_directory(dir_path: String) -> Result<Vec<IngestFrameDto>, Comman
                 continue;
             }
         };
-        let frame = ingest::classify_frame(&p, &bytes);
+        let frame = import_scan::classify_frame(&p, &bytes);
         out.push(frame.into());
     }
     Ok(out)
@@ -346,7 +346,7 @@ fn pipeline_run_session(
 ) -> Result<PipelineResult, CommandError> {
     let dir = PathBuf::from(&dir_path);
 
-    let paths = ingest::scan_directory(&dir).map_err(CommandError::from)?;
+    let paths = import_scan::scan_fits_directory(&dir).map_err(CommandError::from)?;
     let mut frames: Vec<FrameInfo> = Vec::with_capacity(paths.len());
     for p in paths {
         let bytes = match std::fs::read(&p) {
@@ -356,7 +356,7 @@ fn pipeline_run_session(
                 continue;
             }
         };
-        frames.push(ingest::classify_frame(&p, &bytes));
+        frames.push(import_scan::classify_frame(&p, &bytes));
     }
 
     // Read every light frame into a normalised F32Image. Calibration
@@ -364,7 +364,7 @@ fn pipeline_run_session(
     // master dark/flat pipeline lands with the calibration milestone.
     let light_paths: Vec<PathBuf> = frames
         .iter()
-        .filter(|f| matches!(f.frame_type, ingest::FrameType::Light))
+        .filter(|f| matches!(f.frame_type, import_scan::FrameType::Light))
         .map(|f| f.path.clone())
         .collect();
 
@@ -376,7 +376,7 @@ fn pipeline_run_session(
         calibrated.push(img);
     }
 
-    let manifest = ingest::build_manifest(&session_id, &dir_path, frames);
+    let manifest = import_scan::build_manifest(&session_id, &dir_path, frames);
 
     let verbosity = match verbosity.as_str() {
         "intermediate" => Verbosity::Intermediate,

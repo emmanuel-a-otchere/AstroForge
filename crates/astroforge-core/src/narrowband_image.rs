@@ -27,7 +27,7 @@
 //! classification layer.
 
 use crate::image::F32Image;
-use crate::ingest::LightGroup;
+use crate::import_scan::LightGroup;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

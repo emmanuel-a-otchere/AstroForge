@@ -1,0 +1,43 @@
+name: Model E2E
+
+# RT-7 (#426) — on-demand verification that the pinned model
+# artifacts are still downloadable, digest-matching, and loadable
+# under the pinned `ort`. Runs the network-gated tests in
+# crates/astroforge-ai/tests/model_download_e2e.rs
+# (ASTROFORGE_MODEL_E2E=1). The normal CI suite never needs network
+# and skips them; trigger this manually after pinning a new digest
+# or when an upstream publisher is suspected to have moved.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  download-and-infer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ubuntu-latest-cargo-model-e2e-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run the network-gated model e2e
+        env:
+          ASTROFORGE_MODEL_E2E: "1"
+        run: cargo test -p astroforge-ai --test model_download_e2e -- --nocapture

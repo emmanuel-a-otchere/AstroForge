@@ -2199,11 +2199,21 @@ export interface AiModelInfo {
   input_tile_size: number;
   output_channels: number;
   scale_factor: number;
+  download_url: string | null;
   installed: boolean;
 }
 
 export const aiModelList = (): Promise<AiModelInfo[]> =>
   invoke("ai_model_list");
+
+/**
+ * RT-7 (#426) — install a pinned catalog model. The Rust side
+ * verifies the fetched bytes against the pinned SHA-256 before
+ * installing (fail-closed); the promise rejects with the reason on
+ * network / checksum / io failures.
+ */
+export const aiModelDownload = (name: string): Promise<string> =>
+  invoke("ai_model_download", { name });
 
 // ─── CR-04 P8 — Import Understanding IPC ────────────────────────────────
 //

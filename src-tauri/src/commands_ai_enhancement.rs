@@ -83,7 +83,7 @@ fn legacy_path() -> Option<PathBuf> {
 /// Locate the user's home directory (`HOME`, falling back to
 /// `USERPROFILE` on Windows). Returns None when neither is
 /// set.
-fn dirs_home() -> Option<PathBuf> {
+pub(crate) fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))

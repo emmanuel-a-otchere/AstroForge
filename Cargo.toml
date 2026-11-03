@@ -23,3 +23,5 @@ sha2 = "0.10"
 thiserror = "1"
 log = "0.4"
 env_logger = "0.11"
+# RT-7 — model downloader HTTP client (rustls; no native TLS deps)
+ureq = { version = "2", default-features = false, features = ["tls"] }

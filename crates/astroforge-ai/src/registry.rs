@@ -69,7 +69,10 @@ impl ModelRegistry {
             Some(e) => &e.info.sha256,
             None => return false,
         };
-        if expected == "placeholder" {
+        // Unpinned sentinels cannot verify bytes; the permissive
+        // legacy behavior is retained for them (pinned entries —
+        // RT-7's SwinIR/Swin2SR digests — always hash-check).
+        if expected == "placeholder" || expected == "unverified" {
             return true;
         }
         let actual = sha256_hex(data);
@@ -122,10 +125,19 @@ mod tests {
 
     #[test]
     fn test_verify_checksum_placeholder() {
+        // An unpinned ("unverified") catalog entry cannot verify
+        // bytes, so the registry treats it as permissive — pinned
+        // entries (RT-7: the SwinIR denoise model) must not be
+        // affected by this legacy path.
         let mut registry = ModelRegistry::new(PathBuf::from("/tmp/models"));
-        let model = model_catalog()[0].clone();
+        let model = model_catalog()
+            .into_iter()
+            .find(|m| m.sha256 == "unverified")
+            .expect("an unpinned entry exists")
+            .clone();
+        let name = model.name.clone();
         registry.register(model);
-        assert!(registry.verify_checksum(&model_catalog()[0].name, b"test"));
+        assert!(registry.verify_checksum(&name, b"test"));
     }
 
     #[test]

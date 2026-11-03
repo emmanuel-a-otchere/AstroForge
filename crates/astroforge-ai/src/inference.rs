@@ -344,6 +344,178 @@ pub fn builtin_model(id: &str) -> Option<&'static BuiltinModel> {
     BUILTIN_MODELS.iter().find(|m| m.id == id)
 }
 
+// ─── NCHW catalog-graph execution (RT-7 slice 2) ────────────────────
+//
+// Downloaded catalog graphs (SwinIR denoise) consume `[1,3,H,W]`
+// float32 RGB in [0,1] with FIXED spatial dims — SwinIR's windowed
+// attention is brittle under dynamic H/W in ORT (publisher's card).
+// The engine edge-pads each incoming tile up to the fixed size,
+// runs, and crops the output back to the tile's real dims; the
+// dispatcher's tiler supplies ≤tile-size tiles and cosine-blends
+// the overlaps, so seams stay invisible.
+
+/// Convert an F32Image to flat NCHW `[1,C,H,W]` row-major data.
+/// Catalog graphs are RGB; other channel counts are an error
+/// rather than a silent re-interpretation.
+fn f32_image_to_nchw(image: &F32Image) -> Result<(Vec<usize>, Vec<f32>), InferenceError> {
+    let (c, h, w) = (image.channels(), image.height(), image.width());
+    if c != 3 {
+        return Err(InferenceError::BadOutputShape(format!(
+            "catalog NCHW graphs expect 3 channels, image has {c}"
+        )));
+    }
+    let mut data = Vec::with_capacity(c * h * w);
+    for ch in 0..c {
+        for y in 0..h {
+            for x in 0..w {
+                data.push(image[(ch, y, x)]);
+            }
+        }
+    }
+    Ok((vec![1, c, h, w], data))
+}
+
+/// Convert flat NCHW output back to an F32Image, validating the
+/// shape contract ([1,C,H,W], C == 3, uniform planes).
+fn nchw_to_f32_image(shape: &[usize], data: &[f32]) -> Result<F32Image, InferenceError> {
+    if shape.len() != 4 || shape[0] != 1 {
+        return Err(InferenceError::BadOutputShape(format!(
+            "expected [1,C,H,W], got {shape:?}"
+        )));
+    }
+    let (c, h, w) = (shape[1], shape[2], shape[3]);
+    if c != 3 {
+        return Err(InferenceError::BadOutputShape(format!(
+            "expected 3 output channels, got {c}"
+        )));
+    }
+    if data.len() != c * h * w {
+        return Err(InferenceError::BadOutputShape(format!(
+            "NCHW data length {} does not match shape {shape:?}",
+            data.len()
+        )));
+    }
+    let mut image = F32Image::new(w, h, c);
+    for ch in 0..c {
+        for y in 0..h {
+            for x in 0..w {
+                image[(ch, y, x)] = data[(ch * h + y) * w + x];
+            }
+        }
+    }
+    Ok(image)
+}
+
+/// Edge-replicate `tile` up to `size × size` (tiles are always
+/// ≤ the fixed graph edge; `size` 0 means the graph is dynamic and
+/// the tile passes through untouched).
+fn pad_tile_to_nchw_edge(tile: &F32Image, size: u32) -> F32Image {
+    let target = size as usize;
+    if target == 0 || (tile.width() >= target && tile.height() >= target) {
+        return tile.clone();
+    }
+    let (w, h, c) = (tile.width(), tile.height(), tile.channels());
+    let mut out = F32Image::new(target, target, c);
+    for ch in 0..c {
+        for y in 0..target {
+            for x in 0..target {
+                let sx = x.min(w - 1);
+                let sy = y.min(h - 1);
+                out[(ch, y, x)] = tile[(ch, sy, sx)];
+            }
+        }
+    }
+    out
+}
+
+impl OnnxEngine {
+    /// Run a (≤ tile-size) image through a catalog NCHW graph:
+    /// pad to the fixed edge, run, crop the output back to the
+    /// input dims. The output shape must preserve spatial dims
+    /// (denoise-class graphs; SR adapters handle their own scale).
+    fn run_nchw_tile(&mut self, tile: &F32Image) -> Result<F32Image, InferenceError> {
+        use ort::value::Tensor;
+        let EngineMode::Nchw {
+            input_name,
+            output_name: _,
+            tile_size,
+        } = self.mode
+        else {
+            return Err(InferenceError::BadOutputShape(
+                "run_nchw_tile on a plane-wise engine".into(),
+            ));
+        };
+        let (w, h, c) = (tile.width(), tile.height(), tile.channels());
+        let padded = pad_tile_to_nchw_edge(tile, tile_size);
+        let (shape, data) = f32_image_to_nchw(&padded)?;
+        let tensor = Tensor::from_array((shape, data.into_boxed_slice()))
+            .map_err(|e| InferenceError::Ort(e.to_string()))?;
+        let outputs = self
+            .session
+            .run(ort::inputs![input_name => tensor])
+            .map_err(|e| InferenceError::Ort(e.to_string()))?;
+        let (out_shape, out_data) = outputs[0]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| InferenceError::Ort(e.to_string()))?;
+        let full = nchw_to_f32_image(
+            &out_shape.iter().map(|&d| d as usize).collect::<Vec<_>>(),
+            out_data,
+        )?;
+        if full.width() < w || full.height() < h {
+            return Err(InferenceError::BadOutputShape(format!(
+                "graph output {}x{} smaller than input tile {w}x{h}",
+                full.width(),
+                full.height()
+            )));
+        }
+        // Crop the padded margin back off.
+        let mut cropped = F32Image::new(w, h, c);
+        for ch in 0..c {
+            for y in 0..h {
+                for x in 0..w {
+                    cropped[(ch, y, x)] = full[(ch, y, x)];
+                }
+            }
+        }
+        Ok(cropped)
+    }
+
+    /// NCHW entry point: images at or under the fixed tile edge run
+    /// directly (after padding); larger images are tiled internally
+    /// at the fixed edge with the shared tiler + cosine blending.
+    fn run_nchw(&mut self, image: &F32Image) -> Result<F32Image, InferenceError> {
+        let Some(tile) = self.required_tile_size() else {
+            return self.run_nchw_tile(image);
+        };
+        if image.width() <= tile as usize && image.height() <= tile as usize {
+            return self.run_nchw_tile(image);
+        }
+        let config = crate::tiling::TileConfig {
+            tile_size: tile,
+            overlap: crate::tiling::DEFAULT_OVERLAP.min(tile / 2),
+        };
+        let engine_cell = std::cell::RefCell::new(self);
+        let first_error: std::cell::RefCell<Option<InferenceError>> = std::cell::RefCell::new(None);
+        let result = crate::tiling::run_tiled_inference(image, &config, |tile_img, _geom| {
+            if let Some(e) = first_error.borrow().as_ref() {
+                let _ = e;
+                return tile_img.clone();
+            }
+            match engine_cell.borrow_mut().run_nchw_tile(tile_img) {
+                Ok(out) => out,
+                Err(e) => {
+                    *first_error.borrow_mut() = Some(e);
+                    tile_img.clone()
+                }
+            }
+        });
+        if let Some(e) = first_error.into_inner() {
+            return Err(e);
+        }
+        Ok(result)
+    }
+}
+
 /// Errors from the inference engine. `Ort` carries the ONNX Runtime
 /// error string (the `ort` error type does not implement `Clone` /
 /// `PartialEq`, so we flatten to `String` at the boundary).
@@ -397,6 +569,44 @@ impl std::error::Error for InferenceError {}
 pub struct OnnxEngine {
     session: ort::session::Session,
     kind: BuiltinInputKind,
+    /// Execution mode: builtin graphs run plane-wise (one
+    /// `[1,1,H,W]` run per channel); downloaded catalog graphs run
+    /// NCHW (`[1,3,H,W]` f32 RGB, fixed tile from the download
+    /// spec, edge-padded tiles cropped back after the run).
+    mode: EngineMode,
+}
+
+/// How an open session consumes images (see [`OnnxEngine`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EngineMode {
+    PlaneWise(BuiltinInputKind),
+    Nchw {
+        input_name: &'static str,
+        output_name: &'static str,
+        /// Fixed spatial tile the graph accepts (0 = dynamic).
+        tile_size: u32,
+    },
+}
+
+impl EngineMode {
+    /// The mode for a catalog id, from the download-spec table.
+    /// Ids without a downloadable artifact (the builtin shadow
+    /// entries) run plane-wise. Pure — no session is opened — so
+    /// the routing decision is unit-testable offline.
+    pub fn for_catalog(id: &str) -> EngineMode {
+        match crate::downloader::download_spec(id) {
+            Some(spec) => EngineMode::Nchw {
+                input_name: spec.input_name,
+                output_name: spec.output_name,
+                tile_size: spec.tile_size,
+            },
+            None => EngineMode::PlaneWise(
+                crate::inference::catalog_model(id)
+                    .map(|e| e.kind)
+                    .unwrap_or(BuiltinInputKind::ImageOnly),
+            ),
+        }
+    }
 }
 
 impl OnnxEngine {
@@ -418,7 +628,11 @@ impl OnnxEngine {
         let session = ort::session::Session::builder()
             .and_then(|mut b| b.commit_from_memory(bytes))
             .map_err(|e| InferenceError::Ort(e.to_string()))?;
-        Ok(Self { session, kind })
+        Ok(Self {
+            session,
+            kind,
+            mode: EngineMode::PlaneWise(kind),
+        })
     }
 
     pub fn open_builtin(model: &'static BuiltinModel) -> Result<Self, InferenceError> {
@@ -446,10 +660,15 @@ impl OnnxEngine {
             });
         }
         let kind = entry.kind;
+        let mode = EngineMode::for_catalog(id);
         let session = ort::session::Session::builder()
             .and_then(|mut b| b.commit_from_memory(&bytes))
             .map_err(|e| InferenceError::Ort(e.to_string()))?;
-        Ok(Self { session, kind })
+        Ok(Self {
+            session,
+            kind,
+            mode,
+        })
     }
 
     /// Open a session from arbitrary catalog bytes without a
@@ -466,11 +685,30 @@ impl OnnxEngine {
         let session = ort::session::Session::builder()
             .and_then(|mut b| b.commit_from_memory(&bytes))
             .map_err(|e| InferenceError::Ort(e.to_string()))?;
-        Ok(Self { session, kind })
+        Ok(Self {
+            session,
+            kind,
+            mode: EngineMode::PlaneWise(kind),
+        })
     }
 
     pub fn kind(&self) -> BuiltinInputKind {
         self.kind
+    }
+
+    pub fn mode(&self) -> EngineMode {
+        self.mode
+    }
+
+    /// The fixed spatial tile this engine requires, when the graph
+    /// has hard-coded spatial dims (catalog NCHW graphs). The
+    /// dispatcher must tile at exactly this size; `None` lets the
+    /// caller pick (builtin graphs are dynamic).
+    pub fn required_tile_size(&self) -> Option<u32> {
+        match self.mode {
+            EngineMode::Nchw { tile_size, .. } if tile_size > 0 => Some(tile_size),
+            _ => None,
+        }
     }
 
     /// Run the graph over every channel of `image` and restack the
@@ -486,6 +724,9 @@ impl OnnxEngine {
         strength: Option<f32>,
         mask: Option<&Mask>,
     ) -> Result<F32Image, InferenceError> {
+        if let EngineMode::Nchw { .. } = self.mode {
+            return self.run_nchw(image);
+        }
         let channels = image.channels();
         let mut out_planes: Option<(usize, usize, Vec<Vec<f32>>)> = None;
         for c in 0..channels {
@@ -996,6 +1237,114 @@ mod tests {
     }
 
     // ── SessionCache ──────────────────────────────────────────────
+
+    #[test]
+    fn nchw_conversion_round_trips() {
+        let mut img = F32Image::new(8, 6, 3);
+        for c in 0..3 {
+            for y in 0..6 {
+                for x in 0..8 {
+                    img[(c, y, x)] = (c * 100 + y * 8 + x) as f32 / 1000.0;
+                }
+            }
+        }
+        let (shape, data) = f32_image_to_nchw(&img).expect("convert");
+        assert_eq!(shape, vec![1, 3, 6, 8]);
+        // NCHW layout: channel plane-major.
+        assert_eq!(data[0], img[(0, 0, 0)]);
+        assert_eq!(data[8], img[(0, 1, 0)]);
+        assert_eq!(data[48], img[(1, 0, 0)]);
+        let back = nchw_to_f32_image(&shape, &data).expect("convert back");
+        for c in 0..3 {
+            for y in 0..6 {
+                for x in 0..8 {
+                    assert_eq!(back[(c, y, x)], img[(c, y, x)]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nchw_conversion_rejects_non_rgb() {
+        let img = F32Image::new(4, 4, 1);
+        assert!(f32_image_to_nchw(&img).is_err());
+        // Shape contract: batch dim must be 1, channels must be 3.
+        assert!(nchw_to_f32_image(&[2, 3, 4, 4], &[0.0; 96]).is_err());
+        assert!(nchw_to_f32_image(&[1, 1, 4, 4], &[0.0; 16]).is_err());
+        assert!(nchw_to_f32_image(&[1, 3, 4, 4], &[0.0; 15]).is_err());
+    }
+
+    #[test]
+    fn pad_tile_preserves_content_and_size() {
+        let mut tile = F32Image::new(100, 60, 3);
+        for c in 0..3 {
+            for y in 0..60 {
+                for x in 0..100 {
+                    tile[(c, y, x)] = (x + y) as f32 / 160.0;
+                }
+            }
+        }
+        let padded = pad_tile_to_nchw_edge(&tile, 128);
+        assert_eq!((padded.width(), padded.height()), (128, 128));
+        // Content is preserved; the margin replicates the last
+        // row/column (edge padding).
+        assert_eq!(padded[(0, 59, 99)], tile[(0, 59, 99)]);
+        assert_eq!(padded[(0, 60, 99)], tile[(0, 59, 99)]);
+        assert_eq!(padded[(0, 59, 100)], tile[(0, 59, 99)]);
+        // Already-large tiles pass through untouched.
+        let big = F32Image::new(128, 128, 3);
+        let passthrough = pad_tile_to_nchw_edge(&big, 128);
+        assert_eq!((passthrough.width(), passthrough.height()), (128, 128));
+        // Dynamic graph (size 0): untouched.
+        let dyn_ = pad_tile_to_nchw_edge(&tile, 0);
+        assert_eq!((dyn_.width(), dyn_.height()), (100, 60));
+    }
+
+    #[test]
+    fn mode_for_catalog_routes_by_download_spec() {
+        // Pinned downloadable graph -> NCHW with the spec's contract.
+        match EngineMode::for_catalog("swinir-denoise-astro") {
+            EngineMode::Nchw {
+                input_name,
+                output_name,
+                tile_size,
+            } => {
+                assert_eq!(input_name, "image");
+                assert_eq!(output_name, "denoised");
+                assert_eq!(tile_size, 128);
+            }
+            other => panic!("expected Nchw, got {other:?}"),
+        }
+        // Builtin shadow entry (no download spec) -> plane-wise.
+        assert_eq!(
+            EngineMode::for_catalog("builtin-blur-blend"),
+            EngineMode::PlaneWise(BuiltinInputKind::Strength)
+        );
+        // Unpinned catalog entry (no download spec) -> falls back to
+        // the entry's declared kind; open_catalog still fails closed
+        // on the unpinned digest before any run.
+        assert_eq!(
+            EngineMode::for_catalog("swin2sr-dejpeg"),
+            EngineMode::PlaneWise(BuiltinInputKind::ImageOnly)
+        );
+    }
+
+    #[test]
+    fn required_tile_size_reflects_mode() {
+        // Plane-wise engine (real builtin bytes — the session must
+        // parse): no fixed tile.
+        let bytes = builtin_model("builtin-hotpixel")
+            .expect("builtin exists")
+            .bytes
+            .to_vec();
+        let engine =
+            OnnxEngine::open_catalog_unpinned(bytes, BuiltinInputKind::Threshold).expect("open");
+        assert_eq!(engine.required_tile_size(), None);
+        assert_eq!(
+            engine.mode(),
+            EngineMode::PlaneWise(BuiltinInputKind::Threshold)
+        );
+    }
 
     #[test]
     fn session_cache_starts_empty() {

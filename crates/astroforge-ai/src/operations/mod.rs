@@ -538,18 +538,24 @@ pub fn dispatch_operation(
     }
     let scalar = scalar_for(&binding, parameters_json)?;
 
-    // Model resolution: a downloaded catalog artifact
-    // supersedes the builtin. Catalog digests are
-    // placeholders pending DP#4, so catalog artifacts
-    // skip digest pinning until the licensing decision
-    // lands real hashes.
+    // Model resolution: a downloaded catalog artifact supersedes
+    // the builtin. open_catalog verifies the artifact digest
+    // against the pinned entry (DP#4) and fails closed on
+    // unknown / unpinned ids; unpinned entries fall back to the
+    // builtin only when the artifact is absent, otherwise error —
+    // see resolve_engine.
     let mut engine = resolve_engine(&binding, models_dir)?;
     let (model_id, model_version, model_hash) = engine_model_identity(&binding, models_dir);
 
-    let tile_size = crate::tiling::DEFAULT_TILE_SIZE.min(probe.max_tile_size());
+    // Fixed-tile catalog graphs (EngineMode::Nchw with a hard-coded
+    // spatial edge — SwinIR's windowed attention) dictate the tile
+    // size; the probe heuristic only applies to dynamic graphs.
+    let tile_size = engine
+        .required_tile_size()
+        .unwrap_or_else(|| crate::tiling::DEFAULT_TILE_SIZE.min(probe.max_tile_size()));
     let config = crate::tiling::TileConfig {
         tile_size,
-        overlap: crate::tiling::DEFAULT_OVERLAP,
+        overlap: crate::tiling::DEFAULT_OVERLAP.min(tile_size / 2),
     };
 
     let inferred = if binding.spatial_scale != 1 {
@@ -636,9 +642,15 @@ fn resolve_engine(
     binding: &OperationModelBinding,
     models_dir: Option<&std::path::Path>,
 ) -> Result<OnnxEngine, OperationError> {
+    // Catalog preference rule (RT-7 slice 2): fixed-tile NCHW graphs
+    // (spatial_scale == 1) run through the tiled dispatcher path.
+    // Spatial-scale ops (super_resolution) keep the builtin graph
+    // until the SR catalog adapter lands — the x4 NCHW graph needs
+    // its own output-scale handling in the tiler.
+    let catalog_eligible = binding.spatial_scale == 1;
     if let (Some(dir), Some(name)) = (models_dir, binding.catalog_model_name) {
         let path = dir.join(format!("{name}.onnx"));
-        if path.exists() {
+        if catalog_eligible && path.exists() {
             let bytes = std::fs::read(&path)
                 .map_err(|e| OperationError::Io(format!("read {}: {e}", path.display())))?;
             // DP#4: open_catalog verifies the digest against the
@@ -660,9 +672,15 @@ fn engine_model_identity(
     binding: &OperationModelBinding,
     models_dir: Option<&std::path::Path>,
 ) -> (String, String, String) {
+    // Catalog preference rule (RT-7 slice 2): fixed-tile NCHW graphs
+    // (spatial_scale == 1) run through the tiled dispatcher path.
+    // Spatial-scale ops (super_resolution) keep the builtin graph
+    // until the SR catalog adapter lands — the x4 NCHW graph needs
+    // its own output-scale handling in the tiler.
+    let catalog_eligible = binding.spatial_scale == 1;
     if let (Some(dir), Some(name)) = (models_dir, binding.catalog_model_name) {
         let path = dir.join(format!("{name}.onnx"));
-        if path.exists() {
+        if catalog_eligible && path.exists() {
             if let Ok(bytes) = std::fs::read(&path) {
                 let hash = astroforge_core::artifact::ContentStore::sha256_hex(&bytes);
                 let version = crate::hub::get_model(name)

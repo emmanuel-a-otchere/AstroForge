@@ -117,3 +117,118 @@ fn swin2sr_superres_downloads_pins_and_loads() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// RT-7 slice 2 acceptance: the downloaded SwinIR model serves a real
+/// `denoise_luminance` dispatch end-to-end — model resolution, NCHW
+/// tiling at the fixed 128 edge, tile stitch, provenance row.
+#[test]
+fn denoise_dispatch_routes_through_downloaded_swinir() {
+    if !enabled() {
+        eprintln!("skipping: set ASTROFORGE_MODEL_E2E=1 to run the network e2e");
+        return;
+    }
+    let spec = DOWNLOAD_SPECS
+        .iter()
+        .find(|s| s.id == "swinir-denoise-astro")
+        .expect("denoise spec");
+    let dir = tmp_dir();
+    let path = install_model(&dir, spec, &HttpByteSource).expect("download + verify + install");
+    let _ = path;
+
+    // 128x128 RGB scene: single tile, no padding needed beyond the
+    // exact edge.
+    let mut src = astroforge_core::image::F32Image::new(128, 128, 3);
+    for c in 0..3 {
+        for y in 0..128 {
+            for x in 0..128 {
+                src[(c, y, x)] = 0.5 + 0.1 * ((x * 7 + y * 13) % 11) as f32 / 55.0;
+            }
+        }
+    }
+    let inputs = astroforge_ai::operations::DispatchInputs {
+        source: &src,
+        mask: None,
+        probe: &astroforge_ai::hardware::HardwareProbe::detect(),
+        models_dir: Some(&dir),
+    };
+    let out = astroforge_ai::operations::dispatch_operation(
+        "denoise_luminance",
+        r#"{"strength":0.8}"#,
+        "v-e2e-src",
+        "v-e2e-dst".into(),
+        "pv-e2e".into(),
+        inputs,
+    )
+    .expect("dispatch through the downloaded model");
+
+    // Provenance: the catalog model served the request, not the
+    // builtin.
+    assert_eq!(out.model_id, "swinir-denoise-astro");
+    assert_eq!(out.model_hash, spec.sha256);
+    assert_eq!(out.outcome.source_image_version_id, "v-e2e-src");
+    let tiles: serde_json::Value =
+        serde_json::from_str(&out.tile_configuration_json).expect("tile json");
+    assert_eq!(tiles["tile_size"], 128, "fixed SwinIR tile forced");
+    assert_eq!(tiles["tiled"], false, "128x128 source is one tile");
+    assert_eq!(
+        (
+            out.result_image.width(),
+            out.result_image.height(),
+            out.result_image.channels()
+        ),
+        (128, 128, 3)
+    );
+    let mut all_finite = true;
+    for c in 0..3 {
+        for y in 0..128 {
+            for x in 0..128 {
+                all_finite &= out.result_image[(c, y, x)].is_finite();
+            }
+        }
+    }
+    assert!(all_finite, "output must be finite");
+
+    // Multi-tile path: 200x150 forces 128-edge tiling + edge padding
+    // (tiles at the right/bottom edges are smaller than 128).
+    let mut big = astroforge_core::image::F32Image::new(200, 150, 3);
+    for c in 0..3 {
+        for y in 0..150 {
+            for x in 0..200 {
+                big[(c, y, x)] = ((x * 3 + y * 5) % 17) as f32 / 170.0 + 0.2;
+            }
+        }
+    }
+    let inputs = astroforge_ai::operations::DispatchInputs {
+        source: &big,
+        mask: None,
+        probe: &astroforge_ai::hardware::HardwareProbe::detect(),
+        models_dir: Some(&dir),
+    };
+    let out = astroforge_ai::operations::dispatch_operation(
+        "denoise_luminance",
+        r#"{"strength":0.8}"#,
+        "v-e2e-src",
+        "v-e2e-dst".into(),
+        "pv-e2e".into(),
+        inputs,
+    )
+    .expect("multi-tile dispatch");
+    assert_eq!(out.model_id, "swinir-denoise-astro");
+    let tiles: serde_json::Value =
+        serde_json::from_str(&out.tile_configuration_json).expect("tile json");
+    assert_eq!(tiles["tiled"], true, "200x150 source must tile");
+    assert_eq!(
+        (out.result_image.width(), out.result_image.height()),
+        (200, 150)
+    );
+    let mut all_finite = true;
+    for c in 0..3 {
+        for y in 0..150 {
+            for x in 0..200 {
+                all_finite &= out.result_image[(c, y, x)].is_finite();
+            }
+        }
+    }
+    assert!(all_finite, "output must be finite");
+    let _ = std::fs::remove_dir_all(&dir);
+}

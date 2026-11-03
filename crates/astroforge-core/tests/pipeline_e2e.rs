@@ -9,7 +9,7 @@
 //! files written to a tempdir — no external data, no network.
 
 use astroforge_core::fits::{self, FitsHeader};
-use astroforge_core::ingest::{self, FrameInfo, FrameType};
+use astroforge_core::import_scan::{self, FrameInfo, FrameType};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig, Verbosity};
 use std::fs::File;
 use std::io::Write;
@@ -74,13 +74,13 @@ fn ingest_classify_finds_lights_only() {
     write_minimal_fits(&dir.join("light_002.fits"), 16, 16, 120.0);
     write_minimal_fits(&dir.join("dark_001.fits"), 16, 16, 120.0);
 
-    let paths = ingest::scan_directory(&dir).expect("scan");
+    let paths = import_scan::scan_fits_directory(&dir).expect("scan");
     assert_eq!(paths.len(), 3);
 
     let mut frames: Vec<FrameInfo> = Vec::new();
     for p in paths {
         let bytes = std::fs::read(&p).expect("read");
-        frames.push(ingest::classify_frame(&p, &bytes));
+        frames.push(import_scan::classify_frame(&p, &bytes));
     }
     let lights = frames
         .iter()
@@ -101,12 +101,12 @@ fn end_to_end_pipeline_walks_every_stage() {
     write_minimal_fits(&dir.join("light_002.fits"), 32, 32, 60.0);
     write_minimal_fits(&dir.join("light_003.fits"), 32, 32, 60.0);
 
-    let paths = ingest::scan_directory(&dir).expect("scan");
+    let paths = import_scan::scan_fits_directory(&dir).expect("scan");
     let mut frames = Vec::new();
     let mut light_paths = Vec::new();
     for p in &paths {
         let bytes = std::fs::read(p).expect("read");
-        let f = ingest::classify_frame(p, &bytes);
+        let f = import_scan::classify_frame(p, &bytes);
         if f.frame_type == FrameType::Light {
             light_paths.push(p.clone());
         }
@@ -125,7 +125,7 @@ fn end_to_end_pipeline_walks_every_stage() {
     }
     assert_eq!(calibrated.len(), 3);
 
-    let manifest = ingest::build_manifest("test-session", dir.to_str().unwrap(), frames);
+    let manifest = import_scan::build_manifest("test-session", dir.to_str().unwrap(), frames);
     let config = PipelineConfig {
         verbosity: Verbosity::Beginner,
         lights_only: true,

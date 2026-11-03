@@ -5,7 +5,7 @@ use crate::crop::{self, CropRegion};
 use crate::curves::{self, CurvesParams};
 use crate::export::{self, FrameStats, ProcessingReport, StageParams};
 use crate::image::F32Image;
-use crate::ingest::{FrameType, SessionManifest};
+use crate::import_scan::{FrameType, SessionManifest};
 use crate::registration::{self, AffineTransform};
 use crate::stacking::{self, StreamingStacker};
 use crate::star_segmentation;
@@ -461,7 +461,7 @@ pub fn run_streaming_pipeline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ingest::{FrameInfo, FrameType, LightGroup};
+    use crate::import_scan::{FrameInfo, FrameType, LightGroup};
     use std::path::PathBuf;
 
     fn make_manifest(n_lights: usize) -> SessionManifest {

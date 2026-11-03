@@ -45,6 +45,30 @@ A running log of clean-up work that should land as standalone PRs. Each item bel
 
 ## Closed tickets
 
+### HOUSE-2 — ingest.rs consolidated into import_scan.rs (closed, RT-6 / #425)
+
+**Outcome (2026-11-03):** `ingest.rs` deleted (355 lines). The session-manifest
+layer it owned (`FrameType`, `FrameInfo`, `SessionManifest`, `LightGroup`,
+`classify_frame`, `group_lights`, `build_manifest`, plus its 5 unit tests) was
+folded **verbatim** into `import_scan.rs` as a documented section. The legacy
+FITS-only walk became `import_scan::scan_fits_directory`, expressed as a FITS
+filter over the canonical `scan_directory` walker — which additionally skips
+hidden entries and symlinked directories (strictly safer than the old walk).
+`start_import()` never existed as a single entry point (the HOUSE-2 note was
+aspirational); the six real consumers (`astroforge-app` CLI,
+`pipeline_e2e.rs`, `planetary_routing.rs`, `mvp_pipeline.rs`,
+`narrowband_image.rs`, `src-tauri/src/main.rs`) were re-pointed to
+`import_scan::{...}` with a one-line import change each — no behavioral
+change.
+
+**Migration test:** `crates/astroforge-core/tests/import_scan_parity.rs`
+(3 tests): the folded walk must equal the canonical walker filtered to FITS
+on the same tree (nested dirs included, hidden dirs excluded); the manifest
+layer and the CR-04 asset layer must agree per-file (exptime, filter,
+dimensions — no drift); and the `SourceAsset` conversion covers every
+discovered file with coalesced dimensions flowing through.
+
+
 ### HOUSE-1 — Wizard sidebars + dead code (closed, RT-5 / #424)
 
 **Outcome (post-audit, diverges from the original file list):** the original

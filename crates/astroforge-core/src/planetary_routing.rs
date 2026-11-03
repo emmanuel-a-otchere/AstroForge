@@ -1,4 +1,4 @@
-use crate::ingest::FrameInfo;
+use crate::import_scan::FrameInfo;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -64,7 +64,7 @@ pub fn route_session_prompt(frames: &[FrameInfo]) -> Option<TargetType> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ingest::FrameType;
+    use crate::import_scan::FrameType;
     use std::path::PathBuf;
 
     fn make_frames(count: usize, exptime: f64) -> Vec<FrameInfo> {

@@ -24,7 +24,7 @@ use std::time::Instant;
 use anyhow::{bail, Context, Result};
 use astroforge_core::export::export_tiff_16bit;
 use astroforge_core::fits;
-use astroforge_core::ingest::{self, FrameInfo, FrameType};
+use astroforge_core::import_scan::{self, FrameInfo, FrameType};
 use astroforge_core::mvp_pipeline::{self, PipelineConfig};
 
 fn main() {
@@ -94,13 +94,13 @@ fn run(source_dir: &Path, output_path: &Path) -> Result<CliReport> {
 
     // 1. Ingest: scan the directory and classify every FITS frame.
     log::info!("scanning {}", source_dir.display());
-    let paths = ingest::scan_directory(source_dir)
+    let paths = import_scan::scan_fits_directory(source_dir)
         .with_context(|| format!("scan_directory failed for {}", source_dir.display()))?;
     let mut frames: Vec<FrameInfo> = Vec::new();
     for path in paths {
         let bytes =
             fs::read(&path).with_context(|| format!("read failed for {}", path.display()))?;
-        let frame = ingest::classify_frame(&path, &bytes);
+        let frame = import_scan::classify_frame(&path, &bytes);
         frames.push(frame);
     }
 
@@ -121,7 +121,7 @@ fn run(source_dir: &Path, output_path: &Path) -> Result<CliReport> {
     );
     // Clone here: build_manifest takes ownership, but we still need `frames`
     //    for the per-type counts (darks/flats/biases) below.
-    let manifest = ingest::build_manifest(
+    let manifest = import_scan::build_manifest(
         &session_id,
         &source_dir.display().to_string(),
         frames.clone(),

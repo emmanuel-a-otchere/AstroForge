@@ -112,7 +112,9 @@ fn detect_gpu_backend() -> GpuBackend {
     }
     #[cfg(target_os = "linux")]
     {
-        GpuBackend::Cpu
+        // nvidia-smi presence is the cheapest honest CUDA probe; a
+        // successful query means a usable NVIDIA driver stack.
+        detect_linux_cuda()
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
@@ -122,6 +124,18 @@ fn detect_gpu_backend() -> GpuBackend {
 
 fn estimate_vram() -> u64 {
     0
+}
+
+#[cfg(target_os = "linux")]
+fn detect_linux_cuda() -> GpuBackend {
+    match std::process::Command::new("nvidia-smi")
+        .arg("--query-gpu=name")
+        .arg("--format=csv,noheader")
+        .output()
+    {
+        Ok(out) if out.status.success() && !out.stdout.is_empty() => GpuBackend::Cuda,
+        _ => GpuBackend::Cpu,
+    }
 }
 
 #[cfg(test)]

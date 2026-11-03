@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### RT-8: GPU execution providers for ort (#427, CR-06 P5.2)
+
+**Scope.** Wire the pre-existing pure provider-selection logic into real
+ORT session construction, keep CPU fallback, and label the requested
+backend honestly.
+
+- `gpu_providers::ort_gpu_dispatches(probe)`: materializes the compiled
+  preference list into `ort` EP dispatches (CUDA/TensorRT/DirectML/
+  CoreML/OpenVINO, each gated by its `gpu-*` feature; CPU stays the
+  implicit ORT fallback).
+- `OnnxEngine::open_catalog_on(id, bytes, probe)`: probe-aware catalog
+  session builder; EP registration failure degrades to a CPU builder
+  with a warning (a missing driver never fails a session). Builtin
+  graphs stay CPU-only by design (tiny kernels; registration overhead
+  dominates).
+- `DispatchResult.backend` now reports the requested backend from the
+  engine ("cpu" in default builds, "coreml" with `gpu-coreml`, ...)
+  instead of a hard-coded string.
+- `hardware::detect_gpu_backend` on Linux probes `nvidia-smi` (Cuda
+  when a driver answers, else CPU).
+- CI: new `ai-gpu-coreml` job (macOS) runs the astroforge-ai suite with
+  `--features gpu-coreml`, registering the real CoreML provider on
+  Metal runners; provider compilation tests are feature-aware.
+
 ### Recon Tranche 2026-10 — Wave 1: ship readiness (RT-1..RT-5, #419-#424, #442)
 
 **Scope.** Hygiene + release engineering wave of the ship-readiness tranche.

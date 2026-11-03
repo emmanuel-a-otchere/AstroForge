@@ -100,7 +100,7 @@ fn obs_confidence_to_f32(c: ObsConfidence) -> f32 {
 
 /// Build the `model_candidates` list for an operation by
 /// filtering the canonical registry by `stage`. P3 picks
-/// `swinir-denoise-astro` for denoise, `swinir-sr-astro-2x`
+/// `swinir-denoise-astro` for denoise, `swin2sr-realworld-x4`
 /// for super-resolution, `trail-lama-tiny` for trail
 /// cleanup, and so on. The candidates list is always
 /// ordered: the recommended model first, the rest after.
@@ -468,7 +468,7 @@ fn rule_super_resolution(report: &ImageAnalysisReport, out: &mut Vec<AiRecommend
     }
     let confidence = obs_confidence_to_f32(lc.confidence) * 0.7;
     let (candidates, recommended) =
-        candidates_for_stage("ai_super_resolution", Some("swinir-sr-astro-2x"));
+        candidates_for_stage("ai_super_resolution", Some("swin2sr-realworld-x4"));
     let (runtime, memory) = resource_estimate(recommended.as_deref(), report.width, report.height);
     out.push(AiRecommendation {
         operation: "super_resolution".into(),
@@ -630,7 +630,7 @@ mod tests {
                 .unwrap()
                 .recommended_model
                 .as_deref(),
-            Some("swinir-sr-astro-2x")
+            Some("swin2sr-realworld-x4")
         );
     }
 

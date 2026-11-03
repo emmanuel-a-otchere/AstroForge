@@ -399,7 +399,7 @@ pub fn model_binding(operation_id: &str) -> Option<OperationModelBinding> {
         },
         "super_resolution" => OperationModelBinding {
             builtin_model_id: "builtin-upscale-2x",
-            catalog_model_name: Some("swinir-sr-astro-2x"),
+            catalog_model_name: Some("swin2sr-realworld-x4"),
             scalar_param_key: None,
             scalar_default: 0.0,
             scalar_offset_one: false,

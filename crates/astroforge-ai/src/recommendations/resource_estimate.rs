@@ -80,7 +80,7 @@ pub fn estimate_for(model: &ModelInfo, width: u32, height: u32) -> ResourceEstim
 fn per_tile_latency_ms(model_name: &str) -> u64 {
     match model_name {
         "swinir-denoise-astro" => 80,
-        "swinir-sr-astro-2x" => 320,
+        "swin2sr-realworld-x4" => 320,
         "swin2sr-dejpeg" => 100,
         "star-seg-v1" => 60,
         "cloud-score-v1" => 40,
@@ -153,13 +153,14 @@ mod tests {
             input_channels: 3,
             input_tile_size: 512,
             output_channels: 3,
+            download_url: None,
             scale_factor: 1,
         }
     }
 
     fn sr_model() -> ModelInfo {
         ModelInfo {
-            name: "swinir-sr-astro-2x".into(),
+            name: "swin2sr-realworld-x4".into(),
             version: "1.0.0".into(),
             sha256: "x".into(),
             size_bytes: 50_000_000,
@@ -168,6 +169,7 @@ mod tests {
             input_channels: 3,
             input_tile_size: 512,
             output_channels: 3,
+            download_url: None,
             scale_factor: 2,
         }
     }

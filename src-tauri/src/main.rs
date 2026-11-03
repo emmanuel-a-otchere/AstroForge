@@ -2195,6 +2195,7 @@ fn main() {
             // CR-05 R1 — read-only AI model catalog (Recipes/AI
             // Models/Settings/Help application-level surfaces).
             commands_ai_models::ai_model_list,
+            commands_ai_models::ai_model_download,
             export_multi_format,
             // CR-02.6 — project / pipeline-run commands (additive).
             commands_project::project_list,

@@ -1,18 +1,21 @@
-//! CR-05 R1 — read-only AI model catalog IPC.
+//! CR-05 R1 — AI model catalog IPC + RT-7 (#426) install flow.
 //!
 //! Surfaces `astroforge_ai::hub::model_catalog()` so the application-level
-//! "AI Models" navigation target renders a real, content-bearing screen
-//! instead of a placeholder. The catalog is the canonical list of every
-//! model AstroForge can host (denoise, super-resolution, de-jpeg, star
-//! segmentation, cloud score, color calibration, trail inpainting).
+//! "AI Models" navigation target renders the canonical catalog (denoise,
+//! super-resolution, de-jpeg, star segmentation, cloud score, color
+//! calibration, trail inpainting), and installs pinned catalog models on
+//! demand: `ai_model_download` fetches the artifact, verifies it against
+//! the pinned SHA-256 fail-closed (`astroforge_ai::downloader`), and
+//! writes it to `<home>/AstroForge/models/<id>.onnx` atomically.
 //!
-//! No download/install IPC is exposed here. Models ship with the binary in
-//! this slice; download flow is deferred to a later tranche (it needs a
-//! `<models_dir>` resolution path and a `ModelRegistry::register` writer,
-//! neither of which exists yet in the IPC layer). The AI Models screen
-//! surfaces the catalog as a read-only list with stage + license + size.
+//! `installed` reflects on-disk presence; integrity is enforced at
+//! download time and again when a session opens the model
+//! (`inference::OnnxEngine::open_verified`), so a tampered file can never
+//! execute.
 
+use astroforge_ai::downloader::{download_spec, install_model, HttpByteSource};
 use astroforge_ai::hub::{model_catalog, ModelInfo};
+use std::path::PathBuf;
 
 /// AstroForge model record exposed to the frontend. Mirrors the Rust
 /// `astroforge_ai::hub::ModelInfo` struct so the renderer can show
@@ -31,18 +34,32 @@ pub struct AiModelInfoDto {
     pub input_tile_size: u32,
     pub output_channels: u32,
     pub scale_factor: u32,
-    /// True when a model asset exists on disk. The model catalog itself
-    /// is always present; the on-disk check uses the standard
-    /// `<models_dir>/<name>.onnx` convention the registry follows.
-    /// This slice returns `false` uniformly — the download flow is
-    /// deferred to a later tranche — but the field is exposed now so
-    /// the UI can render an "Installed" badge without a follow-up
-    /// breaking change.
+    /// Runtime-download URL for installable models; `None` for
+    /// unannounced placeholders.
+    pub download_url: Option<String>,
+    /// True when a model artifact exists on disk at the standard
+    /// `<models_dir>/<name>.onnx` path.
     pub installed: bool,
 }
 
-impl From<ModelInfo> for AiModelInfoDto {
-    fn from(m: ModelInfo) -> Self {
+/// The user's models directory (`<home>/AstroForge/models`), matching
+/// the path the enhancement pipeline resolves for
+/// `ModelRegistry::new`. Returns `None` when no home directory is
+/// set (embedded/kiosk environments) — catalog listing still works,
+/// installs do not.
+fn models_dir() -> Option<PathBuf> {
+    crate::commands_ai_enhancement::dirs_home().map(|mut p| {
+        p.push("AstroForge");
+        p.push("models");
+        p
+    })
+}
+
+impl AiModelInfoDto {
+    fn from_info_with_disk(m: ModelInfo) -> Self {
+        let installed = models_dir()
+            .map(|dir| dir.join(format!("{}.onnx", m.name)).is_file())
+            .unwrap_or(false);
         Self {
             name: m.name,
             version: m.version,
@@ -53,8 +70,15 @@ impl From<ModelInfo> for AiModelInfoDto {
             input_tile_size: m.input_tile_size,
             output_channels: m.output_channels,
             scale_factor: m.scale_factor,
-            installed: false,
+            download_url: m.download_url,
+            installed,
         }
+    }
+}
+
+impl From<ModelInfo> for AiModelInfoDto {
+    fn from(m: ModelInfo) -> Self {
+        Self::from_info_with_disk(m)
     }
 }
 
@@ -63,5 +87,22 @@ impl From<ModelInfo> for AiModelInfoDto {
 /// command is the single source for the AI Models application screen.
 #[tauri::command]
 pub fn ai_model_list() -> Vec<AiModelInfoDto> {
-    model_catalog().into_iter().map(Into::into).collect()
+    model_catalog()
+        .into_iter()
+        .map(AiModelInfoDto::from_info_with_disk)
+        .collect()
+}
+
+/// Install a catalog model by id: fetch from the pinned URL, verify
+/// the exact bytes against the pinned SHA-256 (fail-closed — a
+/// mismatched artifact is discarded, never loaded), and write it
+/// atomically into the models directory. Returns the installed path.
+#[tauri::command]
+pub fn ai_model_download(name: String) -> Result<String, String> {
+    let spec = download_spec(&name)
+        .ok_or_else(|| format!("no downloadable artifact for model '{name}'"))?;
+    let dir = models_dir()
+        .ok_or_else(|| "home directory unavailable; cannot resolve models dir".to_string())?;
+    let path = install_model(&dir, spec, &HttpByteSource).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
 }

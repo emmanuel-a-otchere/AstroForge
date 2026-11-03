@@ -108,7 +108,7 @@ impl SwinIrSuperRes {
 
 impl AiModel for SwinIrSuperRes {
     fn name(&self) -> &str {
-        "swinir-sr-astro-2x"
+        "swin2sr-realworld-x4"
     }
     fn stage(&self) -> &str {
         "ai_super_resolution"
@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn test_swinir_sr_2x() {
         let mut ctx = make_ctx();
-        ctx.model_name = "swinir-sr-astro-2x".into();
+        ctx.model_name = "swin2sr-realworld-x4".into();
         let model = SwinIrSuperRes::new(ctx, 2);
         let img = make_test_image();
         let result = model.run(&img);

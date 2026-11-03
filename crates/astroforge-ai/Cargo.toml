@@ -13,6 +13,7 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 ndarray = { workspace = true }
+ureq = { workspace = true }
 # CR-06 P5.1 — real ONNX inference. `ort` wraps ONNX Runtime 1.28;
 # the `download-binaries` feature fetches the prebuilt CPU runtime at
 # build time. `tls-rustls` keeps that fetch pure-Rust (the default
@@ -51,3 +52,12 @@ gpu-tensorrt = ["ort/tensorrt"]
 
 [dev-dependencies]
 serde_json = { workspace = true }
+# Network-gated e2e (tests/model_download_e2e.rs) drives raw sessions
+# to pin the published tensor contracts.
+ort = { version = "2.0.0-rc.13", default-features = false, features = [
+    "std",
+    "download-binaries",
+    "tls-rustls",
+    "copy-dylibs",
+    "api-27",
+] }

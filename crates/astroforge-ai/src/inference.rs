@@ -254,17 +254,23 @@ pub const CATALOG_MODELS: &[CatalogModel] = &[
     // upstream licenses + hashes land; the engine refuses to
     // load any of them today. Adding a real digest to the
     // sentinel entry is the DP#4 closeout.
+    // RT-7 (#426) — the first two real catalog pins. Digests are the
+    // git-LFS content sha256 of the exact published artifacts; the
+    // downloader (crate::downloader) verifies bytes against them
+    // fail-closed before install. Licenses verified from the model
+    // cards: both Apache-2.0 (SwinIR upstream is Apache-2.0; the
+    // onnx-community Swin2SR export is Apache-2.0).
     CatalogModel {
         id: "swinir-denoise-astro",
         kind: BuiltinInputKind::ImageOnly,
-        sha256: UNVERIFIED_SHA256,
-        license: None,
+        sha256: "5fb427215c6a893b4c4aa27b6ab0aad66742fb9cb7ab24f65eff27b09cc2ea74",
+        license: Some(LicenseSpdx::Apache20),
     },
     CatalogModel {
-        id: "swinir-sr-astro-2x",
+        id: "swin2sr-realworld-x4",
         kind: BuiltinInputKind::ImageOnly,
-        sha256: UNVERIFIED_SHA256,
-        license: None,
+        sha256: "13474507a83b3dc254df0fbf32f4a34ffa62070d62b33cc99eacef43df3a3692",
+        license: Some(LicenseSpdx::Apache20),
     },
     CatalogModel {
         id: "swin2sr-dejpeg",
@@ -930,13 +936,13 @@ mod tests {
 
     #[test]
     fn catalog_unpinned_set_is_correct() {
-        // The 7 real-catalog entries from P2-M1-T5..T11 should
-        // all carry the UNVERIFIED_SHA256 sentinel until DP#4
-        // lands. This is the fail-closed guarantee the catalog
-        // path relies on.
+        // RT-7 (#426): swinir-denoise-astro and swin2sr-realworld-x4
+        // are now pinned (Apache-2.0, verified digests). The
+        // remaining 5 real-catalog entries from P2-M1-T5..T11 still
+        // carry the UNVERIFIED_SHA256 sentinel until their DP#4
+        // close-out — the fail-closed guarantee the catalog path
+        // relies on.
         let unpinned_ids = [
-            "swinir-denoise-astro",
-            "swinir-sr-astro-2x",
             "swin2sr-dejpeg",
             "star-seg-v1",
             "cloud-score-v1",
@@ -963,12 +969,13 @@ mod tests {
 
     #[test]
     fn open_catalog_unpinned_fails_closed() {
-        // SwinIR is registered but unpinned. Any bytes — even
-        // real ones — fail closed with a clear error.
+        // A still-unpinned catalog entry. Any bytes — even real
+        // ones — fail closed with a clear error. (swinir-denoise-
+        // astro is pinned since RT-7; dejpeg is not.)
         let bytes = vec![0u8; 8];
-        match OnnxEngine::open_catalog("swinir-denoise-astro", bytes) {
+        match OnnxEngine::open_catalog("swin2sr-dejpeg", bytes) {
             Err(InferenceError::CatalogUnpinned { id }) => {
-                assert_eq!(id, "swinir-denoise-astro");
+                assert_eq!(id, "swin2sr-dejpeg");
             }
             Err(other) => panic!("expected CatalogUnpinned, got {other:?}"),
             Ok(_) => panic!("expected error, got Ok"),

@@ -1,3 +1,4 @@
+pub mod downloader;
 pub mod gpu_providers;
 pub mod hardware;
 pub mod hub;

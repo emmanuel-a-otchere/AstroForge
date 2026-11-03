@@ -12,12 +12,20 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { aiModelList, type AiModelInfo } from "../lib/astroforge-api";
+  import {
+    aiModelList,
+    aiModelDownload,
+    type AiModelInfo,
+  } from "../lib/astroforge-api";
 
   let models: AiModelInfo[] = $state([]);
   let loading = $state(true);
   let error: string | null = $state(null);
   let tauri = $state(true);
+
+  // RT-7 (#426) — per-model download state.
+  let downloading = $state<Record<string, boolean>>({});
+  let downloadError = $state<Record<string, string>>({});
 
   onMount(async () => {
     try {
@@ -37,7 +45,23 @@
     }
   });
 
+  async function download(model: AiModelInfo) {
+    downloading[model.name] = true;
+    downloadError[model.name] = "";
+    try {
+      await aiModelDownload(model.name);
+      // Refresh the catalog so the Installed badge reflects disk.
+      models = await aiModelList();
+    } catch (e) {
+      downloadError[model.name] =
+        e instanceof Error ? e.message : String(e);
+    } finally {
+      downloading[model.name] = false;
+    }
+  }
+
   function formatBytes(n: number): string {
+    if (n <= 0) return "—";
     if (n < 1024) return `${n} B`;
     const units = ["KB", "MB", "GB"];
     let val = n / 1024;
@@ -62,9 +86,10 @@
     <div>
       <h1 class="font-display">AI Models</h1>
       <p class="font-body">
-        Inference capabilities AstroForge can route processing through. The
-        catalog is bundled with the application; model install / download is
-        a follow-up tranche.
+        Inference capabilities AstroForge can route processing through.
+        Models with a pinned digest download on demand into
+        <code>~/AstroForge/models</code> and are verified against their
+        SHA-256 before install; entries marked TBD are not yet released.
       </p>
     </div>
   </header>
@@ -127,6 +152,20 @@
               >
                 {model.installed ? "Installed" : "Not installed"}
               </span>
+              {#if !model.installed && model.download_url}
+                <button
+                  class="download-btn font-body"
+                  onclick={() => download(model)}
+                  disabled={downloading[model.name]}
+                >
+                  {downloading[model.name] ? "Downloading…" : "Download"}
+                </button>
+              {/if}
+              {#if downloadError[model.name]}
+                <p class="download-error font-body" role="alert">
+                  {downloadError[model.name]}
+                </p>
+              {/if}
             </td>
           </tr>
         {/each}
@@ -249,5 +288,34 @@
     background: var(--primary-container);
     color: var(--on-primary-container);
     border-color: var(--primary);
+  }
+
+  .download-btn {
+    display: block;
+    margin-top: 4px;
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--primary);
+    background: transparent;
+    color: var(--primary);
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  .download-btn:hover:not(:disabled) {
+    background: var(--primary-container);
+    color: var(--on-primary-container);
+  }
+
+  .download-btn:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+
+  .download-error {
+    margin: 4px 0 0;
+    max-width: 260px;
+    font-size: 0.75rem;
+    color: var(--error, #b3261e);
   }
 </style>

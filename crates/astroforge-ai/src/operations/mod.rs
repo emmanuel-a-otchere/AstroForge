@@ -544,7 +544,7 @@ pub fn dispatch_operation(
     // unknown / unpinned ids; unpinned entries fall back to the
     // builtin only when the artifact is absent, otherwise error —
     // see resolve_engine.
-    let mut engine = resolve_engine(&binding, models_dir)?;
+    let mut engine = resolve_engine(&binding, models_dir, probe)?;
     let (model_id, model_version, model_hash) = engine_model_identity(&binding, models_dir);
 
     // Fixed-tile catalog graphs (EngineMode::Nchw with a hard-coded
@@ -627,7 +627,7 @@ pub fn dispatch_operation(
         model_id,
         model_version,
         model_hash,
-        backend: "cpu".into(),
+        backend: engine.backend_label().to_string(),
         runtime: "onnxruntime-1.28".into(),
         tile_configuration_json,
         duration_ms: started.elapsed().as_millis() as u64,
@@ -641,6 +641,7 @@ pub fn dispatch_operation(
 fn resolve_engine(
     binding: &OperationModelBinding,
     models_dir: Option<&std::path::Path>,
+    probe: &crate::hardware::HardwareProbe,
 ) -> Result<OnnxEngine, OperationError> {
     // Catalog preference rule (RT-7 slice 2): fixed-tile NCHW graphs
     // (spatial_scale == 1) run through the tiled dispatcher path.
@@ -657,7 +658,7 @@ fn resolve_engine(
             // pinned registry entry. Unknown ids fail closed;
             // unpinned entries (sha256 = "unverified") fail closed
             // until real hashes land.
-            return OnnxEngine::open_catalog(name, bytes)
+            return OnnxEngine::open_catalog_on(name, bytes, probe)
                 .map_err(|e| OperationError::Inference(e.to_string()));
         }
     }

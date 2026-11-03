@@ -8,13 +8,14 @@
 //!
 //! # Design
 //!
-//! The slice intentionally *does not* call into `ort` itself. The
-//! selection logic is pure data: given a probe, return the ordered
-//! preference list of providers the dispatcher would pass to
-//! `ort::Session::builder().with_execution_providers(...)`. The actual
-//! `ort` invocation lives in `Onnx_runtime::open_*` and is exercised
-//! end-to-end by per-platform CI runners with the matching feature
-//! enabled.
+//! The selection logic is pure data: given a probe, return the
+//! ordered preference list of providers for the runtime. RT-8 (#427)
+//! adds the `ort` bridge: [`ort_gpu_dispatches`] materializes the
+//! compiled preference list into `ort::ep::ExecutionProviderDispatch`
+//! values for `Session::builder().with_execution_providers(...)` —
+//! consumed by `inference::OnnxEngine::open_catalog_on` and exercised
+//! on the CI `ai-gpu-coreml` job (macOS runners register the real
+//! CoreML provider).
 //!
 //! Default `cargo build` (CPU-only) builds and tests cleanly without
 //! any GPU SDK present. CI matrix expansion to GPU runners is a
@@ -151,6 +152,60 @@ pub fn has_compiled_gpu(probe: &HardwareProbe) -> bool {
         .any(|ep| ep.backend().is_some())
 }
 
+/// Materialize the compiled GPU preference list into `ort`
+/// execution-provider dispatches for
+/// `Session::builder().with_execution_providers(...)`. Each provider
+/// is gated by its `gpu-*` Cargo feature (which enables the matching
+/// `ort` feature); the CPU fallback is intentionally absent — ONNX
+/// Runtime always falls back to CPU internally, and registering it
+/// explicitly pins the order needlessly.
+///
+/// This is the only place that touches `ort` EP types; everything
+/// above stays pure so selection logic tests run in CPU-only builds.
+pub fn ort_gpu_dispatches(
+    probe: &HardwareProbe,
+) -> Vec<ort::execution_providers::ExecutionProviderDispatch> {
+    compiled_selection(probe)
+        .into_iter()
+        .filter_map(|ep| match ep {
+            #[cfg(feature = "gpu-cuda")]
+            ExecutionProvider::Cuda => Some(ort::execution_providers::CUDA::default().build()),
+            #[cfg(feature = "gpu-tensorrt")]
+            ExecutionProvider::TensorRt => {
+                Some(ort::execution_providers::TensorRT::default().build())
+            }
+            #[cfg(feature = "gpu-directml")]
+            ExecutionProvider::DirectMl => {
+                Some(ort::execution_providers::DirectML::default().build())
+            }
+            #[cfg(feature = "gpu-coreml")]
+            ExecutionProvider::CoreMl => Some(ort::execution_providers::CoreML::default().build()),
+            #[cfg(feature = "gpu-openvino")]
+            ExecutionProvider::OpenVino => {
+                Some(ort::execution_providers::OpenVINO::default().build())
+            }
+            // CPU never registers (implicit fallback); uncompiled GPU
+            // providers were already filtered out by compiled_selection.
+            ExecutionProvider::Cpu => None,
+            #[allow(unreachable_patterns)]
+            _ => None,
+        })
+        .collect()
+}
+
+/// The user-facing backend label for a probe: the first compiled GPU
+/// provider's label, or `"cpu"`. This is the *requested* backend —
+/// ONNX Runtime may still fall back internally (e.g. no Metal
+/// device); surfacing the definitive provider requires session
+/// metadata parsing (follow-up).
+pub fn backend_label(probe: &HardwareProbe) -> String {
+    compiled_selection(probe)
+        .into_iter()
+        .find(|ep| ep.backend().is_some())
+        .map(|ep| ep.label().to_lowercase())
+        .unwrap_or_else(|| "cpu".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,19 +272,51 @@ mod tests {
     }
 
     #[test]
-    fn default_build_has_no_compiled_gpu() {
-        // Without any gpu-* feature flag, the GPU providers are not
-        // compiled; only CPU is.
-        assert!(!ExecutionProvider::Cuda.is_compiled());
-        assert!(!ExecutionProvider::DirectMl.is_compiled());
-        assert!(!ExecutionProvider::CoreMl.is_compiled());
-        assert!(!ExecutionProvider::OpenVino.is_compiled());
-        assert!(!ExecutionProvider::TensorRt.is_compiled());
+    fn gpu_providers_compile_only_with_their_feature() {
+        // Each GPU provider is compiled iff its gpu-* feature is on —
+        // this test passes under the default CPU-only build AND under
+        // feature-enabled runs (the ai-gpu-coreml CI job, RT-8 #427).
+        assert_eq!(
+            ExecutionProvider::CoreMl.is_compiled(),
+            cfg!(feature = "gpu-coreml")
+        );
+        assert_eq!(
+            ExecutionProvider::Cuda.is_compiled(),
+            cfg!(feature = "gpu-cuda")
+        );
+        assert_eq!(
+            ExecutionProvider::DirectMl.is_compiled(),
+            cfg!(feature = "gpu-directml")
+        );
+        assert_eq!(
+            ExecutionProvider::TensorRt.is_compiled(),
+            cfg!(feature = "gpu-tensorrt")
+        );
+        assert_eq!(
+            ExecutionProvider::OpenVino.is_compiled(),
+            cfg!(feature = "gpu-openvino")
+        );
+        assert!(ExecutionProvider::Cpu.is_compiled());
     }
 
     #[test]
     fn has_compiled_gpu_returns_false_for_cpu_probe() {
         assert!(!has_compiled_gpu(&probe(GpuBackend::Cpu)));
+    }
+
+    #[test]
+    fn backend_label_reflects_compiled_providers() {
+        let p = probe(GpuBackend::Metal);
+        if cfg!(feature = "gpu-coreml") {
+            assert_eq!(backend_label(&p), "coreml");
+            assert!(has_compiled_gpu(&p));
+        } else {
+            // Default CPU-only build: the Metal probe finds no
+            // compiled provider and the label stays honest.
+            assert_eq!(backend_label(&p), "cpu");
+            assert!(!has_compiled_gpu(&p));
+        }
+        assert_eq!(backend_label(&probe(GpuBackend::Cpu)), "cpu");
     }
 
     #[test]

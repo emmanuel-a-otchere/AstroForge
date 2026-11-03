@@ -574,6 +574,11 @@ pub struct OnnxEngine {
     /// NCHW (`[1,3,H,W]` f32 RGB, fixed tile from the download
     /// spec, edge-padded tiles cropped back after the run).
     mode: EngineMode,
+    /// The requested backend label ("cpu", "coreml", "cuda", ...).
+    /// Requested, not confirmed: ORT may fall back internally when
+    /// a device is unavailable; surfacing the definitive provider
+    /// needs session metadata parsing (follow-up on #427).
+    backend_label: String,
 }
 
 /// How an open session consumes images (see [`OnnxEngine`]).
@@ -611,8 +616,10 @@ impl EngineMode {
 
 impl OnnxEngine {
     /// Build a session from raw ONNX bytes after verifying the digest
-    /// against the pinned value. CPU execution provider only; GPU
-    /// providers are compile-time features and land in P5.2.
+    /// against the pinned value. CPU-only by design: builtins are
+    /// tiny classical kernels whose workload never justifies GPU EP
+    /// registration overhead — downloaded catalog models take the
+    /// probe-aware path ([`Self::open_catalog_on`], RT-8 / #427).
     pub fn open_verified(
         bytes: &[u8],
         expected_sha256: &str,
@@ -632,7 +639,43 @@ impl OnnxEngine {
             session,
             kind,
             mode: EngineMode::PlaneWise(kind),
+            // Builtins are tiny classical kernels; GPU registration
+            // overhead would dwarf the workload. CPU-only by design.
+            backend_label: "cpu".to_string(),
         })
+    }
+
+    /// Build a session for `bytes`, registering the compiled GPU
+    /// execution providers for `probe` (RT-8 / #427). Registration
+    /// failure degrades to a plain CPU builder with a warning — a
+    /// missing driver never fails a session.
+    fn make_session(
+        bytes: &[u8],
+        probe: &crate::hardware::HardwareProbe,
+    ) -> Result<(ort::session::Session, String), InferenceError> {
+        let dispatches = crate::gpu_providers::ort_gpu_dispatches(probe);
+        let label = crate::gpu_providers::backend_label(probe);
+        let builder =
+            ort::session::Session::builder().map_err(|e| InferenceError::Ort(e.to_string()))?;
+        let mut builder = if dispatches.is_empty() {
+            builder
+        } else {
+            match builder.with_execution_providers(&dispatches) {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!(
+                        "GPU execution-provider registration failed ({}); falling back to CPU",
+                        e.message()
+                    );
+                    ort::session::Session::builder()
+                        .map_err(|e| InferenceError::Ort(e.to_string()))?
+                }
+            }
+        };
+        let session = builder
+            .commit_from_memory(bytes)
+            .map_err(|e| InferenceError::Ort(e.to_string()))?;
+        Ok((session, label))
     }
 
     pub fn open_builtin(model: &'static BuiltinModel) -> Result<Self, InferenceError> {
@@ -647,6 +690,16 @@ impl OnnxEngine {
     /// This closes DP#4: prior to this slice, catalog digests
     /// were placeholders and the engine accepted any bytes.
     pub fn open_catalog(id: &str, bytes: Vec<u8>) -> Result<Self, InferenceError> {
+        Self::open_catalog_on(id, bytes, &crate::hardware::HardwareProbe::detect())
+    }
+
+    /// Probe-aware variant: registers the compiled GPU execution
+    /// providers matching the probe's backend (RT-8 / #427).
+    pub fn open_catalog_on(
+        id: &str,
+        bytes: Vec<u8>,
+        probe: &crate::hardware::HardwareProbe,
+    ) -> Result<Self, InferenceError> {
         let entry =
             catalog_model(id).ok_or_else(|| InferenceError::UnknownCatalogModel(id.to_string()))?;
         if entry.sha256 == UNVERIFIED_SHA256 {
@@ -661,13 +714,12 @@ impl OnnxEngine {
         }
         let kind = entry.kind;
         let mode = EngineMode::for_catalog(id);
-        let session = ort::session::Session::builder()
-            .and_then(|mut b| b.commit_from_memory(&bytes))
-            .map_err(|e| InferenceError::Ort(e.to_string()))?;
+        let (session, backend_label) = Self::make_session(&bytes, probe)?;
         Ok(Self {
             session,
             kind,
             mode,
+            backend_label,
         })
     }
 
@@ -689,6 +741,7 @@ impl OnnxEngine {
             session,
             kind,
             mode: EngineMode::PlaneWise(kind),
+            backend_label: "cpu".to_string(),
         })
     }
 
@@ -698,6 +751,12 @@ impl OnnxEngine {
 
     pub fn mode(&self) -> EngineMode {
         self.mode
+    }
+
+    /// The requested backend label ("cpu", "coreml", ...). Requested,
+    /// not confirmed — see the field docs.
+    pub fn backend_label(&self) -> &str {
+        &self.backend_label
     }
 
     /// The fixed spatial tile this engine requires, when the graph

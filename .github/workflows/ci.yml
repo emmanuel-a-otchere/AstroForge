@@ -96,6 +96,36 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  # RT-8 (#427) — execution-provider registration on real Metal
+  # hardware. macOS runners need no GPU SDK for the CoreML feature
+  # (ort's download-binaries artifact includes it), so this job runs
+  # the astroforge-ai suite with the provider compiled in; every
+  # open_catalog session registers CoreML before falling back.
+  ai-gpu-coreml:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-cargo-gpu-coreml-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Test (astroforge-ai, gpu-coreml)
+        run: cargo test -p astroforge-ai --features gpu-coreml
+
+      - name: Clippy (astroforge-ai, gpu-coreml)
+        run: cargo clippy -p astroforge-ai --features gpu-coreml --all-targets -- -D warnings
+
   # Phase 7 close-out (#43 Windows, #44 macOS, #45 30-frame memory).
   # The CLI smoke + memory tests run as a matrix across the three target
   # OSes. The script is portable bash; Windows runners use Git Bash which

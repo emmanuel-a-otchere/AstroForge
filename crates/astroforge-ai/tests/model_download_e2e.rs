@@ -169,7 +169,10 @@ fn denoise_dispatch_routes_through_downloaded_swinir() {
     let tiles: serde_json::Value =
         serde_json::from_str(&out.tile_configuration_json).expect("tile json");
     assert_eq!(tiles["tile_size"], 128, "fixed SwinIR tile forced");
-    assert_eq!(tiles["tiled"], false, "128x128 source is one tile");
+    // "tiled" records that the tiled code path served the op
+    // (spatial_scale == 1); with overlap 64 the tiler emits
+    // overlapping 128-edge tiles even for an exactly-128 source.
+    assert_eq!(tiles["tiled"], true);
     assert_eq!(
         (
             out.result_image.width(),

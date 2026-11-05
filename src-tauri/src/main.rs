@@ -95,6 +95,7 @@ mod commands_plate_solve;
 mod commands_preview;
 mod commands_project;
 mod commands_resource;
+mod commands_session_quality;
 
 /// Tauri-managed state: holds the GalleryStore (rusqlite) behind a
 /// mutex so the IPC handlers can borrow it immutably across awaits.
@@ -2257,6 +2258,7 @@ fn main() {
             // to <root>/.astroforge/applied/<project_id>/.
             commands_ai_enhancement::read_image_artifact,
             commands_plate_solve::plate_solve_overlay,
+            commands_session_quality::session_quality_report,
             // CR-06 P5 — region-aware masks. The mask
             // engine is pure logic in
             // `astroforge-core::masks`; the create /

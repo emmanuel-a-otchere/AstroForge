@@ -22,22 +22,56 @@
     refreshUnderstanding,
     type TargetProvenanceReportJson,
   } from "../../state/import-wizard";
+  import SessionQualityPanel from "../SessionQualityPanel.svelte";
+  import {
+    sessionQualityReport,
+    type SessionQualityReport,
+  } from "../../lib/astroforge-api";
 
-  $: state = $importWizard;
-  $: classification = state.classification;
-  $: analysis = state.analysis;
-  $: ambiguous =
+  let wizard = $derived($importWizard);
+  let classification = $derived(wizard.classification);
+  let analysis = $derived(wizard.analysis);
+  // RT-13 (#431): per-frame quality trends over the session's light
+  // frames, loaded once the understanding step has frames. Failure is
+  // surfaced inline rather than blocking the wizard.
+  let qualityReport: SessionQualityReport | null = $state(null);
+  let qualityError: string | null = $state(null);
+  $effect(() => {
+    const lights = $importWizard.frames
+      .filter((f) => f.frameType === "LIGHT")
+      .map((f) => f.path);
+    if (lights.length === 0) {
+      qualityReport = null;
+      return;
+    }
+    let cancelled = false;
+    sessionQualityReport(lights)
+      .then((r) => {
+        if (!cancelled) {
+          qualityReport = r;
+          qualityError = null;
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) qualityError = e instanceof Error ? e.message : String(e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+  let ambiguous = $derived(
     classification?.import_state === "ambiguous" ||
-    (classification?.classification_confidence !== null &&
-      classification?.classification_confidence !== undefined &&
-      (classification.classification_confidence ?? 1) < 0.6);
+      (classification?.classification_confidence !== null &&
+        classification?.classification_confidence !== undefined &&
+        (classification.classification_confidence ?? 1) < 0.6),
+  );
 
   let provenance: TargetProvenanceReportJson | null = null;
   let provenanceError: string | null = null;
 
   async function refresh(): Promise<void> {
-    if (state.sessionId) {
-      await refreshUnderstanding(state.sessionId);
+    if (wizard.sessionId) {
+      await refreshUnderstanding(wizard.sessionId);
       try {
         provenance = await fetchProvenance();
         provenanceError = null;
@@ -122,6 +156,12 @@
     {:else if provenanceError}
       <p class="error" role="alert">Provenance fetch failed: {provenanceError}</p>
     {/if}
+{#if qualityReport}
+      <SessionQualityPanel report={qualityReport} />
+    {:else if qualityError}
+      <p class="quality-error" role="status">Quality trends unavailable: {qualityError}</p>
+    {/if}
+
 
     <div class="actions">
       <button class="btn-secondary" on:click={refresh} type="button">
@@ -226,5 +266,10 @@
     background: var(--color-surface, #222);
     color: var(--color-text-primary, #eee);
     border-color: var(--color-border, #444);
+  }
+  .quality-error {
+    margin: 0.5rem 0 0;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary, #aaa);
   }
 </style>

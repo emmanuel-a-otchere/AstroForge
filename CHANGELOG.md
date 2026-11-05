@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### RT-13: session quality dashboard — per-frame metric trends (#431)
+
+**Scope.** Surfaces the existing metric machinery (FWHM distribution,
+SNR snapshot keys) as a session-level view, feeding the import
+recommendation engine with robust outlier flags.
+
+- `session_quality` (core): `FrameQuality::compute` per light frame
+  (mean FWHM, star count, estimated/local SNR — eccentricity NOT
+  trended: the star extractor computes no shapes today, and a
+  fabricated metric is worse than its absence, noted in the module
+  docs); `session_quality_report` builds per-metric OLS trends
+  (improving/worsening via direction conventions) + median/MAD
+  outlier flags at 3σ, with a 5%-of-median scale floor when MAD
+  collapses (integer star counts) so wild frames still flag.
+- `session_quality_report` IPC (per-frame decode failures collected,
+  never fatal) + TS bridge; `SessionQualityPanel.svelte` (outlier
+  chips, trend table, unreadable list) mounted in the import wizard's
+  Understanding step over the session's light frames.
+- 5 tests incl. an end-to-end computation over a committed
+  sample-dataset frame; Step3Understanding migrated to Svelte 5 runes
+  in passing (the panel's `$state` collided with the legacy `state`
+  variable).
+
 ### RT-12: plate-solve decision close-out + WCS annotation spike (#430)
 
 **Scope.** ADR-0001 gains a Staged-adoption amendment (v0.x = solving API

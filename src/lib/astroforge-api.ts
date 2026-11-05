@@ -2215,6 +2215,30 @@ export const aiModelList = (): Promise<AiModelInfo[]> =>
 export const aiModelDownload = (name: string): Promise<string> =>
   invoke("ai_model_download", { name });
 
+
+// ─── RT-12 (#430) — plate-solve annotation overlay ────────────────────
+
+export interface WcsAnnotationOverlay {
+  target_name: string;
+  ra_center: string;
+  dec_center: string;
+  field_width_arcmin: number;
+  field_height_arcmin: number;
+  rotation_deg: number;
+  source: "Header" | "Solved";
+}
+
+/**
+ * WCS-derived overlay for a FITS artifact (target / center / FOV).
+ * `overlay` is null when the header carries no WCS keys — the
+ * canvas then shows no badge rather than a fabricated one. Live
+ * solving (ASTAP) is not bundled in v0.x (ADR-0001 staged adoption).
+ */
+export const plateSolveOverlay = (
+  path: string,
+): Promise<{ overlay: WcsAnnotationOverlay | null }> =>
+  invoke("plate_solve_overlay", { path });
+
 // ─── CR-04 P8 — Import Understanding IPC ────────────────────────────────
 //
 // Wires P3..P7 (frame classification, target detection, session grouping,

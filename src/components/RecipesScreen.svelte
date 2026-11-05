@@ -39,6 +39,28 @@
     AiEnhancementLevelFromRust,
   } from "../lib/astroforge-api";
 
+  // RT-10 (#428): the bundled community gallery index (ADR-0021 —
+  // static in-repo JSON; the repo is the host). Entries import
+  // through the same strict recipe_import path as file imports.
+  import galleryIndex from "../../recipes/index.json";
+
+  interface GalleryEntry {
+    name: string;
+    author?: string;
+    target_type: string;
+    recipe_version: string;
+    pipeline: { stage: string; params: Record<string, unknown> }[];
+    equipment_hints?: { camera?: string; filters?: string[] };
+    integrity?: { perceptual_models_used?: boolean };
+    [key: string]: unknown;
+  }
+
+  const communityRecipes = (
+    galleryIndex as { index_version: number; recipes: GalleryEntry[] }
+  ).recipes;
+
+  let communityBusy = $state<Record<string, boolean>>({});
+
   let loading = $state(true);
   let error: string | null = $state(null);
   let managerOpen = $state(false);
@@ -182,6 +204,19 @@
       );
     } finally {
       importExportBusy = false;
+    }
+  }
+
+  async function importCommunityRecipe(entry: GalleryEntry): Promise<void> {
+    communityBusy[entry.name] = true;
+    try {
+      const summary = await importProfile(JSON.stringify(entry));
+      reportStatus(`Imported "${summary.name}" from the community gallery.`);
+      await loadProfiles();
+    } catch (err) {
+      reportError(err instanceof Error ? err.message : String(err));
+    } finally {
+      communityBusy[entry.name] = false;
     }
   }
 
@@ -407,6 +442,54 @@
     <p class="state-line error font-body" role="alert" data-testid="import-export-error">
       {importExportError}
     </p>
+  {/if}
+
+
+  <!--
+    RT-10 (#428) — community recipe gallery (ADR-0021). Bundled
+    static index; entries import through the same strict
+    recipe_import path as file imports (CR-08 §23 + §28).
+  -->
+  {#if communityRecipes.length > 0}
+    <section class="community" aria-label="Community recipes">
+      <h2 class="font-display">Community gallery</h2>
+      <p class="community-note font-body">
+        Hand-vetted recipes bundled with the app (ADR-0021). Importing
+        runs the same strict validation as a file import.
+      </p>
+      <div class="community-grid" role="list">
+        {#each communityRecipes as entry (entry.name)}
+          <article class="community-card" role="listitem">
+            <h3 class="font-display">{entry.name}</h3>
+            <p class="font-body">
+              {entry.target_type}
+              {#if entry.equipment_hints?.camera}
+                · {entry.equipment_hints.camera}
+              {/if}
+              {#if entry.equipment_hints?.filters?.length}
+                · {entry.equipment_hints.filters.join(", ")}
+              {/if}
+            </p>
+            <p class="font-body">
+              {entry.pipeline.length} stages · v{entry.recipe_version}
+              {#if entry.integrity?.perceptual_models_used}
+                · perceptual
+              {:else}
+                · deterministic
+              {/if}
+            </p>
+            <button
+              type="button"
+              class="primary-cta font-label"
+              onclick={() => importCommunityRecipe(entry)}
+              disabled={communityBusy[entry.name]}
+            >
+              {communityBusy[entry.name] ? "Importing…" : "Import"}
+            </button>
+          </article>
+        {/each}
+      </div>
+    </section>
   {/if}
 
   {#if loading}
@@ -818,5 +901,50 @@
     border-left: 3px solid var(--error, #b3261e);
     border-radius: var(--radius-sm, 4px);
     font-size: 0.85rem;
+  }
+
+  .community {
+    margin: 0 0 var(--space-5, 24px);
+  }
+
+  .community h2 {
+    margin: 0 0 var(--space-2, 8px);
+  }
+
+  .community-note {
+    margin: 0 0 var(--space-3, 12px);
+    color: var(--on-surface-variant);
+  }
+
+  .community-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--space-3, 12px);
+  }
+
+  .community-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+    padding: var(--space-4, 16px);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md, 8px);
+    background: var(--surface-container-low);
+  }
+
+  .community-card h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .community-card p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--on-surface-variant);
+  }
+
+  .community-card button {
+    margin-top: auto;
+    align-self: flex-start;
   }
 </style>

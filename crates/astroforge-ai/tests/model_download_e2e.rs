@@ -235,3 +235,75 @@ fn denoise_dispatch_routes_through_downloaded_swinir() {
     assert!(all_finite, "output must be finite");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// RT-11 (#429) + #426 tranche acceptance: a frame from the committed
+/// sample dataset (256x256 Seestar-style synthetic session) through
+/// the real dispatch path with the downloaded SwinIR model — the
+/// fixed-128 tiler emits overlapping tiles with edge padding, and the
+/// stitch must land finite RGB at the source dims.
+///
+/// Repo-relative frame path: the model-e2e workflow checks out the
+/// repo, so the fixture resolves from the crate dir upward.
+#[test]
+fn denoise_acceptance_over_sample_dataset_frame() {
+    if !enabled() {
+        eprintln!("skipping: set ASTROFORGE_MODEL_E2E=1 to run the network e2e");
+        return;
+    }
+    // Locate tests/fixtures/sample-dataset from the crate dir.
+    let mut frame = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    frame.push("../../tests/fixtures/sample-dataset/light_003.fits");
+    let bytes = std::fs::read(&frame)
+        .unwrap_or_else(|e| panic!("sample frame missing at {}: {e}", frame.display()));
+
+    // Decode with core's FITS reader (the same path the app uses).
+    let header = astroforge_core::fits::parse_header(&bytes).expect("sample frame header parses");
+    let img = astroforge_core::fits::read_f32_image(&bytes, &header).expect("sample frame decodes");
+    assert_eq!(
+        (img.width(), img.height(), img.channels()),
+        (256, 256, 3),
+        "fixture frame is 256x256 RGB"
+    );
+
+    let spec = DOWNLOAD_SPECS
+        .iter()
+        .find(|s| s.id == "swinir-denoise-astro")
+        .expect("denoise spec");
+    let dir = tmp_dir();
+    install_model(&dir, spec, &HttpByteSource).expect("download + verify + install");
+
+    let inputs = astroforge_ai::operations::DispatchInputs {
+        source: &img,
+        mask: None,
+        probe: &astroforge_ai::hardware::HardwareProbe::detect(),
+        models_dir: Some(&dir),
+    };
+    let out = astroforge_ai::operations::dispatch_operation(
+        "denoise_luminance",
+        r#"{"strength":0.7}"#,
+        "v-rt11-src",
+        "v-rt11-dst".into(),
+        "pv-rt11".into(),
+        inputs,
+    )
+    .expect("dispatch over sample frame");
+    assert_eq!(out.model_id, "swinir-denoise-astro");
+    assert_eq!(
+        (
+            out.result_image.width(),
+            out.result_image.height(),
+            out.result_image.channels()
+        ),
+        (256, 256, 3)
+    );
+    let mut all_finite = true;
+    for c in 0..3 {
+        for y in 0..256 {
+            for x in 0..256 {
+                all_finite &= out.result_image[(c, y, x)].is_finite();
+            }
+        }
+    }
+    assert!(all_finite, "output must be finite");
+    let _ = std::fs::remove_dir_all(&dir);
+}

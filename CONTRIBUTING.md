@@ -93,6 +93,24 @@ The plan is structured into 5 phases (0–4), each with milestones and individua
 tasks. Every task references the spec section it implements, ensuring full
 traceability from spec to code.
 
+## Sample dataset
+
+`tests/fixtures/sample-dataset/` (RT-11, #429) is a committed synthetic
+Seestar-style session — 12 lights + 4 darks + 3 flats + 3 biases at
+256×256, generated deterministically by
+`scripts/generate_sample_dataset.py` (no external data, no licensing
+surface; same license as the repo). Run the pipeline over it:
+
+```bash
+bash scripts/mvp_smoke.sh tests/fixtures/sample-dataset
+```
+
+It is also the acceptance vehicle for the AI denoise path: the
+network-gated e2e in
+`crates/astroforge-ai/tests/model_download_e2e.rs` runs a real dispatch
+over one of its frames when `ASTROFORGE_MODEL_E2E=1` (or via the
+model-e2e workflow, workflow_dispatch).
+
 ## General Contribution Guidelines
 
 *(Build instructions, dependency lists, and development setup will be added

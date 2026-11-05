@@ -164,6 +164,12 @@ jobs:
       - name: Build CLI
         run: cargo build --bin astroforge
 
+      # RT-11 (#429): the committed sample dataset must survive the
+      # end-to-end smoke on every push (256x256 Seestar-style session;
+      # exercises the pipeline well beyond the 32px smoke fixture).
+      - name: Smoke the sample dataset
+        run: bash scripts/mvp_smoke.sh tests/fixtures/sample-dataset
+
       - name: Run smoke script
         shell: bash
         run: bash scripts/mvp_smoke.sh tests/fixtures/sample-session

@@ -257,12 +257,13 @@ fn denoise_acceptance_over_sample_dataset_frame() {
         .unwrap_or_else(|e| panic!("sample frame missing at {}: {e}", frame.display()));
 
     // Decode with core's FITS reader (the same path the app uses).
-    let header = astroforge_core::fits::parse_header(&bytes)
-        .expect("sample frame header parses");
-    let img = astroforge_core::fits::read_f32_image(&bytes, &header)
-        .expect("sample frame decodes");
-    assert_eq!((img.width(), img.height(), img.channels()), (256, 256, 3),
-        "fixture frame is 256x256 RGB");
+    let header = astroforge_core::fits::parse_header(&bytes).expect("sample frame header parses");
+    let img = astroforge_core::fits::read_f32_image(&bytes, &header).expect("sample frame decodes");
+    assert_eq!(
+        (img.width(), img.height(), img.channels()),
+        (256, 256, 3),
+        "fixture frame is 256x256 RGB"
+    );
 
     let spec = DOWNLOAD_SPECS
         .iter()
@@ -288,7 +289,11 @@ fn denoise_acceptance_over_sample_dataset_frame() {
     .expect("dispatch over sample frame");
     assert_eq!(out.model_id, "swinir-denoise-astro");
     assert_eq!(
-        (out.result_image.width(), out.result_image.height(), out.result_image.channels()),
+        (
+            out.result_image.width(),
+            out.result_image.height(),
+            out.result_image.channels()
+        ),
         (256, 256, 3)
     );
     let mut all_finite = true;

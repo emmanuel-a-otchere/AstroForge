@@ -1,0 +1,149 @@
+{
+  "index_version": 1,
+  "description": "AstroForge community recipe gallery (RT-10 / #428). Static in-repo index per ADR-0021: this repository is the host; the app bundles the index at build time and every entry imports through the standard sanitized SharedRecipe path (spec \u00a711.1) with strict validation. Entries are hand-vetted; to submit one, open a PR adding an entry here.",
+  "recipes": [
+    {
+      "recipe_version": "1.0",
+      "app_version": "0.1.0",
+      "name": "Seestar OSC Broadband",
+      "author": "astroforge",
+      "target_type": "deep_sky",
+      "equipment_hints": {
+        "camera": "Seestar S50",
+        "filters": []
+      },
+      "pipeline": [
+        {
+          "stage": "ingest",
+          "params": { "hotPixelSigma": 3.0 }
+        },
+        {
+          "stage": "background_extraction",
+          "params": { "polyOrder": 2, "model": "polynomial" }
+        },
+        {
+          "stage": "color_calibration",
+          "params": { "method": "star_reference" }
+        },
+        {
+          "stage": "denoise",
+          "params": { "method": "wavelet", "layers": 3, "strength": 0.2, "edgeProtect": true }
+        },
+        {
+          "stage": "stretch",
+          "params": { "method": "midtone", "midtone": 0.4 }
+        },
+        {
+          "stage": "export",
+          "params": { "format": "tiff16" }
+        }
+      ],
+      "model_versions": {},
+      "integrity": {
+        "perceptual_models_used": false
+      }
+    },
+    {
+      "recipe_version": "1.0",
+      "app_version": "0.1.0",
+      "name": "DwarfII Core-Preserved Detail",
+      "author": "astroforge",
+      "target_type": "deep_sky",
+      "equipment_hints": {
+        "camera": "Dwarf II",
+        "filters": []
+      },
+      "pipeline": [
+        {
+          "stage": "ingest",
+          "params": { "hotPixelSigma": 3.0 }
+        },
+        {
+          "stage": "background_extraction",
+          "params": { "polyOrder": 3, "model": "polynomial" }
+        },
+        {
+          "stage": "denoise",
+          "params": { "method": "wavelet", "layers": 3, "strength": 0.25, "edgeProtect": true }
+        },
+        {
+          "stage": "color_wb",
+          "params": { "method": "g2v" }
+        },
+        {
+          "stage": "stretch",
+          "params": { "method": "midtone", "midtone": 0.4 }
+        },
+        {
+          "stage": "sharpen_deconvolution",
+          "params": { "algorithm": "richardson_lucy", "iterations": 10, "coreProtect": true }
+        },
+        {
+          "stage": "creative_polish",
+          "params": { "clahe": true, "strength": 0.3 }
+        },
+        {
+          "stage": "color_scnr",
+          "params": { "target": "green" }
+        },
+        {
+          "stage": "export",
+          "params": { "format": "tiff16", "resample": "lanczos4" }
+        }
+      ],
+      "model_versions": {},
+      "integrity": {
+        "perceptual_models_used": false
+      }
+    },
+    {
+      "recipe_version": "1.0",
+      "app_version": "0.1.0",
+      "name": "HOO Narrowband Dual-Band",
+      "author": "astroforge",
+      "target_type": "deep_sky",
+      "equipment_hints": {
+        "camera": "ASI2600MM Pro",
+        "filters": ["Ha", "OIII"]
+      },
+      "pipeline": [
+        {
+          "stage": "ingest",
+          "params": { "hotPixelSigma": 3.0 }
+        },
+        {
+          "stage": "background_extraction",
+          "params": { "polyOrder": 2, "model": "polynomial" }
+        },
+        {
+          "stage": "denoise",
+          "params": { "method": "wavelet", "layers": 4, "strength": 0.3, "edgeProtect": true }
+        },
+        {
+          "stage": "stretch",
+          "params": { "method": "histogram", "blackPoint": 0.01, "midpoint": 0.08 }
+        },
+        {
+          "stage": "star_handling",
+          "params": { "mode": "separate", "replace": "soft" }
+        },
+        {
+          "stage": "color_calibration",
+          "params": { "method": "narrowband_palette", "palette": "HOO" }
+        },
+        {
+          "stage": "creative_polish",
+          "params": { "clahe": true, "strength": 0.25 }
+        },
+        {
+          "stage": "export",
+          "params": { "format": "tiff16" }
+        }
+      ],
+      "model_versions": {},
+      "integrity": {
+        "perceptual_models_used": false
+      }
+    }
+  ]
+}

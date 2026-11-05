@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### RT-10: community recipe gallery — static index (ADR-0021) (#428)
+
+**Scope.** Resolves §17 item 3 / #119 (the recorded decision there was
+lost to a malformed comment; ADR-0021 is the real record): the gallery is
+a static in-repo JSON index — the repository is the host, curation is PR
+review, the app bundles the index at build time (no hosting infra, no
+runtime fetches in v0.x).
+
+- `recipes/index.json`: `index_version` envelope + sanitized
+  SharedRecipe entries (three seed entries: Seestar OSC broadband,
+  DwarfII core-preserved detail, HOO narrowband).
+- CI gate (`crates/astroforge-ai/tests/recipe_gallery_index.rs`, 5
+  tests): parse + required fields, ingest→export pipeline frame,
+  NodeCatalog stage vocabulary, unique names, hub-verified model pins,
+  honest integrity flags.
+- Recipes screen: Community gallery section (name / target / equipment /
+  stage count / integrity) with per-entry Import feeding the existing
+  strict `recipe_import` path (§23 + §28) — no new trust surface.
+- Docs: ADR-0021 + spec delta note (`DELTA_RT10_RECIPE_GALLERY.md`) +
+  SPEC_INDEX pointer.
+
 ### RT-8: GPU execution providers for ort (#427, CR-06 P5.2)
 
 **Scope.** Wire the pre-existing pure provider-selection logic into real

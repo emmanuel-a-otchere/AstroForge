@@ -4,6 +4,11 @@ This document tracks all active and historical specifications for the AstroForge
 project. Specifications follow semantic versioning and are the single source of
 truth for the project's behavior, architecture, and feature set.
 
+> **RT-10 (resolved 2026-11-06):** §17 item 3 (recipe-gallery hosting)
+> resolved — static in-repo JSON index per
+> [ADR-0021](../adr/0021-recipe-gallery-hosting.md). Delta:
+> [DELTA_RT10_RECIPE_GALLERY.md](./DELTA_RT10_RECIPE_GALLERY.md).
+
 ## Active Specification
 
 | Version | File | Status | Date |

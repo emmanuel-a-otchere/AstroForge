@@ -74,3 +74,29 @@ Three options were on the table:
   post-Phase-2 enhancement.
 - Wire WCS output into the FITS export path (P2-M4-T3) so a solved
   image carries provenance forward into recipes and exports.
+
+## Amendment — Staged adoption (RT-12, 2026-11-06)
+
+The ASTAP decision stands for v1.x. RT-12 (#430) records the staging
+that shipped in v0.x and closes the open follow-ups:
+
+1. **v0.x ships the solving API + degrade-gracefully path without the
+   binary.** `plate_solve` reports "ASTAP binary not bundled" honestly
+   (`handle_solve_failure` keeps registration alive, per P2-M4-T7);
+   bundling the 30 MB binary + per-platform CI matrix remains gated on
+   v1.x packaging work.
+2. **The annotation overlay works today from header WCS.** Any FITS
+   carrying WCS keys (solved upstream or re-imported from a solved
+   export) renders a target / center / FOV badge on the CR-07 canvas
+   (`overlay_from_header` + the `plate_solve_overlay` IPC) — no
+   binary, no catalog, no network. Named-star annotation stays empty
+   by design until the H17 catalog ships with the binary (annotating
+   from a catalog we do not carry would be fabrication).
+3. **H17 redistribution terms: confirmed-not-blocked, re-verify before
+   bundling.** ASTAP's catalogs are freely redistributable per the
+   upstream distribution, but the H17 file is generated from Gaia
+   (ESA) data — the bundle must carry the Gaia/ESA attribution notice
+   when v1.x packaging lands. Recorded here; no v0.x action.
+4. **H18/H19 packaging** remains the post-v1 enhancement already noted
+   above.
+

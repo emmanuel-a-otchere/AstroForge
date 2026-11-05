@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### RT-12: plate-solve decision close-out + WCS annotation spike (#430)
+
+**Scope.** ADR-0001 gains a Staged-adoption amendment (v0.x = solving API
++ degrade-gracefully, no binary; v1.x = bundle ASTAP + H17 with the
+Gaia/ESA attribution notice; H18/H19 stays post-v1). The spike: a
+WCS-derived annotation overlay that works today —
+
+- `plate_solve::overlay_from_header` (+ `format_ra_hms`/`format_dec_dms`)
+  extracts target / center / FOV from WCS keys already in a FITS header;
+  a header without WCS returns `None` (no fabricated badge).
+- `plate_solve_overlay` IPC + TS bridge; ImageCanvas renders a
+  target · RA/Dec · FOV badge when the overlay is present.
+- `annotate_stars` documented as catalog-gated (empty by design until
+  the H17 bundle ships — no guessed magnitudes).
+
 ### RT-11: sample dataset bundle (#429)
 
 **Scope.** A committed synthetic Seestar-style session

@@ -134,7 +134,106 @@ pub fn annotate_stars(
     _image_width: usize,
     _image_height: usize,
 ) -> Vec<StarAnnotation> {
+    // Named-star annotation needs a bundled star catalog (ASTAP H17,
+    // ADR-0001). Until the binary + catalog ship together in v1.x
+    // packaging, this stays empty by design rather than guessing
+    // magnitudes from a catalog we do not carry.
     Vec::new()
+}
+
+// ─── RT-12 (#430) — WCS-derived annotation overlay ─────────────────
+//
+// The annotation path that works TODAY: any FITS carrying WCS keys
+// (solved upstream, or re-imported from a solved export) renders a
+// target + center + FOV overlay without the ASTAP binary. Live
+// solving stays behind the bundled-binary path per ADR-0001's staged
+// adoption note.
+
+/// The UI payload for a WCS annotation overlay. `source` records
+/// where the WCS came from so the badge stays honest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AnnotationOverlay {
+    pub target_name: String,
+    pub ra_center: String,
+    pub dec_center: String,
+    pub field_width_arcmin: f64,
+    pub field_height_arcmin: f64,
+    pub rotation_deg: f64,
+    pub source: WcsSource,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WcsSource {
+    /// Read from the file's own FITS header (CRVAL/CD keys).
+    Header,
+    /// Produced by a live solve (ASTAP; not bundled in v0.x).
+    Solved,
+}
+
+/// Extract an overlay from WCS keys already present in a FITS
+/// header: OBJECT for the name, CRVAL1/2 for the center, CD1_1 /
+/// CD2_2 for the pixel scale (CDELT1/2 fallback), NAXIS1/2 for the
+/// field. Returns `None` when the header carries no WCS — the UI
+/// then shows no badge rather than a fabricated one.
+pub fn overlay_from_header(
+    header: &FitsHeader,
+    width: usize,
+    height: usize,
+) -> Option<AnnotationOverlay> {
+    let crval1 = header.get_f64("CRVAL1")?;
+    let crval2 = header.get_f64("CRVAL2")?;
+    // Pixel scale: CD matrix (arcsec/pixel) with CDELT fallback
+    // (degrees/pixel, sign-flipped convention aside — magnitude is
+    // what the FOV needs).
+    let scale_arcsec = header
+        .get_f64("CD1_1")
+        .or_else(|| header.get_f64("CDELT1").map(|d| d * 3600.0))
+        .unwrap_or(0.0);
+    let (w, h) = if width > 0 && height > 0 {
+        (width as f64, height as f64)
+    } else {
+        (
+            header.get_i64("NAXIS1").unwrap_or(0) as f64,
+            header.get_i64("NAXIS2").unwrap_or(0) as f64,
+        )
+    };
+    // FITS string values arrive with their quotes ('M42'); the UI
+    // wants the bare name.
+    let target = header
+        .get("OBJECT")
+        .map(|v| v.trim_matches('\'').to_string())
+        .unwrap_or_default();
+    Some(AnnotationOverlay {
+        target_name: target,
+        ra_center: format_ra_hms(crval1),
+        dec_center: format_dec_dms(crval2),
+        field_width_arcmin: w * scale_arcsec / 60.0,
+        field_height_arcmin: h * scale_arcsec / 60.0,
+        rotation_deg: header.get_f64("CROTA1").unwrap_or(0.0),
+        source: WcsSource::Header,
+    })
+}
+
+/// Format RA (degrees) as `HHh MMm SS.s`.
+pub fn format_ra_hms(ra_deg: f64) -> String {
+    let ra = ra_deg.rem_euclid(360.0);
+    let hours = ra / 15.0;
+    let h = hours.floor();
+    let m_frac = (hours - h) * 60.0;
+    let m = m_frac.floor();
+    let sec = (m_frac - m) * 60.0;
+    format!("{h:02}h {m:02}m {sec:04.1}s")
+}
+
+/// Format Dec (degrees) as `+DD° MM' SS"`.
+pub fn format_dec_dms(dec_deg: f64) -> String {
+    let sign = if dec_deg < 0.0 { '-' } else { '+' };
+    let dec = dec_deg.abs();
+    let d = dec.floor();
+    let m_frac = (dec - d) * 60.0;
+    let m = m_frac.floor();
+    let sec = (m_frac - m) * 60.0;
+    format!("{sign}{d:02}° {m:02}' {sec:04.1}\"")
 }
 
 pub fn handle_solve_failure(result: &PlateSolveResult) -> bool {
@@ -150,6 +249,44 @@ mod tests {
         let result = plate_solve(&[], 250.0, 2.9, PlateSolveBackend::Astap);
         assert!(!result.success);
         assert!(result.error.is_some());
+    }
+
+    #[test]
+    fn ra_dec_formatting_round_trips() {
+        assert_eq!(format_ra_hms(0.0), "00h 00m 00.0s");
+        // 5h30m = 82.5 deg
+        assert_eq!(format_ra_hms(82.5), "05h 30m 00.0s");
+        // M42 center ≈ 05h35m, -05°23'
+        assert!(format_ra_hms(83.82).starts_with("05h 35m"));
+        assert!(format_dec_dms(-5.39).starts_with("-05° 23'"));
+        assert_eq!(format_dec_dms(0.0), "+00° 00' 00.0\"");
+        // Wrap-around: 360 deg -> 0h
+        assert_eq!(format_ra_hms(360.0), "00h 00m 00.0s");
+    }
+
+    #[test]
+    fn overlay_from_header_reads_wcs_keys() {
+        let mut header = FitsHeader::new();
+        header.set("OBJECT", "'M42 Sample'");
+        header.set("CRVAL1", "83.82");
+        header.set("CRVAL2", "-5.39");
+        header.set("CD1_1", "2.4"); // arcsec/pixel
+        header.set("NAXIS1", "256");
+        header.set("NAXIS2", "256");
+        let overlay = overlay_from_header(&header, 256, 256).expect("wcs header yields overlay");
+        assert_eq!(overlay.target_name, "M42 Sample");
+        assert!(overlay.ra_center.starts_with("05h 35m"));
+        assert!(overlay.dec_center.starts_with("-05° 23'"));
+        // 256 px * 2.4 arcsec = 614.4 arcsec = 10.24 arcmin
+        assert!((overlay.field_width_arcmin - 10.24).abs() < 1e-9);
+        assert_eq!(overlay.source, WcsSource::Header);
+    }
+
+    #[test]
+    fn overlay_from_header_without_wcs_is_none() {
+        let mut header = FitsHeader::new();
+        header.set("OBJECT", "'No WCS here'");
+        assert!(overlay_from_header(&header, 64, 64).is_none());
     }
 
     #[test]

@@ -91,6 +91,7 @@ mod commands_image_versions;
 mod commands_import;
 mod commands_node_graph;
 mod commands_pipeline_plan;
+mod commands_plate_solve;
 mod commands_preview;
 mod commands_project;
 mod commands_resource;
@@ -2255,6 +2256,7 @@ fn main() {
             // artifact bytes for the Zone B canvas. Path-confined
             // to <root>/.astroforge/applied/<project_id>/.
             commands_ai_enhancement::read_image_artifact,
+            commands_plate_solve::plate_solve_overlay,
             // CR-06 P5 — region-aware masks. The mask
             // engine is pure logic in
             // `astroforge-core::masks`; the create /

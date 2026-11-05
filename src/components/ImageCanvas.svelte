@@ -53,6 +53,11 @@
   // creation fails (sandbox, headless, very old webview).
   // Callers can pin a back-end explicitly for testing.
   export let backend: "auto" | "webgl" | "canvas2d" = "auto";
+  // RT-12 (#430): WCS-derived annotation overlay (target / center /
+  // FOV). Null = no WCS in the artifact's header; the canvas then
+  // renders no badge rather than a fabricated one.
+  export let wcsOverlay: import("../lib/astroforge-api").WcsAnnotationOverlay | null =
+    null;
   // CR-07 follow-on 2: WebGL-overlay canvas (mask + clipping
   // wash). Lives behind the WebGL canvas as a sibling
   // absolutely-positioned element when the WebGL back-end is
@@ -619,6 +624,16 @@
 <div class="image-canvas" data-testid="image-canvas">
     <!-- Toolbar -->
   <div class="toolbar">
+    {#if wcsOverlay}
+      <span
+        class="wcs-badge"
+        title="WCS from {wcsOverlay.source === "Header" ? "the file's FITS header" : "a live solve"}"
+      >
+        {wcsOverlay.target_name || "Target"}
+        · {wcsOverlay.ra_center} {wcsOverlay.dec_center}
+        · {wcsOverlay.field_width_arcmin.toFixed(1)}′ × {wcsOverlay.field_height_arcmin.toFixed(1)}′
+      </span>
+    {/if}
     <button type="button" on:click={fit} aria-label="Fit to window">Fit</button>
     <button type="button" on:click={oneToOne} aria-label="1:1 zoom">1:1</button>
     {#if drawView.zoomMode === "1:1"}
@@ -786,6 +801,18 @@
     background: #0b0d12;
     color: #d8dde6;
   }
+  .wcs-badge {
+    align-self: center;
+    margin-right: 8px;
+    padding: 2px 8px;
+    border-radius: var(--radius-full, 999px);
+    border: 1px solid var(--outline-variant, #cac4d0);
+    background: var(--surface-container-high, #ece6f0);
+    color: var(--on-surface-variant, #49454f);
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
   .toolbar {
     display: flex;
     gap: 8px;

@@ -1,11 +1,14 @@
 # AstroForge — Recon Tranche 2026-10: Ship-Readiness Plan
 
-**Date:** 2026-10 (post-recon)
-**Status:** Wave 1 complete (RT-1 #419, RT-2 #420, RT-3 #421, RT-4 #422,
-RT-5 #424 closed); RT-2 ship acceptance verified by v0.1.0-rc.7 (draft
-release with installers for Linux/Windows/macOS-arm64, release-tested on
-macOS arm64). Waves 2-5 pending. macOS x86_64 installers deferred:
-ort-sys rc.13 ships no prebuilt ONNX Runtime for that target (#420).
+**Date:** 2026-10 (post-recon) — closed 2026-11-06
+**Status:** COMPLETE. All 14 tracked issues closed (milestone #4, 14/15;
+the 15th is #458, the SR catalog adapter spun out of RT-7 at close-out
+per DoD §7.2). Wave 1 ship acceptance verified by v0.1.0-rc.7; Wave 3 AI
+denoise live-verified via the model-e2e workflow; Waves 4-5 delivered
+(ADR-0021 gallery, RT-11 dataset, ADR-0001 amendment, quality dashboard,
+ADR-0022 a11y/i18n scope). Deferred: macOS x86_64 installers (#420
+follow-up), SR adapter (#458), confirmed-provider parsing (#427
+follow-up).
 **Milestone:** "Recon Tranche 2026-10 — Ship Readiness" (milestone #4)
 **Scope:** Concrete plan for the gaps, improvements, and enrichment ideas identified
 in the 2026-10 repository recon. Each workstream below is tracked by a GitHub

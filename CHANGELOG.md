@@ -102,6 +102,21 @@ backend honestly.
   `--features gpu-coreml`, registering the real CoreML provider on
   Metal runners; provider compilation tests are feature-aware.
 
+### RT-14: accessibility + i18n scope decided (ADR-0022) (#432)
+
+**Scope.** ADR-0022 records the decisions #130–#132 carried (their close
+comments were malformed, so the ADR is the real record, as ADR-0021 was
+for #119): **progressive accessibility, deferred i18n** —
+
+- v1.x: complete keyboard operability, 100% name/role/value coverage
+  (extending the existing aria usage), prefers-reduced-motion — stated
+  plainly, with no untested "WCAG AA compliant" claim.
+- Post-v1: formal WCAG 2.1 AA audit, NVDA/JAWS/VoiceOver certification,
+  contrast tooling (#131 keeps the v1.x subset; the audit follows).
+- i18n post-v1, English-only until CR-10's editor surface stabilizes
+  the UI vocabulary (#132, blocked on CR-10): extracting strings now
+  would freeze a catalogue mid-flight and cost every subsequent slice.
+
 ### Recon Tranche 2026-10 — Wave 1: ship readiness (RT-1..RT-5, #419-#424, #442)
 
 **Scope.** Hygiene + release engineering wave of the ship-readiness tranche.

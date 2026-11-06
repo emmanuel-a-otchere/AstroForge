@@ -9,6 +9,10 @@ truth for the project's behavior, architecture, and feature set.
 > [ADR-0021](../adr/0021-recipe-gallery-hosting.md). Delta:
 > [DELTA_RT10_RECIPE_GALLERY.md](./DELTA_RT10_RECIPE_GALLERY.md).
 
+> **RT-14 (resolved 2026-11-06):** §17 item 12 (a11y/i18n scope)
+> resolved — progressive accessibility subset in v1.x, i18n post-v1, per
+> [ADR-0022](../adr/0022-accessibility-i18n-scope.md).
+
 ## Active Specification
 
 | Version | File | Status | Date |

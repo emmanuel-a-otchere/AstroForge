@@ -2216,6 +2216,52 @@ export const aiModelDownload = (name: string): Promise<string> =>
   invoke("ai_model_download", { name });
 
 
+
+// ─── RT-13 (#431) — session quality dashboard ────────────────────────
+
+export interface FrameQuality {
+  index: number;
+  name: string;
+  fwhmMean: number;
+  starCount: number;
+  estimatedSnr: number;
+  localSnr: number;
+}
+
+export interface MetricTrend {
+  metric: string;
+  first: number;
+  last: number;
+  slopePerFrame: number;
+  improving: boolean;
+}
+
+export interface OutlierFlag {
+  frameIndex: number;
+  frameName: string;
+  metric: string;
+  value: number;
+  typical: number;
+  robustSigma: number;
+}
+
+export interface SessionQualityReport {
+  frames: FrameQuality[];
+  trends: MetricTrend[];
+  outliers: OutlierFlag[];
+  unreadable: { path: string; reason: string }[];
+}
+
+/**
+ * Per-frame quality trends + robust outlier flags over a session's
+ * light frames (capture order). Unreadable frames are reported, not
+ * hidden.
+ */
+export const sessionQualityReport = (
+  framePaths: string[],
+): Promise<SessionQualityReport> =>
+  invoke("session_quality_report", { request: { framePaths } });
+
 // ─── RT-12 (#430) — plate-solve annotation overlay ────────────────────
 
 export interface WcsAnnotationOverlay {

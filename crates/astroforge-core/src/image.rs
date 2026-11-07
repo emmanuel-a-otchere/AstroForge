@@ -44,6 +44,21 @@ impl F32Image {
     /// `scale` is clamped to `(0.0, 1.0]`; a scale of 1.0 returns a
     /// clone. Output dimensions are `max(1, round(dim * scale))` so
     /// even tiny scales produce a viewable 1×1 image.
+    /// #465 W3 — construct from interleaved or planar raw channel
+    /// data. The decoders pass PLANAR (channel-plane-major) data,
+    /// matching the crate's (channels, height, width) layout.
+    pub fn from_channels(width: usize, height: usize, channels: usize, planar: &[f32]) -> Self {
+        let mut out = F32Image::new(width, height, channels);
+        for c in 0..channels {
+            for y in 0..height {
+                for x in 0..width {
+                    out[(c, y, x)] = planar[c * height * width + y * width + x];
+                }
+            }
+        }
+        out
+    }
+
     pub fn downsample_box(&self, scale: f64) -> F32Image {
         let scale = scale.clamp(f64::EPSILON, 1.0);
         if (scale - 1.0).abs() < f64::EPSILON {

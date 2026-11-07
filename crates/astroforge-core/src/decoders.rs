@@ -20,6 +20,10 @@ use thiserror::Error;
 pub enum ImageDecodeError {
     #[error("TIFF decode: {0}")]
     Tiff(String),
+    #[error("PNG decode: {0}")]
+    Png(String),
+    #[error("JPEG decode: {0}")]
+    Jpeg(String),
     #[error("FITS decode: {0}")]
     Fits(String),
     #[error("unsupported image format: {0}")]
@@ -151,6 +155,57 @@ impl F32Image {
     /// boundary. Integer formats are normalized to [0, 1] via
     /// division by the maximum positive value; floats pass through
     /// unchanged (clamped to the source data's range).
+    /// #465 W3 — decode a PNG image from bytes (8/16-bit, gray/RGB/RGBA).
+    /// Integer samples normalize to [0.0, 1.0].
+    pub fn from_png_bytes(bytes: &[u8]) -> Result<Self, ImageDecodeError> {
+        let decoded = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+            .map_err(|e| ImageDecodeError::Png(format!("{e}")))?;
+        let (width, height) = (decoded.width() as usize, decoded.height() as usize);
+        let (channels, raw): (usize, Vec<u8>) = match decoded {
+            image::DynamicImage::ImageLuma8(img) => (1, img.into_raw()),
+            image::DynamicImage::ImageLumaA8(img) => (2, img.into_raw()),
+            image::DynamicImage::ImageRgb8(img) => (3, img.into_raw()),
+            image::DynamicImage::ImageRgba8(img) => (4, img.into_raw()),
+            other => {
+                // 16-bit and float variants: normalize through RGB8/RGBA8.
+                let conv = other.to_rgb8();
+                (3, conv.into_raw())
+            }
+        };
+        // The image crate returns INTERLEAVED samples; the crate
+        // layout is planar — de-interleave.
+        let mut planar = vec![0.0_f32; channels * height * width];
+        for y in 0..height {
+            for x in 0..width {
+                for c in 0..channels {
+                    planar[c * height * width + y * width + x] =
+                        raw[(y * width + x) * channels + c] as f32 / 255.0;
+                }
+            }
+        }
+        Ok(Self::from_channels(width, height, channels, &planar))
+    }
+
+    /// #465 W3 — decode a JPEG image from bytes (8-bit, gray/RGB/CMYK→RGB).
+    /// JPEG has no alpha; samples normalize to [0.0, 1.0].
+    pub fn from_jpeg_bytes(bytes: &[u8]) -> Result<Self, ImageDecodeError> {
+        let decoded = image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg)
+            .map_err(|e| ImageDecodeError::Jpeg(format!("{e}")))?;
+        let (width, height) = (decoded.width() as usize, decoded.height() as usize);
+        let rgb = decoded.to_rgb8();
+        let raw = rgb.into_raw();
+        let mut planar = vec![0.0_f32; 3 * height * width];
+        for y in 0..height {
+            for x in 0..width {
+                for c in 0..3 {
+                    planar[c * height * width + y * width + x] =
+                        raw[(y * width + x) * 3 + c] as f32 / 255.0;
+                }
+            }
+        }
+        Ok(Self::from_channels(width, height, 3, &planar))
+    }
+
     pub fn from_fits_bytes(bytes: &[u8]) -> Result<Self, ImageDecodeError> {
         // 1. Parse the header: scan 80-char cards, terminate on END.
         let mut i = 0;
@@ -457,5 +512,69 @@ mod tests {
         // First channel first pixel: 1000 / 32767 ≈ 0.0305
         let expected = 1000.0 / i16::MAX as f64;
         assert!((img[(0, 0, 0)] as f64 - expected).abs() < 1e-4);
+    }
+}
+
+#[cfg(test)]
+mod png_jpeg_tests {
+    use super::*;
+
+    #[test]
+    fn png_round_trips_dimensions_and_channels() {
+        // Encode a 4x3 RGB PNG via the image crate, decode via ours.
+        let mut img = image::RgbImage::new(4, 3);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            *px = image::Rgb([(x * 60) as u8, (y * 80) as u8, 128]);
+        }
+        let mut bytes: Vec<u8> = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode png");
+
+        let decoded = F32Image::from_png_bytes(&bytes).expect("decode png");
+        assert_eq!(
+            (decoded.width(), decoded.height(), decoded.channels()),
+            (4, 3, 3)
+        );
+        // Corner pixel (0,0) = (0, 0, 128) normalized.
+        assert!((decoded[(0, 0, 0)] - 0.0).abs() < 1e-6);
+        assert!((decoded[(2, 0, 0)] - 128.0 / 255.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn jpeg_round_trips_dimensions() {
+        let img = image::RgbImage::new(8, 6);
+        let mut bytes: Vec<u8> = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Jpeg,
+            )
+            .expect("encode jpeg");
+
+        let decoded = F32Image::from_jpeg_bytes(&bytes).expect("decode jpeg");
+        assert_eq!(
+            (decoded.width(), decoded.height(), decoded.channels()),
+            (8, 6, 3)
+        );
+        let mut all_ok = true;
+        for c in 0..3 {
+            for y in 0..6 {
+                for x in 0..8 {
+                    let v = decoded[(c, y, x)];
+                    all_ok &= v.is_finite() && (0.0..=1.0).contains(&v);
+                }
+            }
+        }
+        assert!(all_ok);
+    }
+
+    #[test]
+    fn png_rejects_garbage() {
+        assert!(F32Image::from_png_bytes(b"not a png").is_err());
+        assert!(F32Image::from_jpeg_bytes(b"not a jpeg").is_err());
     }
 }

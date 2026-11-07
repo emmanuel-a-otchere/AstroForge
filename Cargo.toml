@@ -17,6 +17,9 @@ authors = ["AstroForge Contributors"]
 astroforge-core = { path = "crates/astroforge-core" }
 astroforge-ai = { path = "crates/astroforge-ai" }
 ndarray = "0.16"
+# W3 (#465) — PNG/JPEG decode via the image-rs crate (pulls only the
+# png + jpeg-decoder features; the rest are disabled)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

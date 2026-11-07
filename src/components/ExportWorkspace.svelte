@@ -21,12 +21,12 @@
   const FORMATS: readonly FormatDef[] = [
     {
       id: "png16",
-      label: "PNG (16-bit)",
+      label: "PNG (8-bit)",
       description: "Lossless, widely supported. Best for web sharing.",
     },
     {
       id: "tiff32",
-      label: "TIFF (32-bit float)",
+      label: "TIFF (16-bit)",
       description: "Lossless, archival. Preserves linear data.",
     },
     {
@@ -36,7 +36,7 @@
     },
     {
       id: "jpeg",
-      label: "JPEG (8-bit sRGB)",
+      label: "JPEG (PNG container — real JPEG lands in v1.x)",
       description: "Small, lossy. For previews and social media.",
     },
   ];

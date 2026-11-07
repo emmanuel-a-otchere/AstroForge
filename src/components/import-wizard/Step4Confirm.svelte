@@ -27,12 +27,16 @@
     type NarrowbandComposition,
     type TargetProvenanceReportJson,
   } from "../../state/import-wizard";
+  import { studioViewport } from "../../state/application";
+  import { importRegisterAssets } from "../../lib/astroforge-api";
 
-  $: state = $importWizard;
-  $: classification = state.classification;
+  let wizardState = $derived($importWizard);
+  let classification = $derived(wizardState.classification);
 
   let provenance: TargetProvenanceReportJson | null = null;
   let provenanceError: string | null = null;
+  let actionError: string | null = $state(null);
+  let actionBusy = $state(false);
 
   async function viewProvenance(): Promise<void> {
     provenanceError = null;
@@ -47,14 +51,55 @@
     }
   }
 
-  async function onConfirm(): Promise<void> {
-    await confirmUnderstanding();
+  // #461 S2: materialisation used to only flip an enum — no
+  // SourceAsset rows were ever written, so the pipeline's frame
+  // loader found nothing and both workflows died before stacking.
+  // Persist the scanned frames now, then land in the Process
+  // workspace (the "host shell routes the user" comment finally
+  // true).
+  async function materialiseAndLand(): Promise<void> {
+    const current = $importWizard;
+    if (!current.sessionId || !current.projectId) {
+      throw new Error("session context missing; cannot persist frames");
+    }
+    const frames = current.frames.map((f) => ({
+      path: f.path,
+      frameType: f.frameType,
+      exptime: f.exptime,
+      filter: f.filter,
+      width: f.width,
+      height: f.height,
+    }));
+    await importRegisterAssets(current.sessionId, current.projectId, frames);
     await materialiseSession();
+    studioViewport.setView("process");
+    goToStep("add-data");
+  }
+
+  async function onConfirm(): Promise<void> {
+    actionBusy = true;
+    actionError = null;
+    try {
+      await confirmUnderstanding();
+      await materialiseAndLand();
+    } catch (e) {
+      actionError = e instanceof Error ? e.message : String(e);
+    } finally {
+      actionBusy = false;
+    }
   }
 
   async function onOverride(): Promise<void> {
-    await applyOverrides();
-    await materialiseSession();
+    actionBusy = true;
+    actionError = null;
+    try {
+      await applyOverrides();
+      await materialiseAndLand();
+    } catch (e) {
+      actionError = e instanceof Error ? e.message : String(e);
+    } finally {
+      actionBusy = false;
+    }
   }
 </script>
 
@@ -72,8 +117,8 @@
             type="radio"
             name="capture-kind"
             value={kind}
-            checked={state.overrideCaptureKind === kind ||
-              (state.overrideCaptureKind === null && classification.capture_kind === kind)}
+            checked={wizardState.overrideCaptureKind === kind ||
+              (wizardState.overrideCaptureKind === null && classification.capture_kind === kind)}
             on:change={() => setOverrideCaptureKind(kind as CaptureKind)}
           />
           <span>{captureKindLabel(kind as CaptureKind)}</span>
@@ -89,8 +134,8 @@
             type="radio"
             name="narrowband-composition"
             value={composition}
-            checked={state.overrideNarrowbandComposition === composition ||
-              (state.overrideNarrowbandComposition === null &&
+            checked={wizardState.overrideNarrowbandComposition === composition ||
+              (wizardState.overrideNarrowbandComposition === null &&
                 classification.narrowband_composition === composition)}
             on:change={() =>
               setOverrideNarrowbandComposition(composition as NarrowbandComposition)}
@@ -104,10 +149,13 @@
       <button class="btn-secondary" on:click={() => goToStep("understanding")} type="button">
         Back
       </button>
-      <button class="btn-secondary" on:click={onOverride} type="button">
+      {#if actionError}
+        <p class="action-error" role="alert">{actionError}</p>
+      {/if}
+      <button class="btn-secondary" on:click={onOverride} type="button" disabled={actionBusy}>
         Override + Confirm
       </button>
-      <button class="btn-primary" on:click={onConfirm} type="button">
+      <button class="btn-primary" on:click={onConfirm} type="button" disabled={actionBusy}>
         Confirm
       </button>
     </div>
@@ -161,5 +209,10 @@
     background: var(--color-surface, #222);
     color: var(--color-text-primary, #eee);
     border-color: var(--color-border, #444);
+  }
+  .action-error {
+    color: var(--color-error, #b3261e);
+    font-size: 0.85rem;
+    margin: 0.25rem 0;
   }
 </style>

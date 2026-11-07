@@ -109,6 +109,16 @@ export const importWizard: Writable<ImportWizardState> =
 
 // ─── Helpers ───────────────────────────────────────────────────
 
+/**
+ * #461 S2 — the host shell wires the freshly created session +
+ * project ids into the wizard BEFORE the scanning step. Step 2's
+ * orchestrator requires both; without this call every import died
+ * with "host shell did not wire session id".
+ */
+export function setSessionContext(projectId: string, sessionId: string): void {
+  importWizard.update((cur) => ({ ...cur, projectId, sessionId }));
+}
+
 export function resetImportWizard(): void {
   importWizard.set({ ...initialState });
 }

@@ -8,12 +8,16 @@
 -->
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { studioViewport } from "../../state/application";
+  import { sessionCreate } from "../../lib/astroforge-api";
   import {
     goToStep,
     setFrames,
     setScanDir,
     setScanError,
     setScanning,
+    setSessionContext,
     type ScannedFrame,
   } from "../../state/import-wizard";
 
@@ -21,9 +25,31 @@
   let scanning = false;
   let error: string | null = null;
 
+  async function pickDirectory(): Promise<void> {
+    // #461 S2: the real native picker (the old placeholder told the
+    // user to type a path into a browser prompt).
+    const chosen = await openDialog({
+      title: "Choose the captures directory",
+      directory: true,
+      multiple: false,
+    });
+    if (typeof chosen === "string" && chosen) {
+      dir = chosen;
+    }
+  }
+
   async function scan(): Promise<void> {
     if (!dir) {
-      error = "Enter a directory path first.";
+      error = "Choose a directory first.";
+      return;
+    }
+    // #461 S2: the session must exist BEFORE the scanning step —
+    // Step 2's orchestrator requires sessionId + projectId, and the
+    // previous build never created either (every import died at
+    // Step 2 with "host shell did not wire session id").
+    const project = $studioViewport.project;
+    if (!project) {
+      error = "Open (or create) a project first — imports live inside a project.";
       return;
     }
     scanning = true;
@@ -49,6 +75,18 @@
         }),
       );
       setFrames(frames);
+      try {
+        const sessionId = await sessionCreate(project.project_id, dir);
+        setSessionContext(project.project_id, sessionId);
+      } catch (sessionErr) {
+        error =
+          sessionErr instanceof Error
+            ? sessionErr.message
+            : String(sessionErr);
+        setScanError(error);
+        scanning = false;
+        return;
+      }
       goToStep("scanning");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -60,24 +98,6 @@
     }
   }
 
-  function pickFile(): void {
-    // The Tauri dialog plugin is the canonical picker; this
-    // placeholder is replaced by the P9 host shell when it
-    // lands. For now the user types the path directly.
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = dir;
-    input.placeholder = "/path/to/captures";
-    const ok = confirm(
-      "Enter the captures directory path in the next prompt.\n\nA native picker lands with the P9 host shell.",
-    );
-    if (ok) {
-      const next = prompt("Captures directory:", dir);
-      if (next !== null) {
-        dir = next;
-      }
-    }
-  }
 </script>
 
 <section class="add-data" aria-labelledby="step-1-heading">
@@ -91,7 +111,7 @@
     <p class="font-body">FITS &middot; DNG &middot; TIFF &middot; PNG &middot; JPEG</p>
   </div>
   <div class="controls">
-    <button class="btn-secondary" on:click={pickFile} type="button">
+    <button class="btn-secondary" on:click={pickDirectory} type="button">
       Choose Folder
     </button>
     <label for="dir-input" class="sr-only">Captures directory</label>

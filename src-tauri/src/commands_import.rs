@@ -23,7 +23,10 @@
 //! the Understanding panel + the ambiguity dialog.
 
 use crate::commands_project::ProjectState;
+use astroforge_core::artifact::ContentStore;
+use astroforge_core::domain::SourceAsset;
 use astroforge_core::domain::{ClassificationProvenance, ImportState};
+use astroforge_core::import_scan::detect_format;
 use astroforge_core::import_scan::ExtractedMetadata;
 use astroforge_core::import_understanding;
 use astroforge_core::import_understanding::SessionAnalysis;
@@ -299,4 +302,110 @@ mod tests {
             _ => astroforge_core::import_scan::AssetFormat::Other,
         }
     }
+}
+
+// ─── RT-13-era wireflow fix (#461 S2) — asset persistence ───────────
+//
+// The import wizard only held scanned metadata in memory: no
+// SourceAsset row was ever written, so the pipeline's frame loader
+// (`load_frames_for_session`) found nothing and both workflows died
+// before stacking. This command persists every scanned frame as a
+// durable SourceAsset (content-hashed, deduped by
+// (session_id, content_hash) per CR-02 §7) and marks the session as
+// the project's active one so the Process workspace becomes usable.
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportFrameInput {
+    pub path: String,
+    pub frame_type: String,
+    pub exptime: Option<f64>,
+    pub filter: Option<String>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisteredAssetsDto {
+    pub session_id: String,
+    pub registered: usize,
+    pub duplicates: usize,
+}
+
+#[tauri::command]
+pub fn import_register_assets(
+    state: State<'_, ProjectState>,
+    session_id: String,
+    project_id: String,
+    frames: Vec<ImportFrameInput>,
+) -> Result<RegisteredAssetsDto, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let mut registered = 0usize;
+    let mut duplicates = 0usize;
+    for frame in &frames {
+        let bytes = std::fs::read(&frame.path).map_err(|e| format!("read {}: {e}", frame.path))?;
+        let path = std::path::Path::new(&frame.path);
+        let original_filename = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| frame.path.clone());
+        let format = detect_format(path).as_str().to_string();
+        let now = chrono_like_now();
+        let asset = SourceAsset {
+            asset_id: String::new(), // generated inside register_source_asset
+            content_hash: ContentStore::sha256_hex(&bytes),
+            original_filename,
+            original_path: frame.path.clone(),
+            file_size: bytes.len() as u64,
+            format,
+            mime_type: None,
+            created_at: now.clone(),
+            imported_at: now,
+            session_id: session_id.clone(),
+            frame_type: Some(frame.frame_type.clone()),
+            exposure: frame.exptime,
+            filter: frame.filter.clone(),
+            binning: None,
+            width: frame.width.map(|w| w.max(0) as u32),
+            height: frame.height.map(|h| h.max(0) as u32),
+            bit_depth: None,
+            bayer_pattern: None,
+            camera: None,
+            date_obs: None,
+            ra: None,
+            dec: None,
+        };
+        let (_id, dup) = store
+            .register_source_asset(&asset)
+            .map_err(|e| format!("register {}: {e}", frame.path))?;
+        if dup {
+            duplicates += 1;
+        } else {
+            registered += 1;
+        }
+    }
+    // Mark the session active on the project so the Process
+    // workspace's plan generator becomes reachable. The frontend
+    // supplies project_id (the wizard state has it; sessions live in
+    // a separate store so the DomainStore cannot resolve it).
+    store
+        .set_active_session(&project_id, &session_id)
+        .map_err(|e| e.to_string())?;
+    Ok(RegisteredAssetsDto {
+        session_id,
+        registered,
+        duplicates,
+    })
+}
+
+/// Cheap wall-clock ISO string; the asset timestamps are metadata,
+/// not ordering keys.
+fn chrono_like_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("{secs}")
 }

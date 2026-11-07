@@ -1084,6 +1084,20 @@ impl DomainStore {
         }
     }
 
+    /// #461 S2 — mark a session as the project's active one. The
+    /// Process workspace gates its plan generator on this field, so
+    /// an import that never sets it strands the project without a
+    /// processing entry point.
+    pub fn set_active_session(&self, project_id: &str, session_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE projects SET active_session_id = ?1 WHERE id = ?2",
+            params![session_id, project_id],
+        )
+        .map_err(crate::domain_store::DomainStoreError::Sqlite)?;
+        Ok(())
+    }
+
     // ─── Source assets (CR-02 §6) ───────────────────────────────────────
 
     /// Register an immutable source. Returns (asset_id, is_duplicate):

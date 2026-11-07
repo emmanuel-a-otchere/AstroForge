@@ -14,7 +14,6 @@ use std::sync::{Arc, Mutex};
 
 use crate::commands_project::ProjectState;
 use astroforge_core::adaptive::AdaptiveParameterSet;
-use astroforge_core::domain::SourceAsset;
 use astroforge_core::domain::{ObjectType, PipelinePlan, PipelinePlanStatus};
 use astroforge_core::pipeline_plan::{
     builtin::deep_sky_osc_balanced,
@@ -199,85 +198,6 @@ impl From<&astroforge_core::domain::PipelineStage> for PipelineStageDto {
     }
 }
 
-/// #461 S3/S4 — derive the session understanding from what the
-/// import actually persisted: the SessionClassification (capture kind,
-/// narrowband composition) plus the registered SourceAsset rows
-/// (frame counts, calibration availability, stacked-master filename
-/// heuristics). Falls back to the balanced default when the session
-/// has no classification yet.
-fn derive_understanding_from_session(
-    store: &astroforge_core::domain_store::DomainStore,
-    session_id: &str,
-) -> SessionUnderstanding {
-    let classification = store.get_session_classification(session_id).ok().flatten();
-    let assets = store.list_source_assets(session_id).unwrap_or_default();
-
-    let lights: Vec<&SourceAsset> = assets
-        .iter()
-        .filter(|a| a.frame_type.as_deref() == Some("Light"))
-        .collect();
-    let has_dark = assets
-        .iter()
-        .any(|a| a.frame_type.as_deref() == Some("Dark"));
-    let has_flat = assets
-        .iter()
-        .any(|a| a.frame_type.as_deref() == Some("Flat"));
-    let has_bias = assets
-        .iter()
-        .any(|a| a.frame_type.as_deref() == Some("Bias"));
-    let calibration = match (has_dark, has_flat, has_bias) {
-        (true, true, true) => CalibrationAvailability::Full,
-        (false, false, false) => CalibrationAvailability::None,
-        _ => CalibrationAvailability::Partial,
-    };
-
-    // Stacked-master heuristic: a single light whose filename carries
-    // the stacked/master/combined marker, or a session whose lights
-    // ALL carry it. Never guessed from metadata alone.
-    let marker = |name: &str| {
-        let lower = name.to_lowercase();
-        lower.contains("_stacked") || lower.contains("_master") || lower.contains("_combined")
-    };
-    let all_marked = !lights.is_empty()
-        && lights
-            .iter()
-            .all(|a| marker(&a.original_filename.to_lowercase()));
-    let already_stacked =
-        (lights.len() == 1 && marker(&lights[0].original_filename.to_lowercase())) || all_marked;
-
-    let (capture_kind, composition) = match &classification {
-        Some(c) => (c.capture_kind.clone(), c.narrowband_composition.clone()),
-        None => (None, None),
-    };
-    let (target_type, acquisition, narrowband_filters) = match composition.as_deref() {
-        Some("hoo") | Some("sho") | Some("hoo_or_sho") => (
-            ObjectType::DeepSky,
-            AcquisitionMode::Narrowband,
-            vec!["Ha".to_string(), "OIII".to_string(), "SII".to_string()],
-        ),
-        Some("mono") | Some("lrgb") => (ObjectType::DeepSky, AcquisitionMode::Mono, vec![]),
-        _ => (
-            match capture_kind.as_deref() {
-                Some("planetary_lunar") => ObjectType::Planet,
-                Some("deep_sky") | None => ObjectType::DeepSky,
-                _ => ObjectType::DeepSky,
-            },
-            AcquisitionMode::Osc,
-            vec![],
-        ),
-    };
-
-    SessionUnderstanding {
-        target_type,
-        acquisition,
-        already_stacked,
-        light_frame_count: lights.len() as u32,
-        calibration,
-        bayer_pattern: None,
-        narrowband_filters,
-    }
-}
-
 #[tauri::command]
 pub fn create_pipeline_plan(
     state: State<'_, PipelinePlanState>,
@@ -301,10 +221,19 @@ pub fn create_pipeline_plan(
     // analysed yet.
     let session_understanding = match request.session_understanding {
         Some(payload) => payload.into_domain(),
-        None => derive_understanding_from_session(
-            &*project_state.store.lock().map_err(|e| e.to_string())?,
-            &request.session_id,
-        ),
+        None => {
+            let store = project_state.store.lock().map_err(|e| e.to_string())?;
+            let classification = store
+                .get_session_classification(&request.session_id)
+                .map_err(|e| e.to_string())?;
+            let assets = store
+                .list_source_assets(&request.session_id)
+                .map_err(|e| e.to_string())?;
+            astroforge_core::pipeline_plan::plan::derive_understanding_from_session(
+                classification.as_ref(),
+                &assets,
+            )
+        }
     };
 
     let ctx = GenerationContext {
@@ -1184,7 +1113,14 @@ mod derive_tests {
             "sess_m",
             &[asset("sess_m", "m42_stacked_master.fits", "Light")],
         );
-        let u = derive_understanding_from_session(&store, &sid);
+        let classification = store
+            .get_session_classification(&sid)
+            .expect("classification");
+        let assets = store.list_source_assets(&sid).expect("assets");
+        let u = astroforge_core::pipeline_plan::plan::derive_understanding_from_session(
+            classification.as_ref(),
+            &assets,
+        );
         assert!(u.already_stacked, "single _master light is already stacked");
         assert_eq!(u.light_frame_count, 1);
         assert_eq!(u.calibration, CalibrationAvailability::None);
@@ -1201,7 +1137,14 @@ mod derive_tests {
                 asset("sess_raw", "flat_000.fits", "Flat"),
             ],
         );
-        let u = derive_understanding_from_session(&store, &sid);
+        let classification = store
+            .get_session_classification(&sid)
+            .expect("classification");
+        let assets = store.list_source_assets(&sid).expect("assets");
+        let u = astroforge_core::pipeline_plan::plan::derive_understanding_from_session(
+            classification.as_ref(),
+            &assets,
+        );
         assert!(!u.already_stacked);
         assert_eq!(u.light_frame_count, 2);
         assert_eq!(u.calibration, CalibrationAvailability::Partial);
@@ -1216,14 +1159,28 @@ mod derive_tests {
                 asset("sess_all", "m31_master_combined.fits", "Light"),
             ],
         );
-        let u = derive_understanding_from_session(&store, &sid);
+        let classification = store
+            .get_session_classification(&sid)
+            .expect("classification");
+        let assets = store.list_source_assets(&sid).expect("assets");
+        let u = astroforge_core::pipeline_plan::plan::derive_understanding_from_session(
+            classification.as_ref(),
+            &assets,
+        );
         assert!(u.already_stacked);
     }
 
     #[test]
     fn empty_session_falls_back_to_balanced_default() {
         let (store, sid) = store_with("sess_empty", &[]);
-        let u = derive_understanding_from_session(&store, &sid);
+        let classification = store
+            .get_session_classification(&sid)
+            .expect("classification");
+        let assets = store.list_source_assets(&sid).expect("assets");
+        let u = astroforge_core::pipeline_plan::plan::derive_understanding_from_session(
+            classification.as_ref(),
+            &assets,
+        );
         assert!(!u.already_stacked);
         assert_eq!(u.light_frame_count, 0);
         assert_eq!(u.calibration, CalibrationAvailability::None);

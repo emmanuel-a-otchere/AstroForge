@@ -2217,6 +2217,42 @@ export const aiModelDownload = (name: string): Promise<string> =>
 
 
 
+
+// ─── #461 S2 — import materialization chain ─────────────────────────
+
+export const sessionCreate = (
+  projectId: string,
+  sourceDir: string | null,
+): Promise<string> => invoke("session_create", { projectId, sourceDir, verbosity: "auto" });
+
+export interface ImportFrameInput {
+  path: string;
+  frameType: string;
+  exptime: number | null;
+  filter: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+export interface RegisteredAssets {
+  sessionId: string;
+  registered: number;
+  duplicates: number;
+}
+
+/**
+ * Persist every scanned frame as a durable SourceAsset (content-hashed,
+ * deduped) and mark the session active on the project — the step the
+ * import wizard previously skipped, which left both core workflows
+ * without data.
+ */
+export const importRegisterAssets = (
+  sessionId: string,
+  projectId: string,
+  frames: ImportFrameInput[],
+): Promise<RegisteredAssets> =>
+  invoke("import_register_assets", { sessionId, projectId, frames });
+
 // ─── RT-13 (#431) — session quality dashboard ────────────────────────
 
 export interface FrameQuality {

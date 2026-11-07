@@ -50,6 +50,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct SessionUnderstanding {
     /// CR-04 target classification.
     pub target_type: ObjectType,
+    /// #461 S4 — the session's lights are already stacked/master
+    /// outputs (filename heuristics: `_stacked` / `_master` /
+    /// `_combined`). Plan generation disables the calibration /
+    /// debayer / register / stack stages for such sessions.
+    #[serde(default)]
+    pub already_stacked: bool,
     /// CR-04 acquisition mode (one-shot color, monochrome, narrowband, ...).
     pub acquisition: AcquisitionMode,
     /// Number of light frames.
@@ -88,6 +94,7 @@ impl SessionUnderstanding {
     /// Convenience constructor for tests + the P1 smoke panel.
     pub fn deep_sky_osc_balanced() -> Self {
         Self {
+            already_stacked: false,
             target_type: ObjectType::DeepSky,
             acquisition: AcquisitionMode::Osc,
             light_frame_count: 462,
@@ -99,6 +106,7 @@ impl SessionUnderstanding {
 
     pub fn deep_sky_osc_no_calibration() -> Self {
         Self {
+            already_stacked: false,
             target_type: ObjectType::DeepSky,
             acquisition: AcquisitionMode::Osc,
             light_frame_count: 462,
@@ -110,6 +118,7 @@ impl SessionUnderstanding {
 
     pub fn planetary_high_frame_count() -> Self {
         Self {
+            already_stacked: false,
             target_type: ObjectType::Planet,
             acquisition: AcquisitionMode::Planetary,
             light_frame_count: 5000,
@@ -199,7 +208,7 @@ impl PlanGenerator {
             });
         }
 
-        Ok(PipelinePlan {
+        let mut plan = PipelinePlan {
             plan_id: plan_uuid,
             project_id: ctx.project_id.clone(),
             session_id: ctx.session_id.clone(),
@@ -210,7 +219,11 @@ impl PlanGenerator {
             created_at: unix_ms_to_iso8601(ctx.generated_at_unix_ms),
             schema_version: 1,
             stages,
-        })
+        };
+        // #461 S4: understanding-driven stage adaptations (the hook
+        // P1 documented but left empty).
+        apply_session_adaptations(&mut plan, &ctx.session_understanding);
+        Ok(plan)
     }
 }
 
@@ -310,14 +323,24 @@ pub fn now_unix_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// P3+ — extend a plan with session-understanding-driven adaptations.
-/// P1 leaves this empty; it documents the contract for future phases.
-#[allow(dead_code)]
+/// #461 S4 — extend a plan with session-understanding-driven
+/// adaptations. Already-stacked sessions (master/stacked inputs) skip
+/// the calibration / debayer / register / stack stages: re-stacking a
+/// stacked master is at best a no-op and at worst kappa-sigma of one
+/// frame. Stages are DISABLED, not removed — the plan keeps the full
+/// recipe shape so the audit trail and the re-enable path survive.
 pub fn apply_session_adaptations(plan: &mut PipelinePlan, understanding: &SessionUnderstanding) {
-    let _ = understanding; // silence unused warning
-    let _ = (plan,); // silence unused warning
-                     // P3: disable optional stages that are not appropriate for the
-                     // dataset. P5: enable adaptive tile sizing from acquisition mode.
+    if understanding.already_stacked {
+        for stage in &mut plan.stages {
+            if matches!(
+                stage.stage_type.as_str(),
+                "calibrate" | "debayer" | "register" | "stack"
+            ) {
+                stage.enabled = false;
+            }
+        }
+    }
+    // P5 follow-up: adaptive tile sizing from acquisition mode.
 }
 
 #[allow(dead_code)]

@@ -99,6 +99,17 @@
         dialogOpen = true;
         break;
       case "open-project":
+        if (project) {
+          // #465 W1.6 — the recent-projects card passes the actual
+          // project; open it directly instead of dumping on Projects.
+          const summary = $projectsStore.items.find(
+            (p) => p.name === project.name,
+          );
+          if (summary) {
+            void lifecycleOpenProject(summary);
+            break;
+          }
+        }
         applicationNavTarget.set("projects");
         break;
       case "import-session":

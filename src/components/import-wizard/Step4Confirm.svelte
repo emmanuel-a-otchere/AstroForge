@@ -28,7 +28,12 @@
     type TargetProvenanceReportJson,
   } from "../../state/import-wizard";
   import { studioViewport } from "../../state/application";
-  import { importRegisterAssets } from "../../lib/astroforge-api";
+  import { projectContext } from "../../state/project-context";
+  import { projectsStore } from "../../state/projects";
+  import {
+    importRegisterAssets,
+    projectGet,
+  } from "../../lib/astroforge-api";
 
   let wizardState = $derived($importWizard);
   let classification = $derived(wizardState.classification);
@@ -72,6 +77,12 @@
     }));
     await importRegisterAssets(current.sessionId, current.projectId, frames);
     await materialiseSession();
+    // #465 W1.2: refresh the frozen project snapshot so the Process
+    // workspace sees the new active_session_id in the SAME sitting
+    // (previously AutoPlanPanel stayed suppressed until reopen).
+    const fresh = await projectGet(current.projectId);
+    projectContext.replace(fresh);
+    await projectsStore.refresh();
     studioViewport.setView("process");
     goToStep("add-data");
   }

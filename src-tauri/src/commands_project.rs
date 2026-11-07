@@ -159,6 +159,16 @@ pub fn project_create(
         .store
         .get_project(&opened.manifest.project_id)
         .map_err(store_err_to_string)?;
+    // #465 W1.5 — write-through to the GLOBAL projects.db. project_list /
+    // project_get / import_begin read the global store, but ProjectManager
+    // only wrote the per-project project.db — freshly created projects
+    // could silently vanish from the lists.
+    {
+        let global = state.store.lock().map_err(lock_err)?;
+        global
+            .register_project(&project)
+            .map_err(store_err_to_string)?;
+    }
     Ok(ProjectSummary::from(&project))
 }
 

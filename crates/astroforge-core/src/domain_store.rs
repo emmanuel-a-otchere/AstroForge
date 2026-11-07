@@ -10,6 +10,7 @@
 //! (decision D-7) — for now the caller chooses the db path, as with the
 //! other stores.
 
+use crate::comparison::now_iso8601;
 use crate::domain::{
     AiMask, AiOperation, AiQualityReport, AiRecommendation, AiSafetyClassification, Artifact,
     ArtifactCategory, EnhancementPreview, EnhancementStack, ImageAnalysis, ImageRegion,
@@ -597,6 +598,10 @@ impl DomainStore {
     /// migrations. Use `:memory:` in tests.
     pub fn new(db_path: &Path) -> Result<Self> {
         let conn = Connection::open(db_path)?;
+        // #465 W1.4 — enforce the declared foreign keys. All the
+        // cross-store dangling-id classes (sessions/assets pointing
+        // at rows that don't exist) previously inserted silently.
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS schema_migrations (
                 version INTEGER PRIMARY KEY,
@@ -1084,17 +1089,74 @@ impl DomainStore {
         }
     }
 
-    /// #461 S2 — mark a session as the project's active one. The
-    /// Process workspace gates its plan generator on this field, so
-    /// an import that never sets it strands the project without a
-    /// processing entry point.
-    pub fn set_active_session(&self, project_id: &str, session_id: &str) -> Result<()> {
+    /// #465 W1.5 — insert a project row with a GIVEN id into THIS
+    /// store. Used by project_create to mirror the per-project row
+    /// into the global projects.db (project_list / project_get /
+    /// import_begin all read the global store; ProjectManager only
+    /// wrote the per-project db, so fresh projects could vanish from
+    /// the lists).
+    pub fn register_project(&self, project: &Project) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE projects SET active_session_id = ?1 WHERE id = ?2",
-            params![session_id, project_id],
+            "INSERT INTO projects (id, name, description, target_id, created_at, updated_at,
+                    application_version, schema_version, status, active_session_id,
+                    active_image_version_id, project_root, source_mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                project.project_id,
+                project.name,
+                project.description,
+                project.target_id,
+                project.created_at,
+                project.updated_at,
+                project.application_version,
+                project.schema_version,
+                // status stored as a String column (see ProjectRow);
+                // serialize via serde like the enum's other round-trips.
+                serde_json::to_string(&project.status)
+                    .unwrap_or_else(|_| format!("{:?}", project.status))
+                    .trim_matches('"')
+                    .to_string(),
+                project.active_session_id,
+                project.active_image_version_id,
+                project.project_root,
+                serde_json::to_string(&project.source_mode)
+                    .unwrap_or_else(|_| format!("{:?}", project.source_mode))
+                    .trim_matches('"')
+                    .to_string(),
+            ],
         )
-        .map_err(crate::domain_store::DomainStoreError::Sqlite)?;
+        .map_err(DomainStoreError::Sqlite)?;
+        drop(conn);
+        Ok(())
+    }
+
+    /// #465 W1.7 — set the active session only when the session row
+    /// exists AND belongs to the given project, bumping updated_at.
+    /// Previously wrote garbage ids silently (FK enforcement is off).
+    pub fn set_active_session(&self, project_id: &str, session_id: &str) -> Result<()> {
+        {
+            let conn = self.conn.lock().unwrap();
+            let exists: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM sessions WHERE id = ?1 AND project_id = ?2",
+                    params![session_id, project_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(DomainStoreError::Sqlite)?;
+            if exists.is_none() {
+                return Err(DomainStoreError::NotFound(format!(
+                    "session '{session_id}' not found for project '{project_id}'"
+                )));
+            }
+        }
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE projects SET active_session_id = ?1, updated_at = ?2 WHERE id = ?3",
+            params![session_id, now_iso8601(), project_id],
+        )
+        .map_err(DomainStoreError::Sqlite)?;
         Ok(())
     }
 

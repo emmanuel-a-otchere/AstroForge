@@ -26,8 +26,8 @@ pub mod runner;
 pub mod stage;
 
 pub use plan::{
-    generate_plan, now_unix_ms, AcquisitionMode, CalibrationAvailability, GenerationContext,
-    PlanError, PlanGenerator, SessionUnderstanding,
+    derive_understanding_from_session, generate_plan, now_unix_ms, AcquisitionMode,
+    CalibrationAvailability, GenerationContext, PlanError, PlanGenerator, SessionUnderstanding,
 };
 pub use runner::{CancelHandle, PauseHandle, PipelineRunner, RunOutcome, RunnerError};
 pub use stage::{StageSpec, StageType};

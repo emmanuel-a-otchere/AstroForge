@@ -308,16 +308,22 @@ impl From<FrameInfo> for IngestFrameDto {
     }
 }
 
-/// Walk a directory for `.fits` / `.fit` files and classify each one.
-/// Returns one DTO per frame with the header information needed by
-/// the UI to render the manifest (counts by type, exposure total,
-/// anomalies to flag).
+/// Walk a directory for any SUPPORTED file (per import_scan's
+/// extension table) and classify each one. Returns one DTO per frame
+/// with the header information needed by the UI to render the
+/// manifest (counts by type, exposure total, anomalies to flag).
+///
+/// #465 W3 — previously this used the FITS-only walk, so every
+/// TIFF/PNG/JPEG/DNG capture silently vanished at Step 1 despite the
+/// UI's format claim. The scan now honors the full extension table;
+/// the pipeline's decoder switch (dispatch.rs) remains the honest
+/// gate for what can actually be processed.
 #[tauri::command]
 fn ingest_scan_directory(dir_path: String) -> Result<Vec<IngestFrameDto>, CommandError> {
     let dir = PathBuf::from(&dir_path);
-    let paths = import_scan::scan_fits_directory(&dir).map_err(CommandError::from)?;
+    let paths = import_scan::scan_directory(&dir).map_err(CommandError::from)?;
     let mut out = Vec::with_capacity(paths.len());
-    for p in paths {
+    for p in paths.into_iter().filter(|p| import_scan::is_supported(p)) {
         let bytes = match std::fs::read(&p) {
             Ok(b) => b,
             Err(e) => {

@@ -457,7 +457,7 @@ pub fn scan_fits_directory(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
         .into_iter()
         .filter(|p| {
             let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-            matches!(ext.to_lowercase().as_str(), "fits" | "fit")
+            matches!(ext.to_lowercase().as_str(), "fits" | "fit" | "fts")
         })
         .collect())
 }

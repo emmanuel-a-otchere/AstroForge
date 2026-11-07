@@ -1569,7 +1569,21 @@ pub fn load_frames_for_session(domain_store: &DomainStore, session_id: &str) -> 
 
         let result = match ext.as_str() {
             "tif" | "tiff" => F32Image::from_tiff_bytes(&bytes),
-            "fits" | "fit" => F32Image::from_fits_bytes(&bytes),
+            "fits" | "fit" | "fts" => F32Image::from_fits_bytes(&bytes),
+            "png" => F32Image::from_png_bytes(&bytes),
+            "jpg" | "jpeg" => F32Image::from_jpeg_bytes(&bytes),
+            "dng" => {
+                // #465 W3 — honest skip: DNG decode is not implemented
+                // yet (dng_parser.rs is dead code; tracked for v1.x).
+                // Surface via the warning channel like other
+                // undecodable formats.
+                log::warn!(
+                    "load_frames_for_session: DNG decode not implemented yet \
+                     (convert to TIFF/FITS): '{}'",
+                    asset.original_path
+                );
+                continue;
+            }
             other => {
                 log::warn!(
                     "load_frames_for_session: unsupported format '{}' for '{}'",

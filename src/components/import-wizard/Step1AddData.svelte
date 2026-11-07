@@ -108,7 +108,7 @@
   </p>
   <div class="drop-zone" role="region" aria-label="Captures folder drop zone">
     <span class="material-symbols-outlined" aria-hidden="true">cloud_upload</span>
-    <p class="font-body">FITS &middot; DNG &middot; TIFF &middot; PNG &middot; JPEG</p>
+    <p class="font-body">FITS · TIFF · PNG · JPEG · DNG (metadata only — DNG decode lands in v1.x)</p>
   </div>
   <div class="controls">
     <button class="btn-secondary" on:click={pickDirectory} type="button">

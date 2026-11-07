@@ -23,7 +23,7 @@
 <WorkspaceScreen
   title="Import"
   icon="upload_file"
-  description="Bring new data into the project. Drop a folder of captures, calibration frames, or stacked results and AstroForge handles the rest."
+  description="Bring new data into the project. Import FITS, TIFF, PNG or JPEG captures (DNG metadata-only for now). Stacked results skip straight to post-processing."
 >
   <ImportWizard />
 </WorkspaceScreen>

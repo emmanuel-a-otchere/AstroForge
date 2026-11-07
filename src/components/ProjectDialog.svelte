@@ -19,7 +19,9 @@
     mode: "create" | "rename";
     project?: ProjectSummary;
     open: boolean;
-    onSubmit: (value: { name: string }) => void;
+    onSubmit:
+      | ((value: { name: string }) => void)
+      | ((value: { name: string }) => Promise<void> | void);
     onCancel: () => void;
   } = $props();
 
@@ -38,14 +40,21 @@
     }
   });
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const trimmed = name.trim();
     if (!trimmed) {
       error = "Name cannot be empty.";
       return;
     }
     submitting = true;
-    onSubmit({ name: trimmed });
+    try {
+      // #465 W1.7 — await so a rejected create/rename resets the
+      // dialog instead of wedging every control disabled (the
+      // parent catches and surfaces the error banner).
+      await onSubmit({ name: trimmed });
+    } finally {
+      submitting = false;
+    }
   }
 
   function handleKeydown(e: KeyboardEvent) {

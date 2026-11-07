@@ -27,6 +27,7 @@
 import { projectContext } from "./project-context";
 import { studioViewport } from "./application";
 import { workspaceState } from "./workspace";
+import { resetImportWizard } from "./import-wizard";
 import { versionStore } from "./versions";
 import { comparisonState } from "./comparison";
 import { resetAiEnhancement } from "./ai-enhancement";
@@ -96,6 +97,7 @@ export function closeProject(): void {
   // reset alongside the other project stores.
   comparisonState.reset();
   resetPipelinePlanStore();
+  resetImportWizard();
 }
 
 /**

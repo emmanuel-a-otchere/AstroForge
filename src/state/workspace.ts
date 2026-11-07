@@ -118,6 +118,14 @@ async function refreshMostRecentPlanStageExecutions(
     if (!mostRecent) return;
     const execs = await api.pipelinePlanListStageExecutions(mostRecent.plan_id);
     stageExecutions.update((map) => ({ ...map, [mostRecent.plan_id]: execs }));
+    // #465 W2 — rehydrate activePlan so re-opening a project lands
+    // the user in a runnable workspace (previously only the stage
+    // rows warmed; the plan itself stayed null, so Overview showed
+    // "pending" forever and Process re-offered plan generation).
+    if (!get(activePlan)) {
+      const plan = await api.pipelinePlanGet(mostRecent.plan_id).catch(() => null);
+      if (plan) activePlan.set(plan);
+    }
   } catch {
     // Best-effort. The store simply stays empty until a
     // navigation or runner callback populates it.
@@ -174,12 +182,17 @@ export const stageStatuses = derived(
     // fallback: when no plan exists the §8 checklist reports
     // `pending` (an honest "no processing data yet") rather
     // than walking the CR-02 wizard table.
+    // #465 W2 — no active plan (yet): trust the server's
+    // overview.processed so a completed session isn't reported
+    // "pending" forever just because activePlan isn't hydrated.
     const processStatus = $plan
       ? computeProcessStatusFromPlan(
           $plan.stages,
           $executions[$plan.plan_id] ?? [],
         )
-      : "pending";
+      : get(internal).overview?.processed
+        ? "complete"
+        : "pending";
 
     const o = $s.overview;
     const ready = o !== null;

@@ -247,6 +247,22 @@ export async function startPipelineRun(
     lastRunOutcome.set(outcome);
     // Refresh per-stage state so the UI reflects the persisted rows.
     await refreshStageExecutions(planId);
+    // #465 W2 — the runner now persists Versions (VersionCreated
+    // events + artifacts) at each producing stage. Refresh the
+    // version store + overview so Enhance / Compare / Export and the
+    // Overview checklist see the outputs immediately; previously the
+    // version list stayed empty forever after a run.
+    try {
+      const { versionStore } = await import("../state/versions");
+      const { workspaceState } = await import("../state/workspace");
+      const plan = get(activePlan);
+      if (plan?.project_id) {
+        await versionStore.load(plan.project_id);
+        await workspaceState.refreshOverview();
+      }
+    } catch {
+      /* refresh is best-effort; the run outcome is already recorded */
+    }
     return outcome;
   } catch (err) {
     lastError.set(toMessage(err));

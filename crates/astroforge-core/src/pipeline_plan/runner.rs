@@ -426,6 +426,20 @@ impl PipelineRunner {
                                 exec.error_json = Some(existing);
                             }
                         }
+                        // #465 W2 — persist the stage output as an
+                        // Artifact + ImageVersion + VersionCreated so
+                        // Compare / Enhance / Export have data.
+                        if let Some(domain) = self.domain_store.as_ref() {
+                            persist_stage_version(
+                                domain,
+                                &plan.project_id,
+                                plan_id,
+                                &mut exec,
+                                image,
+                                "Pipeline",
+                                &stage.stage_type,
+                            );
+                        }
                     }
                 }
                 Err(msg) => {
@@ -623,9 +637,30 @@ impl PipelineRunner {
                         exec.metric_snapshot_json = Some(json);
                     }
                     // P3 s2 — feed the recommendation engine.
-                    if let Some(engine) = self.engine.as_ref() {
-                        let recs = engine.evaluate(&exec, &snapshot);
-                        let _ = self.store.insert_recommendations(&recs);
+                    {
+                        let engine = self.engine.as_ref();
+                        if let Some(engine) = engine {
+                            let recs = engine.evaluate(&exec, &snapshot);
+                            let _ = self.store.insert_recommendations(&recs);
+                        }
+                    }
+                    // #465 W2 — same version persistence as run_loop.
+                    if let Some(domain) = self.domain_store.as_ref() {
+                        let plan = self.store.load_plan(&exec.plan_id).ok();
+                        let project_id = plan
+                            .as_ref()
+                            .map(|p| p.project_id.clone())
+                            .unwrap_or_else(|| exec.plan_id.clone());
+                        let run_id = exec.plan_id.clone();
+                        persist_stage_version(
+                            domain,
+                            &project_id,
+                            &run_id,
+                            &mut exec,
+                            image,
+                            "Pipeline retry",
+                            &stage.stage_type,
+                        );
                     }
                 }
                 self.store.insert_stage_execution(&exec)?;
@@ -799,6 +834,113 @@ impl PauseHandle {
 /// Slice 1's Stack handler requires a `DomainStore` via `StageContext`
 /// when loading from disk. Tests pass `preloaded_frames` directly so
 /// the disk path is bypassed entirely.
+///
+/// #465 W2 — persist a successful image-producing stage output as a
+/// durable Artifact + ImageVersion + VersionCreated event, using the
+/// project's DomainStore. Everything downstream of the pipeline
+/// (Compare / Enhance / Export / the Overview timeline) derives from
+/// `VersionCreated` project events; before this change the runner
+/// dropped its output image after computing metrics, so the version
+/// store stayed empty forever.
+///
+/// Uses a TIFF container (16-bit) so the artifact bytes stay readable
+/// by `load_frames_for_session` and the canvas readers. Failures are
+/// non-fatal: the stage itself succeeded, so a persistence error is
+/// logged and recorded on the exec row rather than failing the run.
+fn persist_stage_version(
+    domain: &crate::domain_store::DomainStore,
+    project_id: &str,
+    run_id: &str,
+    exec: &mut StageExecution,
+    image: &crate::image::F32Image,
+    label: &str,
+    stage_type: &str,
+) {
+    let outcome = (|| -> Result<String, String> {
+        // Encode to TIFF-16 (round-trips through the TIFF decoder).
+        let mut bytes: Vec<u8> = Vec::new();
+        {
+            let mut cursor = std::io::Cursor::new(&mut bytes);
+            crate::export::export_tiff_16bit(image, &mut cursor)
+                .map_err(|e| format!("tiff encode: {e}"))?;
+        }
+        let hash = crate::artifact::ContentStore::sha256_hex(&bytes);
+        let artifact = crate::domain::Artifact {
+            artifact_id: String::new(),
+            artifact_hash: hash,
+            artifact_type: crate::domain::ArtifactCategory::Derived,
+            format: "TIFF".to_string(),
+            // The bytes live in the artifact store row (hash-pinned
+            // content); original_path records the container choice.
+            path: String::new(),
+            size: bytes.len() as u64,
+            created_at: crate::comparison::now_iso8601(),
+            producer_stage: Some(exec.stage_id.clone()),
+            pipeline_run_id: Some(run_id.to_string()),
+            parent_artifact_ids: vec![],
+            width: Some(image.width() as u32),
+            height: Some(image.height() as u32),
+            channels: Some(image.channels() as u32),
+            bit_depth: Some(16),
+            color_space: None,
+            linear_or_nonlinear: None,
+        };
+        let artifact_id = domain
+            .record_artifact(&artifact)
+            .map_err(|e| e.to_string())?;
+        exec.output_artifact_id = Some(artifact_id.clone());
+
+        let sequence = domain
+            .next_image_version_sequence(project_id)
+            .map_err(|e| e.to_string())?;
+        let now = crate::comparison::now_iso8601();
+        let version = crate::domain::ImageVersion {
+            version_id: String::new(),
+            project_id: project_id.to_string(),
+            label: format!("{label} ({stage_type})"),
+            sequence,
+            primary_artifact_id: artifact_id.clone(),
+            source_version_id: None,
+            created_at: now.clone(),
+            hidden: false,
+            recipe_id: None,
+            recipe_version: None,
+            recipe_hash: None,
+        };
+        domain
+            .upsert_image_version(&version)
+            .map_err(|e| e.to_string())?;
+        domain
+            .record_event(
+                project_id,
+                crate::domain::ProjectEventKind::VersionCreated,
+                Some(
+                    &serde_json::json!({
+                        "version_id": version.version_id,
+                        "label": version.label,
+                        "sequence": sequence,
+                        "artifact_id": artifact_id,
+                        "stage_execution_id": exec.stage_execution_id,
+                    })
+                    .to_string(),
+                ),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(artifact_id)
+    })();
+    if let Err(e) = outcome {
+        let mut existing = exec.error_json.clone().unwrap_or_default();
+        if !existing.is_empty() {
+            existing.push('|');
+        }
+        existing.push_str(
+            &serde_json::json!({"what_happened": format!("version persistence failed: {e}")})
+                .to_string(),
+        );
+        exec.error_json = Some(existing);
+    }
+}
+
 fn dispatch_stage_via_registry(
     runner: &PipelineRunner,
     stage: &crate::domain::PipelineStage,

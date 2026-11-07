@@ -60,6 +60,9 @@
   let deleteDialogOpen = $state(false);
   let deleteTarget: ProjectSummary | null = $state(null);
   let dialogError = $state<string | null>(null);
+  // #461 S1: what to do after a project is created from Home
+  // ("import" = land in the Import workspace; null = just open it).
+  let postCreateAction: "import" | null = $state(null);
 
   // Mirror the local dialog state into the cross-component stores
   // so the keyboard-shortcut handler can read whether a dialog
@@ -70,6 +73,55 @@
   $effect(() => {
     deleteDialogOpenStore.set(deleteDialogOpen);
   });
+
+  // #461 S1: Home's recent-projects list needs the store hydrated
+  // at boot (HomeScreen no longer renders a hard-coded empty state).
+  onMount(() => {
+    void projectsStore.refresh();
+  });
+
+  // #461 S1 — Home actions, wired to real navigation/dialogs. The
+  // previous CustomEvent had no listener anywhere: every Home button
+  // was a dead click.
+  function handleHomeAction(
+    action:
+      | "new-project"
+      | "open-project"
+      | "import-session"
+      | "resume-processing",
+    project?: { name: string },
+  ) {
+    switch (action) {
+      case "new-project":
+        postCreateAction = null;
+        dialogMode = "create";
+        dialogProject = null;
+        dialogOpen = true;
+        break;
+      case "open-project":
+        applicationNavTarget.set("projects");
+        break;
+      case "import-session":
+        if ($studioViewport.project) {
+          studioViewport.setView("import");
+        } else {
+          // No project open: create one now, then land in Import.
+          postCreateAction = "import";
+          dialogMode = "create";
+          dialogProject = null;
+          dialogOpen = true;
+        }
+        break;
+      case "resume-processing":
+        if ($studioViewport.project) {
+          studioViewport.setView("process");
+        } else {
+          applicationNavTarget.set("projects");
+        }
+        break;
+    }
+    void project;
+  }
 
   // Wire global keyboard shortcuts (Cmd/Ctrl+N/O/S/1-6, Escape).
   useKeyboardShortcuts({
@@ -132,15 +184,25 @@
   async function handleDialogSubmit(value: { name: string }) {
     try {
       if (dialogMode === "create") {
-        await api.projectCreate({
+        const created = await api.projectCreate({
           name: value.name,
           applicationVersion: "0.1.0",
         });
+        dialogOpen = false;
+        await projectsStore.refresh();
+        // #461 S1: creating from Home now lands the user inside the
+        // project (previously they stayed on a screen that still said
+        // "nothing here yet"), optionally straight into Import.
+        await lifecycleOpenProject(created);
+        if (postCreateAction === "import") {
+          studioViewport.setView("import");
+          postCreateAction = null;
+        }
       } else if (dialogMode === "rename" && dialogProject) {
         await api.projectRename(slugFromName(dialogProject.name), value.name);
+        dialogOpen = false;
+        await projectsStore.refresh();
       }
-      dialogOpen = false;
-      await projectsStore.refresh();
     } catch (e) {
       dialogError = e instanceof Error ? e.message : String(e);
     }
@@ -202,7 +264,7 @@
     </span>
   </div>
   {:else if $applicationNavTarget === "home"}
-    <HomeScreen />
+    <HomeScreen onAction={handleHomeAction} />
   {:else if $applicationNavTarget === "projects"}
     <ProjectsScreen onAction={handleProjectAction} />
   {:else if $applicationNavTarget === "recipes"}

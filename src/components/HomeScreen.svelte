@@ -10,8 +10,8 @@
   route to placeholder modals; P2 wires the real create/open flow.
 -->
 <script lang="ts">
-  import { applicationNavItem } from "../state/application";
-  import type { ApplicationNavTarget } from "../state/application";
+  import { applicationNavTarget } from "../state/application";
+  import { projectsStore } from "../state/projects";
 
   type PrimaryAction = {
     id: "new-project" | "open-project" | "import-session" | "resume-processing";
@@ -52,22 +52,22 @@
     },
   ];
 
+  // RT-13-era wireflow fix (#461 S1): Home actions route through the
+  // host (App.svelte) via an explicit callback — the P1 CustomEvent
+  // had no listener, so every Home button was a dead click.
+  let { onAction } = $props<{
+    onAction: (
+      action: PrimaryAction["id"],
+      project?: { name: string },
+    ) => void;
+  }>();
+
   function handle(action: PrimaryAction["id"]) {
-    // P2 wires projectList() + projectCreate()/projectOpen() here.
-    // P1 emits a CustomEvent so App.svelte can route the action through
-    // its existing dialog layer without coupling the Home screen to a
-    // concrete dialog component yet.
-    const event = new CustomEvent("astroforge:home-action", {
-      detail: { action },
-      bubbles: true,
-    });
-    dispatchEvent(event);
+    onAction(action);
   }
 
-  function navTo(target: ApplicationNavTarget) {
-    applicationNavItem(target); // future: actually navigate; P1 routes via store
-  // Cast to unknown to satisfy strict unused-param handling until P3 lands
-  void target;
+  function navTo(target: "projects") {
+    applicationNavTarget.set(target);
   }
 </script>
 
@@ -112,34 +112,55 @@
       </button>
     </header>
 
-    <!-- P1 ships the empty state per §26; P2 will replace this block with
-         the populated grid driven by projectList(). -->
-    <div class="empty-state">
-      <span class="material-symbols-outlined empty-icon" aria-hidden="true">
-        collections
-      </span>
-      <p class="empty-title font-display">Your astrophotography projects</p>
-      <p class="empty-body font-body">
-        Nothing here yet. Create your first project from a telescope capture
-        or import an existing one.
-      </p>
-      <div class="empty-actions">
-        <button
-          type="button"
-          class="primary-cta font-display"
-          onclick={() => handle("new-project")}
-        >
-          Create Project
-        </button>
-        <button
-          type="button"
-          class="secondary-cta font-display"
-          onclick={() => handle("open-project")}
-        >
-          Import Existing Project
-        </button>
+    {#if $projectsStore.loading}
+      <p class="empty-body font-body" aria-live="polite">Loading projects…</p>
+    {:else if $projectsStore.items.length === 0}
+      <div class="empty-state">
+        <span class="material-symbols-outlined empty-icon" aria-hidden="true">
+          collections
+        </span>
+        <p class="empty-title font-display">Your astrophotography projects</p>
+        <p class="empty-body font-body">
+          Nothing here yet. Create your first project from a telescope capture
+          or import an existing one.
+        </p>
+        <div class="empty-actions">
+          <button
+            type="button"
+            class="primary-cta font-display"
+            onclick={() => handle("new-project")}
+          >
+            Create Project
+          </button>
+          <button
+            type="button"
+            class="secondary-cta font-display"
+            onclick={() => handle("open-project")}
+          >
+            Import Existing Project
+          </button>
+        </div>
       </div>
-    </div>
+    {:else}
+      <div class="project-grid" role="list">
+        {#each $projectsStore.items as project (project.project_id)}
+          <article class="project-card" role="listitem">
+            <h3 class="font-display">{project.name}</h3>
+            <p class="font-body">
+              {project.status}
+              {#if project.active_session_id} · session active{/if}
+            </p>
+            <button
+              type="button"
+              class="primary-cta font-display"
+              onclick={() => onAction("open-project", { name: project.name })}
+            >
+              Open
+            </button>
+          </article>
+        {/each}
+      </div>
+    {/if}
   </section>
 </section>
 

@@ -409,3 +409,25 @@ fn chrono_like_now() -> String {
         .as_secs();
     format!("{secs}")
 }
+
+/// #461 S2 fix — create the import session in the DomainStore (the
+/// same database the pipeline reads SourceAssets from). The
+/// pre-existing `session_create` command writes to the separate
+/// SessionStore, whose sessions cannot satisfy the source_assets
+/// foreign key — using it made every S2 import fail at registration
+/// time. Also marks the session active on the project in one step.
+#[tauri::command]
+pub fn import_begin(
+    state: State<'_, ProjectState>,
+    project_id: String,
+    source_dir: String,
+) -> Result<String, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let session_id = store
+        .create_session(&project_id, &source_dir)
+        .map_err(|e| e.to_string())?;
+    store
+        .set_active_session(&project_id, &session_id)
+        .map_err(|e| e.to_string())?;
+    Ok(session_id)
+}

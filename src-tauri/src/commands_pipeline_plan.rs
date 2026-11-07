@@ -12,7 +12,9 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::commands_project::ProjectState;
 use astroforge_core::adaptive::AdaptiveParameterSet;
+use astroforge_core::domain::SourceAsset;
 use astroforge_core::domain::{ObjectType, PipelinePlan, PipelinePlanStatus};
 use astroforge_core::pipeline_plan::{
     builtin::deep_sky_osc_balanced,
@@ -80,6 +82,11 @@ pub struct SessionUnderstandingPayload {
     pub calibration: String,
     pub bayer_pattern: Option<String>,
     pub narrowband_filters: Vec<String>,
+    /// #461 S4 — the frontend may declare already-stacked inputs.
+    /// When the whole payload is absent the backend derives it from
+    /// the session's persisted classification + asset filenames.
+    #[serde(default)]
+    pub already_stacked: bool,
 }
 
 impl SessionUnderstandingPayload {
@@ -87,6 +94,7 @@ impl SessionUnderstandingPayload {
         SessionUnderstanding {
             target_type: parse_target_type(&self.target_type),
             acquisition: parse_acquisition(&self.acquisition),
+            already_stacked: self.already_stacked,
             light_frame_count: self.light_frame_count,
             calibration: parse_calibration(&self.calibration),
             bayer_pattern: self.bayer_pattern,
@@ -191,9 +199,89 @@ impl From<&astroforge_core::domain::PipelineStage> for PipelineStageDto {
     }
 }
 
+/// #461 S3/S4 — derive the session understanding from what the
+/// import actually persisted: the SessionClassification (capture kind,
+/// narrowband composition) plus the registered SourceAsset rows
+/// (frame counts, calibration availability, stacked-master filename
+/// heuristics). Falls back to the balanced default when the session
+/// has no classification yet.
+fn derive_understanding_from_session(
+    store: &astroforge_core::domain_store::DomainStore,
+    session_id: &str,
+) -> SessionUnderstanding {
+    let classification = store.get_session_classification(session_id).ok().flatten();
+    let assets = store.list_source_assets(session_id).unwrap_or_default();
+
+    let lights: Vec<&SourceAsset> = assets
+        .iter()
+        .filter(|a| a.frame_type.as_deref() == Some("Light"))
+        .collect();
+    let has_dark = assets
+        .iter()
+        .any(|a| a.frame_type.as_deref() == Some("Dark"));
+    let has_flat = assets
+        .iter()
+        .any(|a| a.frame_type.as_deref() == Some("Flat"));
+    let has_bias = assets
+        .iter()
+        .any(|a| a.frame_type.as_deref() == Some("Bias"));
+    let calibration = match (has_dark, has_flat, has_bias) {
+        (true, true, true) => CalibrationAvailability::Full,
+        (false, false, false) => CalibrationAvailability::None,
+        _ => CalibrationAvailability::Partial,
+    };
+
+    // Stacked-master heuristic: a single light whose filename carries
+    // the stacked/master/combined marker, or a session whose lights
+    // ALL carry it. Never guessed from metadata alone.
+    let marker = |name: &str| {
+        let lower = name.to_lowercase();
+        lower.contains("_stacked") || lower.contains("_master") || lower.contains("_combined")
+    };
+    let all_marked = !lights.is_empty()
+        && lights
+            .iter()
+            .all(|a| marker(&a.original_filename.to_lowercase()));
+    let already_stacked =
+        (lights.len() == 1 && marker(&lights[0].original_filename.to_lowercase())) || all_marked;
+
+    let (capture_kind, composition) = match &classification {
+        Some(c) => (c.capture_kind.clone(), c.narrowband_composition.clone()),
+        None => (None, None),
+    };
+    let (target_type, acquisition, narrowband_filters) = match composition.as_deref() {
+        Some("hoo") | Some("sho") | Some("hoo_or_sho") => (
+            ObjectType::DeepSky,
+            AcquisitionMode::Narrowband,
+            vec!["Ha".to_string(), "OIII".to_string(), "SII".to_string()],
+        ),
+        Some("mono") | Some("lrgb") => (ObjectType::DeepSky, AcquisitionMode::Mono, vec![]),
+        _ => (
+            match capture_kind.as_deref() {
+                Some("planetary_lunar") => ObjectType::Planet,
+                Some("deep_sky") | None => ObjectType::DeepSky,
+                _ => ObjectType::DeepSky,
+            },
+            AcquisitionMode::Osc,
+            vec![],
+        ),
+    };
+
+    SessionUnderstanding {
+        target_type,
+        acquisition,
+        already_stacked,
+        light_frame_count: lights.len() as u32,
+        calibration,
+        bayer_pattern: None,
+        narrowband_filters,
+    }
+}
+
 #[tauri::command]
 pub fn create_pipeline_plan(
     state: State<'_, PipelinePlanState>,
+    project_state: State<'_, ProjectState>,
     request: CreatePipelinePlanRequest,
 ) -> Result<PipelinePlanDto, String> {
     let (recipe_stages, recipe_target) = match request.recipe_id.as_deref() {
@@ -206,10 +294,18 @@ pub fn create_pipeline_plan(
         }
     };
 
-    let session_understanding = request
-        .session_understanding
-        .map(SessionUnderstandingPayload::into_domain)
-        .unwrap_or_else(SessionUnderstanding::deep_sky_osc_balanced);
+    // #461 S3 — when the frontend ships no payload, derive the
+    // understanding from the session's persisted classification +
+    // registered assets (CR-04: "understand before processing").
+    // Falls back to the balanced default only when nothing has been
+    // analysed yet.
+    let session_understanding = match request.session_understanding {
+        Some(payload) => payload.into_domain(),
+        None => derive_understanding_from_session(
+            &*project_state.store.lock().map_err(|e| e.to_string())?,
+            &request.session_id,
+        ),
+    };
 
     let ctx = GenerationContext {
         project_id: request.project_id.clone(),
@@ -1017,4 +1113,107 @@ pub fn skip_stage(
 /// Mirrors `store_err_to_string` for store errors.
 fn runner_err_to_string(e: astroforge_core::pipeline_plan::runner::RunnerError) -> String {
     e.to_string()
+}
+
+#[cfg(test)]
+mod derive_tests {
+    use super::*;
+    use astroforge_core::domain::SourceAsset;
+    use astroforge_core::domain_store::DomainStore;
+
+    fn asset(session: &str, name: &str, frame_type: &str) -> SourceAsset {
+        SourceAsset {
+            asset_id: String::new(),
+            content_hash: format!("hash-{name}"),
+            original_filename: name.to_string(),
+            original_path: format!("/tmp/{name}"),
+            file_size: 1,
+            format: "FITS".to_string(),
+            mime_type: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            imported_at: "2026-01-01T00:00:00Z".into(),
+            session_id: session.to_string(),
+            frame_type: Some(frame_type.to_string()),
+            exposure: Some(30.0),
+            filter: None,
+            binning: None,
+            width: Some(256),
+            height: Some(256),
+            bit_depth: None,
+            bayer_pattern: None,
+            camera: None,
+            date_obs: None,
+            ra: None,
+            dec: None,
+        }
+    }
+
+    fn store_with(session: &str, assets: &[SourceAsset]) -> DomainStore {
+        let dir = std::env::temp_dir().join(format!(
+            "af-derive-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = DomainStore::new(&dir).expect("store");
+        for a in assets {
+            store.register_source_asset(&a.clone()).expect("register");
+        }
+        let _ = session;
+        store
+    }
+
+    #[test]
+    fn single_stacked_master_derives_already_stacked() {
+        let store = store_with(
+            "sess_m",
+            &[asset("sess_m", "m42_stacked_master.fits", "Light")],
+        );
+        let u = derive_understanding_from_session(&store, "sess_m");
+        assert!(u.already_stacked, "single _master light is already stacked");
+        assert_eq!(u.light_frame_count, 1);
+        assert_eq!(u.calibration, CalibrationAvailability::None);
+    }
+
+    #[test]
+    fn raw_session_is_not_already_stacked() {
+        let store = store_with(
+            "sess_raw",
+            &[
+                asset("sess_raw", "light_000.fits", "Light"),
+                asset("sess_raw", "light_001.fits", "Light"),
+                asset("sess_raw", "dark_000.fits", "Dark"),
+                asset("sess_raw", "flat_000.fits", "Flat"),
+            ],
+        );
+        let u = derive_understanding_from_session(&store, "sess_raw");
+        assert!(!u.already_stacked);
+        assert_eq!(u.light_frame_count, 2);
+        assert_eq!(u.calibration, CalibrationAvailability::Partial);
+    }
+
+    #[test]
+    fn all_marked_lights_derive_already_stacked() {
+        let store = store_with(
+            "sess_all",
+            &[
+                asset("sess_all", "m31_master_stacked.fits", "Light"),
+                asset("sess_all", "m31_master_combined.fits", "Light"),
+            ],
+        );
+        let u = derive_understanding_from_session(&store, "sess_all");
+        assert!(u.already_stacked);
+    }
+
+    #[test]
+    fn empty_session_falls_back_to_balanced_default() {
+        let store = store_with("sess_empty", &[]);
+        let u = derive_understanding_from_session(&store, "sess_empty");
+        assert!(!u.already_stacked);
+        assert_eq!(u.light_frame_count, 0);
+        assert_eq!(u.calibration, CalibrationAvailability::None);
+        assert_eq!(u.target_type, ObjectType::DeepSky);
+    }
 }

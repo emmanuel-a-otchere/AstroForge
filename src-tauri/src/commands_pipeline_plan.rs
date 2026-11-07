@@ -1148,7 +1148,11 @@ mod derive_tests {
         }
     }
 
-    fn store_with(session: &str, assets: &[SourceAsset]) -> DomainStore {
+    /// Mirror the production flow: create the session in the
+    /// DomainStore (source_assets carries a foreign key into the
+    /// sessions table), then register the assets against it. Assets
+    /// are re-keyed to the created session id.
+    fn store_with(session: &str, assets: &[SourceAsset]) -> (DomainStore, String) {
         let dir = std::env::temp_dir().join(format!(
             "af-derive-{}-{}",
             std::process::id(),
@@ -1158,20 +1162,29 @@ mod derive_tests {
                 .as_nanos()
         ));
         let store = DomainStore::new(&dir).expect("store");
+        // sessions carries an FK into projects — create the project
+        // first (mirroring the real import order).
+        let project = store
+            .create_project(session, None, "0.1.0")
+            .expect("create project");
+        let created = store
+            .create_session(&project, session)
+            .expect("create session");
         for a in assets {
-            store.register_source_asset(&a.clone()).expect("register");
+            let mut owned = a.clone();
+            owned.session_id = created.clone();
+            store.register_source_asset(&owned).expect("register");
         }
-        let _ = session;
-        store
+        (store, created)
     }
 
     #[test]
     fn single_stacked_master_derives_already_stacked() {
-        let store = store_with(
+        let (store, sid) = store_with(
             "sess_m",
             &[asset("sess_m", "m42_stacked_master.fits", "Light")],
         );
-        let u = derive_understanding_from_session(&store, "sess_m");
+        let u = derive_understanding_from_session(&store, &sid);
         assert!(u.already_stacked, "single _master light is already stacked");
         assert_eq!(u.light_frame_count, 1);
         assert_eq!(u.calibration, CalibrationAvailability::None);
@@ -1179,7 +1192,7 @@ mod derive_tests {
 
     #[test]
     fn raw_session_is_not_already_stacked() {
-        let store = store_with(
+        let (store, sid) = store_with(
             "sess_raw",
             &[
                 asset("sess_raw", "light_000.fits", "Light"),
@@ -1188,7 +1201,7 @@ mod derive_tests {
                 asset("sess_raw", "flat_000.fits", "Flat"),
             ],
         );
-        let u = derive_understanding_from_session(&store, "sess_raw");
+        let u = derive_understanding_from_session(&store, &sid);
         assert!(!u.already_stacked);
         assert_eq!(u.light_frame_count, 2);
         assert_eq!(u.calibration, CalibrationAvailability::Partial);
@@ -1196,21 +1209,21 @@ mod derive_tests {
 
     #[test]
     fn all_marked_lights_derive_already_stacked() {
-        let store = store_with(
+        let (store, sid) = store_with(
             "sess_all",
             &[
                 asset("sess_all", "m31_master_stacked.fits", "Light"),
                 asset("sess_all", "m31_master_combined.fits", "Light"),
             ],
         );
-        let u = derive_understanding_from_session(&store, "sess_all");
+        let u = derive_understanding_from_session(&store, &sid);
         assert!(u.already_stacked);
     }
 
     #[test]
     fn empty_session_falls_back_to_balanced_default() {
-        let store = store_with("sess_empty", &[]);
-        let u = derive_understanding_from_session(&store, "sess_empty");
+        let (store, sid) = store_with("sess_empty", &[]);
+        let u = derive_understanding_from_session(&store, &sid);
         assert!(!u.already_stacked);
         assert_eq!(u.light_frame_count, 0);
         assert_eq!(u.calibration, CalibrationAvailability::None);

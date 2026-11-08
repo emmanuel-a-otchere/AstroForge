@@ -540,7 +540,12 @@ export async function saveProfile(recipe: Recipe): Promise<RecipeSummary> {
     recipe: rustRecipe,
   });
   const summary = fromRustSummary(rustSummary);
-  profileStore.set([summary, ...PLACEHOLDER_SUMMARIES]);
+  // #465 W5.1 — prepend to the LIVE store. This previously did
+  // `set([summary, ...PLACEHOLDER_SUMMARIES])`, clobbering the list
+  // with the browser-mode fixtures: after every save the library
+  // showed the new recipe + a fake DwarfII entry while the real
+  // recipes vanished until remount.
+  profileStore.update((current) => [summary, ...current]);
   return summary;
 }
 

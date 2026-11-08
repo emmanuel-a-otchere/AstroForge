@@ -431,3 +431,66 @@ pub fn import_begin(
         .map_err(|e| e.to_string())?;
     Ok(session_id)
 }
+
+/// #465 W4 — list a project's sessions (history). Backed by
+/// DomainStore::list_sessions (the DomainStore-backed sessions
+/// import_begin creates — the same DB the pipeline reads). Ordered
+/// oldest→newest; the UI renders newest-first with a continue action
+/// that re-activates a session.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHistoryDto {
+    pub session_id: String,
+    pub name: String,
+    pub source_location: Option<String>,
+    pub processing_status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    /// The project's current active session — the UI marks this one.
+    pub is_active: bool,
+}
+
+#[tauri::command]
+pub fn session_list_for_project(
+    state: State<'_, ProjectState>,
+    project_id: String,
+) -> Result<Vec<SessionHistoryDto>, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let project = store.get_project(&project_id).map_err(|e| e.to_string())?;
+    let active = project.active_session_id.clone().unwrap_or_default();
+    let sessions = store
+        .list_sessions(&project_id)
+        .map_err(|e| e.to_string())?;
+    Ok(sessions
+        .into_iter()
+        .rev()
+        .map(|s| {
+            let is_active = !active.is_empty() && active == s.session_id;
+            SessionHistoryDto {
+                session_id: s.session_id,
+                name: s.name,
+                source_location: s.source_location,
+                processing_status: s.processing_status,
+                created_at: s.created_at,
+                updated_at: s.updated_at,
+                is_active,
+            }
+        })
+        .collect())
+}
+
+/// #465 W4 — continue a previous session: set it active on the
+/// project (validated membership via set_active_session) so the
+/// Process workspace gates open against it.
+#[tauri::command]
+pub fn session_continue(
+    state: State<'_, ProjectState>,
+    project_id: String,
+    session_id: String,
+) -> Result<(), String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    // set_active_session validates the session row + project membership.
+    store
+        .set_active_session(&project_id, &session_id)
+        .map_err(|e| e.to_string())
+}

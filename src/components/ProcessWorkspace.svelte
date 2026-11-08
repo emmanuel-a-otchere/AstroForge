@@ -44,7 +44,7 @@
   import ProcessingControls from "./ProcessingControls.svelte";
   import SaveAsRecipePanel from "./SaveAsRecipePanel.svelte";
   import NodePalette from "./NodePalette.svelte";
-  import { activeProject } from "../state/project-context";
+  import { activeProject, projectContext } from "../state/project-context";
   import {
     activePlan,
     refreshRecommendations,
@@ -54,6 +54,8 @@
   import {
     insertStage,
     type PipelinePlanDto,
+    sessionListForProject,
+    sessionContinue,
   } from "../lib/astroforge-api";
   import type { NodeCatalogEntry } from "../lib/node-catalog";
 
@@ -79,9 +81,52 @@
   // (projectId + sessionId). The latter is null when the project
   // has no active session yet; we suppress the panel in that
   // case so the user does not see a broken Generate button.
-  $: project = $activeProject;
-  $: sessionId = project?.active_session_id ?? null;
-  $: canGenerateAutoPlan = Boolean(project && sessionId);
+  let project = $derived($activeProject);
+  let sessionId = $derived(project?.active_session_id ?? null);
+  let canGenerateAutoPlan = $derived(Boolean(project && sessionId));
+
+  // #465 W4 — the project's session history (newest first) with a
+  // continue action; replaces the missing "previous sessions" UX.
+  let sessionHistory = $state<Awaited<
+    ReturnType<typeof sessionListForProject>
+  >>([]);
+  let historyLoading = $state(false);
+  let historyError = $state<string | null>(null);
+
+  async function loadHistory(): Promise<void> {
+    if (!project) return;
+    historyLoading = true;
+    historyError = null;
+    try {
+      sessionHistory = await sessionListForProject(project.project_id);
+    } catch (e) {
+      historyError = e instanceof Error ? e.message : String(e);
+    } finally {
+      historyLoading = false;
+    }
+  }
+
+  async function continueSession(entry: { sessionId: string }): Promise<void> {
+    if (!project) return;
+    historyError = null;
+    try {
+      await sessionContinue(project.project_id, entry.sessionId);
+      // Refresh the frozen snapshot so the gates reopen in this sitting.
+      const fresh = await import("../lib/astroforge-api").then((m) =>
+        m.projectGet(project.project_id),
+      );
+      projectContext.replace(fresh);
+      await loadHistory();
+    } catch (e) {
+      historyError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // React to project changes (open/close/active flips).
+  $effect(() => {
+    void project;
+    void loadHistory();
+  });
 
   // CR-10 P1.6.2.4 / Slice P1.6.2.4: palette insert wiring.
   // When the user clicks an entry in the node palette, append
@@ -163,9 +208,57 @@
       it self-hides when there are no paused plans, so it is
       always safe to include here.
     -->
+
     {#if project}
       <section class="recovery-zone" aria-label="Recovery banner zone">
         <RecoveryBanner projectId={project.project_id} />
+      </section>
+    {/if}
+
+    <!--
+      #465 W4 — session history: previous sessions for this project,
+      newest first, with continue-on-active. The pipeline reads
+      SourceAssets from the active session, so "continue" points the
+      plan generator + runner at that session's data.
+    -->
+    {#if project}
+      <section class="session-history" aria-label="Session history">
+        <h2 class="font-display">Sessions</h2>
+        {#if historyLoading}
+          <p class="history-line font-body" aria-live="polite">Loading sessions…</p>
+        {:else if historyError}
+          <p class="history-error font-body" role="alert">{historyError}</p>
+        {:else if sessionHistory.length === 0}
+          <p class="history-line font-body">
+            No sessions yet — import captures to create one.
+          </p>
+        {:else}
+          <ul class="session-list" role="list">
+            {#each sessionHistory as entry (entry.sessionId)}
+              <li class="session-item" role="listitem" data-active={entry.isActive}>
+                <div class="session-meta font-body">
+                  <strong>{entry.name || entry.sessionId}</strong>
+                  {#if entry.sourceLocation}
+                    · {entry.sourceLocation}
+                  {/if}
+                  · {entry.processingStatus}
+                  {#if entry.isActive}
+                    · <span class="active-badge">active</span>
+                  {/if}
+                </div>
+                {#if !entry.isActive}
+                  <button
+                    type="button"
+                    class="continue-btn font-label"
+                    onclick={() => continueSession(entry)}
+                  >
+                    Continue
+                  </button>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </section>
     {/if}
 
@@ -215,34 +308,38 @@
       <SaveAsRecipePanel />
     {/if}
 
-    {#if $workspaceState.runs.length === 0}
+    {#if sessionHistory.length > 0}
+      <!--
+        #465 W4 — run history sourced from the live plan store (the
+        legacy pipeline_runs table was never written by the CR-05
+        runner, so the old list stayed empty even with completed
+        stage executions visible above).
+      -->
+      <ul class="run-list" aria-label="Pipeline runs">
+        {#each sessionHistory as entry (entry.sessionId)}
+          <li class="run-item" data-status={entry.processingStatus}>
+            <div class="run-id font-label">{entry.name || entry.sessionId.slice(0, 12)}</div>
+            <div class="run-meta font-body">
+              Source: {entry.sourceLocation ?? "(not recorded)"} ·
+              Updated: {entry.updatedAt}
+            </div>
+            <span class="status-pill" data-status={entry.processingStatus}>
+              {entry.processingStatus}
+            </span>
+          </li>
+        {/each}
+      </ul>
+    {:else}
       <div class="empty-state">
         <span class="material-symbols-outlined empty-icon" aria-hidden="true">
           play_circle
         </span>
         <p class="empty-title font-display">No pipeline runs yet</p>
         <p class="empty-body font-body">
-          Pick a recipe and start a run. The pipeline driver persists progress
-          so a crash or quit mid-run resumes from the last completed stage.
+          Import captures, generate a plan, and start a run. Completed runs
+          land here with per-stage history.
         </p>
-        <p class="hint font-body">Run controls land in P4b.</p>
       </div>
-    {:else}
-      <ul class="run-list" aria-label="Pipeline runs">
-        {#each $workspaceState.runs as run (run.run_id)}
-          <li class="run-item" data-status={run.status}>
-            <div class="run-id font-label">Run {run.run_id.slice(0, 8)}</div>
-            <div class="run-meta font-body">
-              Recipe: {run.recipe_id ?? "(default)"} ·
-              Started: {formatTime(run.started_at)} ·
-              Completed: {formatTime(run.completed_at)}
-            </div>
-            <span class="status-pill" data-status={run.status}>
-              {run.status}
-            </span>
-          </li>
-        {/each}
-      </ul>
     {/if}
   {/if}
 </WorkspaceScreen>
@@ -381,5 +478,71 @@
   .status-pill[data-status="Queued"] {
     background: rgba(255, 179, 0, 0.2);
     color: #ffb300;
+  }
+  .session-history {
+    margin: 0 0 var(--space-5, 24px);
+  }
+
+  .session-history h2 {
+    margin: 0 0 var(--space-2, 8px);
+    font-size: 1rem;
+  }
+
+  .session-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .session-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    border: 1px solid var(--outline-variant, #cac4d0);
+    border-radius: 8px;
+    background: var(--surface-container-low, #f7f2fa);
+  }
+
+  .session-item[data-active="true"] {
+    border-color: var(--primary, #6750a4);
+  }
+
+  .session-meta {
+    font-size: 0.85rem;
+    color: var(--on-surface-variant, #49454f);
+  }
+
+  .active-badge {
+    color: var(--primary, #6750a4);
+    font-weight: 600;
+  }
+
+  .continue-btn {
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--primary, #6750a4);
+    background: transparent;
+    color: var(--primary, #6750a4);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+
+  .continue-btn:hover {
+    background: var(--primary-container, #eaddff);
+  }
+
+  .history-line,
+  .history-error {
+    margin: 0;
+    font-size: 0.85rem;
+  }
+
+  .history-error {
+    color: var(--error, #b3261e);
   }
 </style>

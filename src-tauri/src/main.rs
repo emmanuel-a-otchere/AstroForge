@@ -2266,6 +2266,8 @@ fn main() {
             commands_plate_solve::plate_solve_overlay,
             commands_import::import_begin,
             commands_import::import_register_assets,
+            commands_import::session_list_for_project,
+            commands_import::session_continue,
             commands_session_quality::session_quality_report,
             // CR-06 P5 — region-aware masks. The mask
             // engine is pure logic in

@@ -20,6 +20,8 @@
     exportProfile,
     importProfile,
     saveProfile,
+    getProfile,
+    getProfileHead,
     profileStore,
     type Recipe,
     type RecipeSummary,
@@ -524,27 +526,37 @@
     />
     <RecipeDetail
       summary={selectedSummary}
-      onApply={(_profileId, _version) => {
-        // CR-08 §15 Recipe Detail Apply action.
-        // The Apply round integration (recipe_apply
-        // IPC + Session picker) is a follow-on slice.
-        // For this slice the action is a stub that
-        // receives the (profileId, version) pair so
-        // the parent's wiring lands in a follow-on
-        // slice without re-plumbing the component.
+      onApply={(profileId, version) => {
+        // #465 W5.3 — honest no-op: recipe application (recipe_apply
+        // + Session picker) lands with the processing-track wiring.
+        // Previously this was a silent no-op on an enabled button.
+        importExportError = null;
+        importExportStatus =
+          `Recipe application is not wired yet (${profileId} v${version}) — it lands with the session-picker slice.`;
       }}
-      onDuplicate={(_profileId, _version) => {
-        // CR-08 §15 Recipe Detail Duplicate action.
-        // The Duplicate IPC wiring (recipe_save with
-        // a derived name) is a follow-on slice; the
-        // component's surface + event payload are in.
+      onDuplicate={(profileId, version) => {
+        void (async () => {
+          try {
+            const recipe = await getProfile(profileId, version);
+            const summary = await saveProfile({
+              ...recipe,
+              name: `${recipe.name} (copy)`,
+              version: 0,
+            });
+            reportStatus(`Duplicated to "${summary.name}".`);
+          } catch (err) {
+            reportError(err instanceof Error ? err.message : String(err));
+          }
+        })();
       }}
-      onEdit={(_profileId, _version) => {
-        // CR-08 §15 Recipe Detail Edit action.
-        // The Edit modal wiring (open §10 Recipe
-        // Editor pre-filled with the Recipe's
-        // current fields) is a follow-on slice; the
-        // component's surface + event payload are in.
+      onEdit={(profileId, _version) => {
+        // The Expert-tier editor is the ProfileManager; open it on
+        // the selected profile (previously a silent no-op).
+        void getProfileHead(profileId)
+          .then(() => (managerOpen = true))
+          .catch((e) =>
+            reportError(e instanceof Error ? e.message : String(e)),
+          );
       }}
     />
   {/if}

@@ -2253,6 +2253,29 @@ export const importRegisterAssets = (
 ): Promise<RegisteredAssets> =>
   invoke("import_register_assets", { sessionId, projectId, frames });
 
+
+export interface SessionHistoryEntry {
+  sessionId: string;
+  name: string;
+  sourceLocation: string | null;
+  processingStatus: string;
+  createdAt: string;
+  updatedAt: string;
+  isActive: boolean;
+}
+
+/** #465 W4 — the project's session history, newest first. */
+export const sessionListForProject = (
+  projectId: string,
+): Promise<SessionHistoryEntry[]> =>
+  invoke("session_list_for_project", { projectId });
+
+/** Continue a previous session: set it active on the project. */
+export const sessionContinue = (
+  projectId: string,
+  sessionId: string,
+): Promise<void> => invoke("session_continue", { projectId, sessionId });
+
 // ─── RT-13 (#431) — session quality dashboard ────────────────────────
 
 export interface FrameQuality {

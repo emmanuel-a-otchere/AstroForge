@@ -20,6 +20,7 @@
     type ApplicationNavTarget,
   } from "../state/application";
   import SaveIndicator from "./SaveIndicator.svelte";
+  import { studioViewport } from "../state/application";
 
   let {
     children,
@@ -41,6 +42,15 @@
   let navOpen = $state(true);
 
   function select(target: ApplicationNavTarget) {
+    // #465 W5 — while a project is open the Studio overlays the app
+    // screens; previously clicking app nav moved the highlight with
+    // no effect (looked broken). Route to Home (which closes the
+    // project via Esc semantics) instead of silently doing nothing —
+    // keep it honest: navigate only when no project is open, else
+    // visually flag via the disabled state.
+    if ($studioViewport.project !== null && target !== "home") {
+      return;
+    }
     applicationNavTarget.set(target);
   }
 
@@ -84,6 +94,10 @@
                 class="nav-item"
                 class:active={isActive}
                 aria-current={isActive ? "page" : undefined}
+                aria-disabled={$studioViewport.project !== null && item.id !== "home"}
+                title={$studioViewport.project !== null && item.id !== "home"
+                  ? "Close the project (Esc) to return to the application screens"
+                  : undefined}
                 onclick={() => select(item.id)}
               >
                 <span

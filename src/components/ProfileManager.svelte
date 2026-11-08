@@ -83,6 +83,18 @@
     saveError = null;
     try {
       const graph = $sessionStore.pipelineGraph;
+      // #465 W5.2 — guard the data-loss hazard: this modal renders on
+      // the application-level Recipes screen where there is no live
+      // session, so an empty graph previously saved a new HEAD
+      // version with ZERO stages, silently destroying the recipe's
+      // contents. Refuse with an honest message instead.
+      if (graph.nodes.length === 0) {
+        saveError =
+          "No live session pipeline to save. Open a project and process " +
+          "a session first — this action overwrites the recipe's stages.";
+        saving = false;
+        return;
+      }
       // Build a Recipe from the live session pipeline + the selected
       // profile's metadata. Each PipelineNode becomes a RecipeStage.
       // Note: Recipe uses TS-shape (stageId), saveProfile converts to

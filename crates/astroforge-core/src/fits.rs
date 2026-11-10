@@ -110,10 +110,21 @@ pub fn parse_header(data: &[u8]) -> Result<FitsHeader, FitsError> {
         }
 
         if record_str.len() >= 8 {
-            let key = record_str[..8].trim().to_string();
+            // FITS cards are byte-oriented (80 ASCII columns), but real
+            // files sometimes carry non-ASCII bytes that from_utf8_lossy
+            // turns into multi-byte replacement chars — breaking plain
+            // byte-index slicing mid-character. Char-boundary-safe
+            // slicing instead of `&s[..8]` (which panicked on real
+            // captures — #465 W5 follow-through).
+            let key: String = record_str
+                .chars()
+                .take(8)
+                .collect::<String>()
+                .trim()
+                .to_string();
             if !key.is_empty() {
                 let value = if record_str.len() > 10 {
-                    let val_part = &record_str[10..];
+                    let val_part: String = record_str.chars().skip(10).collect();
                     let val = val_part.trim_start_matches('=').trim();
                     val.trim_matches('\'').trim().to_string()
                 } else {

@@ -89,7 +89,14 @@
       }
       goToStep("scanning");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      // #465 W5 — CommandError DTOs reject as {message} objects;
+      // String() on them renders "[object Object]". Extract properly.
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === "object" && e !== null && "message" in e
+            ? String((e as { message: unknown }).message)
+            : JSON.stringify(e) ?? String(e);
       error = msg;
       setScanError(msg);
     } finally {

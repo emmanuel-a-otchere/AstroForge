@@ -3,7 +3,7 @@
 fn scan_sample_dataset_repro() {
     let mut dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     dir.push("../../tests/fixtures/sample-dataset");
-    let paths = astroforge_core::import_scan::scan_directory(dir).expect("scan_directory");
+    let paths = astroforge_core::import_scan::scan_directory(&dir).expect("scan_directory");
     let supported: Vec<_> = paths
         .into_iter()
         .filter(|p| astroforge_core::import_scan::is_supported(p))

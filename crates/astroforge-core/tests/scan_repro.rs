@@ -1,9 +1,8 @@
 // Quick headless repro of ingest_scan_directory's body
 #[test]
 fn scan_sample_dataset_repro() {
-    let dir = std::path::Path::new(
-        "/Volumes/512GBORICO/Developer/AstroForge/tests/fixtures/sample-dataset",
-    );
+    let mut dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    dir.push("../../tests/fixtures/sample-dataset");
     let paths = astroforge_core::import_scan::scan_directory(dir).expect("scan_directory");
     let supported: Vec<_> = paths
         .into_iter()

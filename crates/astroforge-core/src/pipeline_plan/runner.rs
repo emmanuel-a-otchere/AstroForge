@@ -287,6 +287,12 @@ impl PipelineRunner {
         // update to completed → checkpoint. The cancel / pause flags
         // are checked between stages so we never leave a half-written
         // artifact. Cancel beats pause.
+        //
+        // #465 W2 — `current_frames` threads the upstream image
+        // through the plan: each stage's output becomes the next
+        // stage's preloaded input (None before the first stage, which
+        // loads from the session's SourceAssets instead).
+        let mut current_frames: Option<Vec<crate::image::F32Image>> = None;
         for stage in &plan.stages {
             // Skip already-completed stages on resume.
             if skip_completed {
@@ -356,11 +362,25 @@ impl PipelineRunner {
             // Dispatch via the handler registry (P2.6); fall back to the
             // no-op dispatcher for stages that don't have a registered
             // handler.
-            let dispatch_result = dispatch_stage_via_registry(self, stage, &exec);
+            // #465 W2 — thread the previous stage's output forward as
+            // the next stage's preloaded frames (the designed
+            // preloaded_frames mechanism). The first stage (calibrate)
+            // gets None and loads from the session's SourceAssets.
+            let dispatch_result = dispatch_stage_via_registry(
+                self,
+                stage,
+                &exec,
+                &plan.session_id,
+                current_frames.clone(),
+            );
             match dispatch_result {
                 Ok(output) => {
                     exec.status = "completed".into();
                     exec.completed_at = Some(format!("unix_ms:{}", now_unix_ms()));
+                    // The stage output becomes the next stage's input.
+                    if let Some(image) = output.image.as_ref() {
+                        current_frames = Some(vec![image.clone()]);
+                    }
                     // CR-05 P5 slice 2 (D-CR05-8 + §22) — record the
                     // per-stage execution budget on the row. Best-effort:
                     // a serialisation failure is logged via error_json but
@@ -620,7 +640,8 @@ impl PipelineRunner {
         // Dispatch via the same handler-registry path the loop uses.
         // Failures propagate as RunnerError::StageFailed; success
         // populates the row and flips the plan status.
-        let dispatch_result = dispatch_stage_via_registry(self, &stage, &exec);
+        let dispatch_result =
+            dispatch_stage_via_registry(self, &stage, &exec, &plan.session_id, None);
         match dispatch_result {
             Ok(output) => {
                 exec.status = "completed".into();
@@ -857,22 +878,29 @@ fn persist_stage_version(
     stage_type: &str,
 ) {
     let outcome = (|| -> Result<String, String> {
-        // Encode to TIFF-16 (round-trips through the TIFF decoder).
-        let mut bytes: Vec<u8> = Vec::new();
+        // Encode to TIFF-16 (round-trips through the TIFF decoder) and
+        // write the pixels under the project's applied/ directory — the
+        // same convention the AI-apply path uses and the same directory
+        // `read_image_artifact` is path-confined to. The artifact row
+        // then records the real on-disk path.
+        let applied = crate::domain_store::DomainStore::applied_pixels_dir(project_id)
+            .ok_or_else(|| "home directory unavailable".to_string())?;
+        std::fs::create_dir_all(&applied).map_err(|e| format!("create applied dir: {e}"))?;
+        let tiff_path = applied.join(format!("{}.tif", exec.stage_execution_id));
         {
-            let mut cursor = std::io::Cursor::new(&mut bytes);
-            crate::export::export_tiff_16bit(image, &mut cursor)
-                .map_err(|e| format!("tiff encode: {e}"))?;
+            let mut f = std::fs::File::create(&tiff_path)
+                .map_err(|e| format!("create {}: {e}", tiff_path.display()))?;
+            crate::export::export_tiff_16bit(image, &mut f)
+                .map_err(|e| format!("tiff write: {e}"))?;
         }
+        let bytes = std::fs::read(&tiff_path).map_err(|e| format!("read back: {e}"))?;
         let hash = crate::artifact::ContentStore::sha256_hex(&bytes);
         let artifact = crate::domain::Artifact {
             artifact_id: String::new(),
             artifact_hash: hash,
             artifact_type: crate::domain::ArtifactCategory::Derived,
             format: "TIFF".to_string(),
-            // The bytes live in the artifact store row (hash-pinned
-            // content); original_path records the container choice.
-            path: String::new(),
+            path: tiff_path.to_string_lossy().to_string(),
             size: bytes.len() as u64,
             created_at: crate::comparison::now_iso8601(),
             producer_stage: Some(exec.stage_id.clone()),
@@ -945,6 +973,8 @@ fn dispatch_stage_via_registry(
     runner: &PipelineRunner,
     stage: &crate::domain::PipelineStage,
     exec: &StageExecution,
+    session_id: &str,
+    preloaded: Option<Vec<crate::image::F32Image>>,
 ) -> Result<StageOutput, String> {
     if stage.stage_type.is_empty() {
         return Err(format!("stage {} has empty stage_type", stage.stage_id));
@@ -976,10 +1006,10 @@ fn dispatch_stage_via_registry(
 
     let ctx = StageContext {
         stage: stage.clone(),
-        session_id: plan_session_id(exec),
+        session_id: session_id.to_string(),
         run_id: exec.plan_id.clone(),
         domain_store,
-        preloaded_frames: None,
+        preloaded_frames: preloaded,
         // CR-05 P5 slice 2 (D-CR05-8) — the runner's derived per-stage
         // budget is exposed to handlers so tiling / streaming can be
         // aligned with what §22 promises. Handlers may ignore it.
@@ -990,16 +1020,6 @@ fn dispatch_stage_via_registry(
         Ok(output) => Ok(output),
         Err(e) => Err(e.to_string()),
     }
-}
-
-/// CR-05 P2.6 — look up the session_id from the plan that owns this
-/// stage execution. For slice 1 the Stack handler does not actually
-/// need session_id (the disk loader is a stub that returns empty);
-/// future slices will plumb the real value. We return the plan_id
-/// prefixed with "session_of:" so handlers can detect a missing
-/// wiring without panicking.
-fn plan_session_id(exec: &StageExecution) -> String {
-    format!("session_of:{}", exec.plan_id)
 }
 
 fn now_unix_ms() -> u64 {

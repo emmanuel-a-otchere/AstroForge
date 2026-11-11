@@ -1417,10 +1417,52 @@ mod p28_tests {
 /// Returns an empty Vec when the disk loader is unavailable; the
 /// handler then returns `NoSourceFrames` so the stage is marked
 /// `failed` consistently with P2.6.
-fn load_source_assets(_ctx: &StageContext) -> Result<Vec<SourceAssetPreview>, StageHandlerError> {
-    // Slice 1 — same scope-bound stub as Stack. The full list +
-    // decode pipeline lands when image_io.rs ships in P3.
-    Ok(Vec::new())
+/// #465 W3/W2 — real asset loading for the calibrate stage: list
+/// the session's SourceAssets and decode each via the decoders
+/// (FITS / TIFF / PNG / JPEG — all four W3 decoders). Undecodable
+/// files are skipped with a warning (mirrors
+/// `load_frames_for_session`) rather than failing the stage.
+fn load_source_assets(ctx: &StageContext) -> Result<Vec<SourceAssetPreview>, StageHandlerError> {
+    let assets = ctx
+        .domain_store
+        .list_source_assets(&ctx.session_id)
+        .map_err(|e| {
+            StageHandlerError::NoSourceFrames(format!(
+                "list_source_assets for '{}': {e}",
+                ctx.session_id
+            ))
+        })?;
+
+    let mut out = Vec::with_capacity(assets.len());
+    for asset in assets {
+        let bytes = match std::fs::read(&asset.original_path) {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!("load_source_assets: skip {}: {e}", asset.original_path);
+                continue;
+            }
+        };
+        let ext = std::path::Path::new(&asset.original_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let decoded = match ext.as_str() {
+            "fits" | "fit" | "fts" => F32Image::from_fits_bytes(&bytes),
+            "tif" | "tiff" => F32Image::from_tiff_bytes(&bytes),
+            "png" => F32Image::from_png_bytes(&bytes),
+            "jpg" | "jpeg" => F32Image::from_jpeg_bytes(&bytes),
+            _ => continue,
+        }
+        .map_err(|e| {
+            StageHandlerError::CalibrationFailed(format!("decode {}: {e}", asset.original_path))
+        })?;
+        out.push(SourceAssetPreview {
+            frame_type: asset.frame_type.clone(),
+            preview: decoded,
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -1540,9 +1582,15 @@ fn load_frames_from_assets(ctx: &StageContext) -> Result<Vec<F32Image>, StageHan
 /// surface a real error rather than synthesizing substitute data.
 pub fn load_frames_for_session(domain_store: &DomainStore, session_id: &str) -> Vec<F32Image> {
     let assets = match domain_store.list_source_assets(session_id) {
-        Ok(a) => a,
+        Ok(a) => {
+            eprintln!(
+                "DEBUG load_frames: session {session_id} -> {} assets",
+                a.len()
+            );
+            a
+        }
         Err(e) => {
-            log::warn!("load_frames_for_session: list_source_assets failed: {e}");
+            eprintln!("DEBUG load_frames: list failed: {e}");
             return Vec::new();
         }
     };

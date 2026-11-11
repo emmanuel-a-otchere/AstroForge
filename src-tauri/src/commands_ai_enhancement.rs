@@ -1070,11 +1070,7 @@ fn load_or_stub_pixels(
 }
 
 pub(crate) fn applied_pixels_dir(project_id: &str) -> Option<std::path::PathBuf> {
-    let mut p = dirs_home()?;
-    p.push(".astroforge");
-    p.push("applied");
-    p.push(project_id);
-    Some(p)
+    astroforge_core::domain_store::DomainStore::applied_pixels_dir(project_id)
 }
 
 #[allow(dead_code)]

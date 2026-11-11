@@ -1131,6 +1131,23 @@ impl DomainStore {
         Ok(())
     }
 
+    /// #465 W2 — the canonical directory for persisted version
+    /// pixels: `<home>/.astroforge/applied/<project_id>/`. The AI
+    /// apply path (tauri) and the pipeline runner both write stage
+    /// outputs here; `read_image_artifact` is path-confined to this
+    /// directory, so versions produced anywhere MUST land here to be
+    /// readable by the canvas.
+    pub fn applied_pixels_dir(project_id: &str) -> Option<std::path::PathBuf> {
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))?;
+        let mut p = home;
+        p.push(".astroforge");
+        p.push("applied");
+        p.push(project_id);
+        Some(p)
+    }
+
     /// #465 W1.7 — set the active session only when the session row
     /// exists AND belongs to the given project, bumping updated_at.
     /// Previously wrote garbage ids silently (FK enforcement is off).

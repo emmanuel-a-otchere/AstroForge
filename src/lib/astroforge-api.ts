@@ -2220,10 +2220,15 @@ export const aiModelDownload = (name: string): Promise<string> =>
 
 // ─── #461 S2 — import materialization chain ─────────────────────────
 
-export const sessionCreate = (
-  projectId: string,
-  sourceDir: string | null,
-): Promise<string> => invoke("session_create", { projectId, sourceDir, verbosity: "auto" });
+// #465 W1.1 (RE-RE-land: the W1 commit described this switch but the
+// astroforge-api.ts change was lost in the stash-conflict resolution —
+// found live by the maintainer's walkthrough) — sessions MUST be
+// created in the DomainStore (import_begin), the same database the
+// pipeline reads SourceAssets from. The pre-existing session_create
+// writes to the separate SessionStore, whose rows cannot satisfy the
+// source_assets foreign key.
+export const sessionCreate = (projectId: string, sourceDir: string): Promise<string> =>
+  invoke("import_begin", { projectId, sourceDir });
 
 export interface ImportFrameInput {
   path: string;

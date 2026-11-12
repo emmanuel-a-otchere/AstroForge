@@ -247,6 +247,14 @@ export async function startPipelineRun(
     lastRunOutcome.set(outcome);
     // Refresh per-stage state so the UI reflects the persisted rows.
     await refreshStageExecutions(planId);
+    // #465 W6 — the run flipped the plan's durable status (e.g.
+    // Ready → Completed); re-fetch so the run-controls header tracks
+    // the store instead of the pre-run snapshot.
+    try {
+      activePlan.set(await pipelinePlanGet(planId));
+    } catch {
+      /* the pre-run plan snapshot is still renderable */
+    }
     // #465 W2 — the runner now persists Versions (VersionCreated
     // events + artifacts) at each producing stage. Refresh the
     // version store + overview so Enhance / Compare / Export and the
@@ -318,6 +326,13 @@ export async function resumePipelineRun(
     const outcome = await resumePipelinePlan(planId);
     lastRunOutcome.set(outcome);
     await refreshStageExecutions(planId);
+    // #465 W6 — mirror startPipelineRun: the resumed run flips the
+    // plan's durable status; re-fetch so the header stays truthful.
+    try {
+      activePlan.set(await pipelinePlanGet(planId));
+    } catch {
+      /* the pre-run plan snapshot is still renderable */
+    }
     return outcome;
   } catch (err) {
     lastError.set(toMessage(err));

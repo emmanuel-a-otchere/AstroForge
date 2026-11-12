@@ -390,16 +390,31 @@ pub struct SourceAssetPreview {
 ///   ceiling per the GLSL MTF shader).
 /// - `midtones` (default 0.5) — Lupton midtone transfer parameter.
 ///
-/// Like P2.6 / P2.7, the handler relies on `preloaded_frames` for
-/// slice 1 input. Production paths that load from disk land in P3
-/// alongside `image_io.rs`.
+/// Like P2.6 / P2.7, the handler takes `preloaded_frames` when the
+/// runner threads an upstream image; when there is none (workflow A:
+/// already-stacked master with the stacking stages disabled) it
+/// loads the session's SourceAssets from disk instead.
 pub struct StretchHandler;
 
 impl StageHandler for StretchHandler {
     fn handle(&self, ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
         let params = parse_stretch_params(ctx.stage.parameters_json.as_deref());
 
-        let frames = ctx.preloaded_frames.clone().unwrap_or_default();
+        // #465 W6 — workflow A (already-stacked master): the stacking
+        // stages are disabled and quality_filter/color have no handlers
+        // yet (no-ops), so no frames arrive via preloading. Fall back
+        // to the session's SourceAssets — the imported master IS the
+        // working image. Same shape as the Stack handler's fallback.
+        // #465 W6 — workflow A (already-stacked master): the stacking
+        // stages are disabled and quality_filter/color have no handlers
+        // yet (no-ops), so no frames arrive via preloading. Fall back
+        // to the session's SourceAssets — the imported master IS the
+        // working image. Same shape as the Stack handler's fallback.
+        let frames = if let Some(preloaded) = &ctx.preloaded_frames {
+            preloaded.clone()
+        } else {
+            load_frames_from_assets(ctx)?
+        };
         if frames.is_empty() {
             return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
         }
@@ -450,7 +465,12 @@ impl StageHandler for DenoiseHandler {
     fn handle(&self, ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
         let params = parse_denoise_params(ctx.stage.parameters_json.as_deref());
 
-        let frames = ctx.preloaded_frames.clone().unwrap_or_default();
+        // #465 W6 — same workflow-A fallback as the Stretch handler.
+        let frames = if let Some(preloaded) = &ctx.preloaded_frames {
+            preloaded.clone()
+        } else {
+            load_frames_from_assets(ctx)?
+        };
         if frames.is_empty() {
             return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
         }
@@ -780,7 +800,12 @@ impl StageHandler for BackgroundHandler {
     fn handle(&self, ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
         let params = parse_background_params(ctx.stage.parameters_json.as_deref());
 
-        let frames = ctx.preloaded_frames.clone().unwrap_or_default();
+        // #465 W6 — same workflow-A fallback as the Stretch handler.
+        let frames = if let Some(preloaded) = &ctx.preloaded_frames {
+            preloaded.clone()
+        } else {
+            load_frames_from_assets(ctx)?
+        };
         if frames.is_empty() {
             return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
         }
@@ -1598,15 +1623,9 @@ fn load_frames_from_assets(ctx: &StageContext) -> Result<Vec<F32Image>, StageHan
 /// surface a real error rather than synthesizing substitute data.
 pub fn load_frames_for_session(domain_store: &DomainStore, session_id: &str) -> Vec<F32Image> {
     let assets = match domain_store.list_source_assets(session_id) {
-        Ok(a) => {
-            eprintln!(
-                "DEBUG load_frames: session {session_id} -> {} assets",
-                a.len()
-            );
-            a
-        }
+        Ok(a) => a,
         Err(e) => {
-            eprintln!("DEBUG load_frames: list failed: {e}");
+            log::warn!("load_frames_for_session: list failed for {session_id}: {e}");
             return Vec::new();
         }
     };

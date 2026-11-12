@@ -48,7 +48,14 @@
       await runAnalysis(state.projectId, state.sessionId, null);
       goToStep("understanding");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      // #465 W5 — CommandError DTOs reject as {message} objects;
+      // extract properly (String() renders "[object Object]").
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === "object" && e !== null && "message" in e
+            ? String((e as { message: unknown }).message)
+            : JSON.stringify(e) ?? String(e);
       error = msg;
       setScanError(msg);
     } finally {

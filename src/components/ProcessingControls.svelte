@@ -35,6 +35,7 @@
     retryStage,
     skipStage,
     stageExecutionBudget,
+    pipelinePlanGet,
     type ExecutionBackend,
     type ExecutionBudget,
     type Precision,
@@ -75,11 +76,27 @@
   // timeline-row click handler are placeholders for follow-up
   // tranches (P6.1c, P6.3); the notice makes the gap visible
   // rather than hiding it behind silent no-ops.
-  type NoticeKind = "adjustProcessing" | "contactSupport" | "timelineSelect";
+  type NoticeKind =
+    | "adjustProcessing"
+    | "contactSupport"
+    | "timelineSelect"
+    | "retry"
+    | "skipStage";
   let notice: { kind: NoticeKind; message: string } | null = null;
 
   function showNotice(kind: NoticeKind, message: string) {
     notice = { kind, message };
+  }
+
+  // #465 W5-follow-through — CommandError DTOs reject as {message}
+  // objects; String() renders "[object Object]" (same extraction the
+  // import wizard's Step 2 uses).
+  function errText(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (typeof err === "object" && err !== null && "message" in err) {
+      return String((err as { message: unknown }).message);
+    }
+    return JSON.stringify(err) ?? String(err);
   }
 
   function dismissNotice() {
@@ -136,9 +153,32 @@
   // wiring yet — they'll land in P6.1c with the recommendation
   // engine's tuning affordances).
 
-  /** Stage id of the currently-failed stage (from metrics). Used
-   *  as the target for retry_stage / skip_stage. */
-  $: failedStageId = processingMetrics?.latest_stage_id ?? null;
+  /** Stage id of the currently-failed stage. Used as the target for
+   *  retry_stage / skip_stage. #465 W6 — latest_stage_id points at
+   *  the most-recently-COMPLETED row, so when a stage fails after a
+   *  completion (workflow A: stretch failed after color) Retry
+   *  silently targeted the wrong stage and the runner rejected it
+   *  with the error visible only in the console. Target the failed
+   *  timeline row instead; fall back to latest_stage_id when the
+   *  timeline has no failed row. */
+  $: failedStageId =
+    executions
+      .filter((e) => e.status === "failed")
+      .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))
+      .map((e) => e.stage_id)[0] ??
+    processingMetrics?.latest_stage_id ??
+    null;
+
+  // #465 W6 — retry/skip flip the plan's durable status (Failed →
+  // Ready), but the header reads the cached activePlan; re-fetch it
+  // so the status text tracks the store instead of going stale.
+  async function refreshActivePlan(): Promise<void> {
+    try {
+      activePlan.set(await pipelinePlanGet(planId));
+    } catch {
+      /* best-effort; the stale plan is still renderable */
+    }
+  }
 
   async function handleRetryOptimized() {
     if (!failedStageId) return;
@@ -146,9 +186,16 @@
       await retryStage(planId, failedStageId, "optimized");
       // Refresh so the recovery panel disappears (on success)
       // or stays with the new error (on retry-failure).
-      await Promise.all([loadProcessingMetrics(), loadProcessingTimeline()]);
+      await Promise.all([
+        loadProcessingMetrics(),
+        loadProcessingTimeline(),
+        refreshActivePlan(),
+      ]);
     } catch (err) {
       console.warn("[ProcessingControls] retryStage failed", err);
+      // #465 W6 — surface the rejection; console-only left Retry
+      // looking like a silent no-op when the target was wrong.
+      showNotice("retry", `Retry failed: ${errText(err)}`);
     }
   }
 
@@ -156,9 +203,14 @@
     if (!failedStageId) return;
     try {
       await retryStage(planId, failedStageId, "as_is");
-      await Promise.all([loadProcessingMetrics(), loadProcessingTimeline()]);
+      await Promise.all([
+        loadProcessingMetrics(),
+        loadProcessingTimeline(),
+        refreshActivePlan(),
+      ]);
     } catch (err) {
       console.warn("[ProcessingControls] retryStage (as_is) failed", err);
+      showNotice("retry", `Retry failed: ${errText(err)}`);
     }
   }
 
@@ -166,9 +218,14 @@
     if (!failedStageId) return;
     try {
       await skipStage(planId, failedStageId);
-      await Promise.all([loadProcessingMetrics(), loadProcessingTimeline()]);
+      await Promise.all([
+        loadProcessingMetrics(),
+        loadProcessingTimeline(),
+        refreshActivePlan(),
+      ]);
     } catch (err) {
       console.warn("[ProcessingControls] skipStage failed", err);
+      showNotice("skipStage", `Skip failed: ${errText(err)}`);
     }
   }
 

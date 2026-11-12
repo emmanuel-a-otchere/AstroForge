@@ -647,7 +647,11 @@ impl PipelineRunner {
 
         // Dispatch via the same handler-registry path the loop uses.
         // Failures propagate as RunnerError::StageFailed; success
-        // populates the row and flips the plan status.
+        // populates the row and flips the plan status. Retry passes
+        // no preloaded frames: self-loading handlers (calibrate /
+        // stack / stretch / denoise / background) re-read the
+        // session's SourceAssets, which is exact for workflow A and
+        // the working input for a first-producing-stage retry.
         let dispatch_result =
             dispatch_stage_via_registry(self, &stage, &exec, &plan.session_id, None);
         match dispatch_result {

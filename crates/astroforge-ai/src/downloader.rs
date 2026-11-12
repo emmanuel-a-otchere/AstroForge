@@ -46,6 +46,14 @@ pub struct ModelDownloadSpec {
     pub output_name: &'static str,
     /// Fixed spatial tile the graph accepts (0 = dynamic).
     pub tile_size: u32,
+    /// Output spatial multiplier relative to the (padded) input.
+    /// 1 for same-size graphs (denoise-class: the adapter crops the
+    /// output back to the input dims); >1 for super-resolution
+    /// graphs (the adapter returns the full upscaled output — see
+    /// `OnnxEngine::run_nchw_tile`). Must be paired with
+    /// `tile_size == 0`: a tiled SR stitch needs 4x-output blending,
+    /// which the tiler does not do (#458 keeps SR whole-image).
+    pub output_scale: u32,
 }
 
 /// The downloadable catalog. Sourced and licensed:
@@ -68,6 +76,7 @@ pub const DOWNLOAD_SPECS: &[ModelDownloadSpec] = &[
         input_name: "image",
         output_name: "denoised",
         tile_size: 128,
+        output_scale: 1,
     },
     ModelDownloadSpec {
         id: "swin2sr-realworld-x4",
@@ -78,6 +87,7 @@ pub const DOWNLOAD_SPECS: &[ModelDownloadSpec] = &[
         input_name: "pixel_values",
         output_name: "restoration",
         tile_size: 0,
+        output_scale: 4,
     },
 ];
 
@@ -248,6 +258,7 @@ mod tests {
             input_name: "image",
             output_name: "denoised",
             tile_size: 128,
+            output_scale: 1,
         }
     }
 
@@ -328,6 +339,15 @@ mod tests {
                 spec.id
             );
             assert_eq!(entry.sha256, spec.sha256, "{} digest drift", spec.id);
+            // #458 — SR-class specs must be dynamic-dim: the tiler
+            // cannot stitch scaled outputs, so a fixed-tile SR spec
+            // would corrupt every multi-tile dispatch.
+            assert!(
+                spec.output_scale == 1 || spec.tile_size == 0,
+                "{}: output_scale {} requires tile_size 0",
+                spec.id,
+                spec.output_scale
+            );
             assert_eq!(
                 entry.license,
                 Some(spec.license),

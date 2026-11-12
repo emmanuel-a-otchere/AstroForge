@@ -414,11 +414,21 @@ fn pad_tile_to_nchw_edge(tile: &F32Image, size: u32) -> F32Image {
     if target == 0 || (tile.width() >= target && tile.height() >= target) {
         return tile.clone();
     }
+    pad_to_dims(tile, target, target)
+}
+
+/// Edge-replicate `tile` to exactly `target_w × target_h` (growing
+/// each edge's last pixel out to the boundary). Shared by the
+/// fixed-edge tile path and the SR whole-image /8 alignment pad.
+fn pad_to_dims(tile: &F32Image, target_w: usize, target_h: usize) -> F32Image {
     let (w, h, c) = (tile.width(), tile.height(), tile.channels());
-    let mut out = F32Image::new(target, target, c);
+    if w >= target_w && h >= target_h {
+        return tile.clone();
+    }
+    let mut out = F32Image::new(target_w, target_h, c);
     for ch in 0..c {
-        for y in 0..target {
-            for x in 0..target {
+        for y in 0..target_h {
+            for x in 0..target_w {
                 let sx = x.min(w - 1);
                 let sy = y.min(h - 1);
                 out[(ch, y, x)] = tile[(ch, sy, sx)];
@@ -429,16 +439,25 @@ fn pad_tile_to_nchw_edge(tile: &F32Image, size: u32) -> F32Image {
 }
 
 impl OnnxEngine {
-    /// Run a (≤ tile-size) image through a catalog NCHW graph:
-    /// pad to the fixed edge, run, crop the output back to the
-    /// input dims. The output shape must preserve spatial dims
-    /// (denoise-class graphs; SR adapters handle their own scale).
+    /// Run a (≤ tile-size) image through a catalog NCHW graph.
+    ///
+    /// Denoise-class graphs (`output_scale == 1`): pad to the fixed
+    /// edge, run, crop the output back to the input dims — the
+    /// output shape must preserve spatial dims.
+    ///
+    /// Super-resolution graphs (`output_scale > 1`, #458): the whole
+    /// image runs in one shot (these graphs are dynamic-dim; the
+    /// tiler cannot stitch scaled outputs), padded up to the window
+    /// alignment the Swin2SR export requires (multiples of 8), and
+    /// the FULL scaled output returns (cropped to `scale ×` the
+    /// original dims only, so the alignment margin comes back off).
     fn run_nchw_tile(&mut self, tile: &F32Image) -> Result<F32Image, InferenceError> {
         use ort::value::Tensor;
         let EngineMode::Nchw {
             input_name,
             output_name: _,
             tile_size,
+            output_scale,
         } = self.mode
         else {
             return Err(InferenceError::BadOutputShape(
@@ -446,7 +465,20 @@ impl OnnxEngine {
             ));
         };
         let (w, h, c) = (tile.width(), tile.height(), tile.channels());
-        let padded = pad_tile_to_nchw_edge(tile, tile_size);
+        // SR graphs are whole-image by contract (tile_size pinned 0;
+        // asserted by download_specs_match_catalog_pins). The /8
+        // alignment pad satisfies the window-attention export; for
+        // already-aligned inputs this is the identity.
+        let (pad_w, pad_h) = if output_scale > 1 {
+            (w.div_ceil(8) * 8, h.div_ceil(8) * 8)
+        } else {
+            (w, h)
+        };
+        let padded = if output_scale > 1 {
+            pad_to_dims(tile, pad_w, pad_h)
+        } else {
+            pad_tile_to_nchw_edge(tile, tile_size)
+        };
         let (shape, data) = f32_image_to_nchw(&padded)?;
         let tensor = Tensor::from_array((shape, data.into_boxed_slice()))
             .map_err(|e| InferenceError::Ort(e.to_string()))?;
@@ -461,6 +493,36 @@ impl OnnxEngine {
             &out_shape.iter().map(|&d| d as usize).collect::<Vec<_>>(),
             out_data,
         )?;
+        if output_scale > 1 {
+            // The scaled contract: output must be exactly
+            // `output_scale ×` the padded input. Anything else is a
+            // graph we don't understand — fail loud, never guess.
+            let expect_w = pad_w * output_scale as usize;
+            let expect_h = pad_h * output_scale as usize;
+            if full.width() != expect_w || full.height() != expect_h {
+                return Err(InferenceError::BadOutputShape(format!(
+                    "SR graph produced {}x{}, expected {}x{} (scale {} of {pad_w}x{pad_h})",
+                    full.width(),
+                    full.height(),
+                    expect_w,
+                    expect_h,
+                    output_scale
+                )));
+            }
+            // Crop the alignment margin back off: keep the top-left
+            // `scale × (w, h)` region — the pad replicated edges, so
+            // the region is fully determined by real pixels.
+            let (ow, oh) = (w * output_scale as usize, h * output_scale as usize);
+            let mut cropped = F32Image::new(ow, oh, c);
+            for ch in 0..c {
+                for y in 0..oh {
+                    for x in 0..ow {
+                        cropped[(ch, y, x)] = full[(ch, y, x)];
+                    }
+                }
+            }
+            return Ok(cropped);
+        }
         if full.width() < w || full.height() < h {
             return Err(InferenceError::BadOutputShape(format!(
                 "graph output {}x{} smaller than input tile {w}x{h}",
@@ -590,6 +652,10 @@ pub enum EngineMode {
         output_name: &'static str,
         /// Fixed spatial tile the graph accepts (0 = dynamic).
         tile_size: u32,
+        /// Output spatial multiplier (1 = same-size denoise-class;
+        /// >1 = SR-class, runs whole-image and returns the scaled
+        /// output — see `run_nchw_tile`).
+        output_scale: u32,
     },
 }
 
@@ -604,12 +670,28 @@ impl EngineMode {
                 input_name: spec.input_name,
                 output_name: spec.output_name,
                 tile_size: spec.tile_size,
+                output_scale: spec.output_scale,
             },
             None => EngineMode::PlaneWise(
                 crate::inference::catalog_model(id)
                     .map(|e| e.kind)
                     .unwrap_or(BuiltinInputKind::ImageOnly),
             ),
+        }
+    }
+
+    /// The fixed spatial tile this mode requires, if any. SR-class
+    /// NCHW modes (`output_scale > 1`) never report a tile — the
+    /// tiler cannot stitch scaled outputs, so they run whole-image
+    /// (#458). Pure; unit-testable without a session.
+    pub fn required_tile_size(&self) -> Option<u32> {
+        match self {
+            EngineMode::Nchw {
+                tile_size,
+                output_scale,
+                ..
+            } if *tile_size > 0 && *output_scale == 1 => Some(*tile_size),
+            _ => None,
         }
     }
 }
@@ -762,12 +844,11 @@ impl OnnxEngine {
     /// The fixed spatial tile this engine requires, when the graph
     /// has hard-coded spatial dims (catalog NCHW graphs). The
     /// dispatcher must tile at exactly this size; `None` lets the
-    /// caller pick (builtin graphs are dynamic).
+    /// caller pick (builtin graphs are dynamic). SR graphs
+    /// (`output_scale > 1`) never report a tile: the tiler cannot
+    /// stitch scaled outputs, so they always run whole-image.
     pub fn required_tile_size(&self) -> Option<u32> {
-        match self.mode {
-            EngineMode::Nchw { tile_size, .. } if tile_size > 0 => Some(tile_size),
-            _ => None,
-        }
+        self.mode.required_tile_size()
     }
 
     /// Run the graph over every channel of `image` and restack the
@@ -1367,10 +1448,12 @@ mod tests {
                 input_name,
                 output_name,
                 tile_size,
+                output_scale,
             } => {
                 assert_eq!(input_name, "image");
                 assert_eq!(output_name, "denoised");
                 assert_eq!(tile_size, 128);
+                assert_eq!(output_scale, 1);
             }
             other => panic!("expected Nchw, got {other:?}"),
         }
@@ -1403,6 +1486,37 @@ mod tests {
             engine.mode(),
             EngineMode::PlaneWise(BuiltinInputKind::Threshold)
         );
+    }
+
+    /// #458 — the SR catalog graph routes as a dynamic-dim NCHW mode
+    /// with the 4x contract, and never reports a tile (even against a
+    /// hostile fixed-tile spec): the tiler cannot stitch scaled
+    /// outputs, so the SR path is whole-image by contract.
+    #[test]
+    fn sr_mode_is_dynamic_and_never_tiles() {
+        match EngineMode::for_catalog("swin2sr-realworld-x4") {
+            EngineMode::Nchw {
+                input_name,
+                output_name,
+                tile_size,
+                output_scale,
+            } => {
+                assert_eq!(input_name, "pixel_values");
+                assert_eq!(output_name, "restoration");
+                assert_eq!(tile_size, 0, "SR graph is dynamic-dim");
+                assert_eq!(output_scale, 4);
+            }
+            other => panic!("expected Nchw, got {other:?}"),
+        }
+        // Hostile future spec: a fixed tile on an SR graph must not
+        // re-introduce tiling — required_tile_size stays None.
+        let hostile = EngineMode::Nchw {
+            input_name: "pixel_values",
+            output_name: "restoration",
+            tile_size: 128,
+            output_scale: 4,
+        };
+        assert_eq!(hostile.required_tile_size(), None);
     }
 
     #[test]

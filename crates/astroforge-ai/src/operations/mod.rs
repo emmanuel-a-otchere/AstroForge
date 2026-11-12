@@ -643,15 +643,15 @@ fn resolve_engine(
     models_dir: Option<&std::path::Path>,
     probe: &crate::hardware::HardwareProbe,
 ) -> Result<OnnxEngine, OperationError> {
-    // Catalog preference rule (RT-7 slice 2): fixed-tile NCHW graphs
-    // (spatial_scale == 1) run through the tiled dispatcher path.
-    // Spatial-scale ops (super_resolution) keep the builtin graph
-    // until the SR catalog adapter lands — the x4 NCHW graph needs
-    // its own output-scale handling in the tiler.
-    let catalog_eligible = binding.spatial_scale == 1;
+    // Catalog preference rule (RT-7 slice 2; #458 extends it to
+    // super-resolution): a downloaded catalog artifact supersedes
+    // the builtin for EVERY pinned binding. Denoise-class graphs run
+    // the tiled dispatcher path; SR-class graphs (dynamic dims,
+    // `output_scale > 1`) run whole-image through the SR adapter —
+    // the binding's `spatial_scale` no longer gates eligibility.
     if let (Some(dir), Some(name)) = (models_dir, binding.catalog_model_name) {
         let path = dir.join(format!("{name}.onnx"));
-        if catalog_eligible && path.exists() {
+        if path.exists() {
             let bytes = std::fs::read(&path)
                 .map_err(|e| OperationError::Io(format!("read {}: {e}", path.display())))?;
             // DP#4: open_catalog verifies the digest against the
@@ -673,15 +673,11 @@ fn engine_model_identity(
     binding: &OperationModelBinding,
     models_dir: Option<&std::path::Path>,
 ) -> (String, String, String) {
-    // Catalog preference rule (RT-7 slice 2): fixed-tile NCHW graphs
-    // (spatial_scale == 1) run through the tiled dispatcher path.
-    // Spatial-scale ops (super_resolution) keep the builtin graph
-    // until the SR catalog adapter lands — the x4 NCHW graph needs
-    // its own output-scale handling in the tiler.
-    let catalog_eligible = binding.spatial_scale == 1;
+    // Catalog preference rule (RT-7 slice 2; #458 extends it to
+    // super-resolution — see `resolve_engine`).
     if let (Some(dir), Some(name)) = (models_dir, binding.catalog_model_name) {
         let path = dir.join(format!("{name}.onnx"));
-        if catalog_eligible && path.exists() {
+        if path.exists() {
             if let Ok(bytes) = std::fs::read(&path) {
                 let hash = astroforge_core::artifact::ContentStore::sha256_hex(&bytes);
                 let version = crate::hub::get_model(name)

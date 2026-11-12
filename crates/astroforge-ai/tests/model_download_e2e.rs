@@ -100,21 +100,170 @@ fn swin2sr_superres_downloads_pins_and_loads() {
             assert!(path.is_file());
             let bytes = std::fs::read(&path).expect("read installed model");
             // Session load proves ort accepts the int8-quantized graph
-            // and the pin matches; the SR tensor contract is asserted
-            // in the adapter slice (transformers.js export has dynamic
-            // spatial dims — pinned there once, not guessed here).
+            // and the pin matches.
             astroforge_ai::inference::OnnxEngine::open_verified(
                 &bytes,
                 spec.sha256,
                 astroforge_ai::inference::BuiltinInputKind::ImageOnly,
             )
             .expect("verified session opens");
+
+            // #458 — the SR tensor contract, pinned against the real
+            // graph (previously guessed from the export family): input
+            // `pixel_values` [1,3,H,W] f32 RGB [0,1] → output
+            // `restoration` [1,3,4H,4W]. 64 is /8-aligned for the
+            // window-attention export. The run itself is the check: a
+            // renamed input or unexpected shape fails here.
+            let mut session = ort::session::Session::builder()
+                .and_then(|mut b| b.commit_from_memory(&bytes))
+                .expect("raw session");
+            let input = ort::value::Tensor::from_array((
+                vec![1usize, 3, 64, 64],
+                vec![0.5_f32; 3 * 64 * 64].into_boxed_slice(),
+            ))
+            .expect("input tensor");
+            let outputs = session
+                .run(ort::inputs![spec.input_name => input])
+                .expect("inference runs");
+            let (shape, data) = outputs[0]
+                .try_extract_tensor::<f32>()
+                .expect("output tensor");
+            let dims: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+            assert_eq!(
+                dims,
+                vec![1, 3, 256, 256],
+                "SR graph must upscale 4x spatially"
+            );
+            assert!(data.iter().all(|v| v.is_finite()), "output must be finite");
         }
         Err(DownloadError::ChecksumMismatch { .. }) => {
             panic!("upstream artifact changed; re-pin the digest after review");
         }
         Err(e) => panic!("unexpected download failure: {e}"),
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #458 acceptance: the downloaded Swin2SR x4 model serves a real
+/// `super_resolution` dispatch end-to-end — the guard removal in
+/// `resolve_engine` lets the catalog artifact supersede the builtin,
+/// the SR adapter runs whole-image with the /8 alignment pad, and the
+/// provenance row names the catalog model with 4x output dims.
+#[test]
+fn superres_dispatch_routes_through_downloaded_swin2sr() {
+    if !enabled() {
+        eprintln!("skipping: set ASTROFORGE_MODEL_E2E=1 to run the network e2e");
+        return;
+    }
+    let spec = DOWNLOAD_SPECS
+        .iter()
+        .find(|s| s.id == "swin2sr-realworld-x4")
+        .expect("superres spec");
+    let dir = tmp_dir();
+    install_model(&dir, spec, &HttpByteSource).expect("download + verify + install");
+
+    // 256x256 RGB scene (the sample-dataset frame shape; /8-aligned,
+    // so the alignment pad is the identity).
+    let mut src = astroforge_core::image::F32Image::new(256, 256, 3);
+    for c in 0..3 {
+        for y in 0..256 {
+            for x in 0..256 {
+                src[(c, y, x)] = 0.4 + 0.15 * ((x * 5 + y * 11) % 13) as f32 / 65.0;
+            }
+        }
+    }
+    let inputs = astroforge_ai::operations::DispatchInputs {
+        source: &src,
+        mask: None,
+        probe: &astroforge_ai::hardware::HardwareProbe::detect(),
+        models_dir: Some(&dir),
+    };
+    let out = astroforge_ai::operations::dispatch_operation(
+        "super_resolution",
+        "{}",
+        "v-sr-src",
+        "v-sr-dst".into(),
+        "pv-sr".into(),
+        inputs,
+    )
+    .expect("dispatch through the downloaded SR model");
+
+    // Provenance: the catalog model served the request, not the
+    // builtin upscale graph.
+    assert_eq!(out.model_id, "swin2sr-realworld-x4");
+    assert_eq!(out.model_hash, spec.sha256);
+    // 4x output dims, finite RGB.
+    assert_eq!(
+        (
+            out.result_image.width(),
+            out.result_image.height(),
+            out.result_image.channels()
+        ),
+        (1024, 1024, 3),
+        "SR output must be 4x the source"
+    );
+    let mut all_finite = true;
+    for c in 0..3 {
+        for y in 0..1024 {
+            for x in 0..1024 {
+                all_finite &= out.result_image[(c, y, x)].is_finite();
+            }
+        }
+    }
+    assert!(all_finite, "output must be finite");
+    // The SR path is untiled by contract.
+    let tiles: serde_json::Value =
+        serde_json::from_str(&out.tile_configuration_json).expect("tile json");
+    assert_eq!(tiles["tiled"], false, "SR runs whole-image");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #458 — non-/8-aligned inputs still dispatch: the adapter pads to
+/// the window alignment and crops the margin back off the 4x output.
+#[test]
+fn superres_handles_unaligned_dims() {
+    if !enabled() {
+        eprintln!("skipping: set ASTROFORGE_MODEL_E2E=1 to run the network e2e");
+        return;
+    }
+    let spec = DOWNLOAD_SPECS
+        .iter()
+        .find(|s| s.id == "swin2sr-realworld-x4")
+        .expect("superres spec");
+    let dir = tmp_dir();
+    install_model(&dir, spec, &HttpByteSource).expect("download + verify + install");
+
+    // 200x150: NOT multiples of 8 (ceil to 200x152), forces the
+    // alignment pad + margin crop in the SR adapter.
+    let mut src = astroforge_core::image::F32Image::new(200, 150, 3);
+    for c in 0..3 {
+        for y in 0..150 {
+            for x in 0..200 {
+                src[(c, y, x)] = ((x * 3 + y * 7) % 19) as f32 / 95.0 + 0.15;
+            }
+        }
+    }
+    let inputs = astroforge_ai::operations::DispatchInputs {
+        source: &src,
+        mask: None,
+        probe: &astroforge_ai::hardware::HardwareProbe::detect(),
+        models_dir: Some(&dir),
+    };
+    let out = astroforge_ai::operations::dispatch_operation(
+        "super_resolution",
+        "{}",
+        "v-sr2-src",
+        "v-sr2-dst".into(),
+        "pv-sr2".into(),
+        inputs,
+    )
+    .expect("unaligned dispatch");
+    assert_eq!(out.model_id, "swin2sr-realworld-x4");
+    assert_eq!(
+        (out.result_image.width(), out.result_image.height()),
+        (800, 600),
+        "4x of the original 200x150 (margin cropped)"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

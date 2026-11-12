@@ -2126,6 +2126,25 @@ fn main() {
                             astroforge_core::pipeline_plan::dispatch::ExportHandler,
                         ),
                     );
+                    // CR-10 P1.6.4.4 — the three user-facing-taxonomy
+                    // stages (crop / star_handling / creative_polish)
+                    // become real engine calls instead of no-ops.
+                    reg.insert(
+                        "crop",
+                        std::sync::Arc::new(astroforge_core::pipeline_plan::dispatch::CropHandler),
+                    );
+                    reg.insert(
+                        "star_handling",
+                        std::sync::Arc::new(
+                            astroforge_core::pipeline_plan::dispatch::StarHandlingHandler,
+                        ),
+                    );
+                    reg.insert(
+                        "creative_polish",
+                        std::sync::Arc::new(
+                            astroforge_core::pipeline_plan::dispatch::CreativePolishHandler,
+                        ),
+                    );
                     reg
                 }),
                 domain_store: Some(std::sync::Arc::new(domain_store)),

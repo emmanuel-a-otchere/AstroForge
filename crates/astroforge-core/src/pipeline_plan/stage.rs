@@ -34,6 +34,16 @@ pub enum StageType {
     Stretch,
     Denoise,
     Detail,
+    /// CR-10 P1.6.4.4 — framing stage (crop to a pixel region). The
+    /// user-facing `crop_rotate` type maps here (rotation lands later;
+    /// crop is the deterministic core).
+    Crop,
+    /// CR-10 P1.6.4.4 — star reduction / sharpening. The user-facing
+    /// `star_handling` type maps here.
+    StarHandling,
+    /// CR-10 P1.6.4.4 — saturation / contrast / brightness polish. The
+    /// user-facing `creative_polish` type maps here.
+    CreativePolish,
     Export,
 }
 
@@ -51,6 +61,9 @@ impl StageType {
             Self::Stretch => "Stretch",
             Self::Denoise => "Denoise",
             Self::Detail => "Detail Enhancement",
+            Self::Crop => "Crop",
+            Self::StarHandling => "Star Handling",
+            Self::CreativePolish => "Creative Polish",
             Self::Export => "Export",
         }
     }
@@ -69,6 +82,10 @@ impl StageType {
             Self::Stretch => true,
             Self::Denoise => false,
             Self::Detail => false,
+            // All three CR-10 stages are optional refinements.
+            Self::Crop => false,
+            Self::StarHandling => false,
+            Self::CreativePolish => false,
             Self::Export => true,
         }
     }

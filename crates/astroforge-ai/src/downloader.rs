@@ -48,7 +48,7 @@ pub struct ModelDownloadSpec {
     pub tile_size: u32,
     /// Output spatial multiplier relative to the (padded) input.
     /// 1 for same-size graphs (denoise-class: the adapter crops the
-    /// output back to the input dims); >1 for super-resolution
+    /// output back to the input dims); above 1 for super-resolution
     /// graphs (the adapter returns the full upscaled output — see
     /// `OnnxEngine::run_nchw_tile`). Must be paired with
     /// `tile_size == 0`: a tiled SR stitch needs 4x-output blending,

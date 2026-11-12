@@ -653,8 +653,8 @@ pub enum EngineMode {
         /// Fixed spatial tile the graph accepts (0 = dynamic).
         tile_size: u32,
         /// Output spatial multiplier (1 = same-size denoise-class;
-        /// >1 = SR-class, runs whole-image and returns the scaled
-        /// output — see `run_nchw_tile`).
+        /// above 1 = SR-class, runs whole-image and returns the
+        /// scaled output — see `run_nchw_tile`).
         output_scale: u32,
     },
 }

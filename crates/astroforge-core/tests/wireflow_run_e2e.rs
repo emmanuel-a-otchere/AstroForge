@@ -223,3 +223,131 @@ fn full_plan_run_over_sample_dataset_persists_versions() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Workflow A (already-stacked master) — the live-walkthrough
+/// regression (#465 W6). The maintainer's JPEG import failed with
+/// "Stretching could not complete: no source frames found": the
+/// stacking stages are disabled for a master, quality_filter/color
+/// had no registered handlers (no-op completes with image=None), so
+/// `current_frames` stayed empty and StretchHandler — which used to
+/// be preloaded-only — failed. The fix: the post-stack consumers
+/// (stretch / denoise / background) self-load the session's
+/// SourceAssets when no frames are threaded. The imported master IS
+/// the working image.
+#[test]
+fn workflow_a_stacked_master_run_completes_and_persists_a_version() {
+    let root = temp_root("workflow-a");
+    let store = Arc::new(DomainStore::new(&root.join("projects.db")).expect("store"));
+
+    // 1. Import: a single already-stacked master (filename marker
+    //    drives already_stacked detection).
+    let dataset = root.join("master");
+    std::fs::create_dir_all(&dataset).expect("mkdir dataset");
+    let (project_id, session_id) = import_begin(&store, "M42 Master", dataset.to_str().unwrap());
+    let master_path = dataset.join("m42_master_stacked.fits");
+    {
+        let mut header = astroforge_core::fits::FitsHeader::new();
+        header.set("IMAGETYP", "LIGHT");
+        header.set("EXPTIME", "30.0");
+        header.set("NAXIS1", "64");
+        header.set("NAXIS2", "64");
+        let mut f = std::fs::File::create(&master_path).expect("create master");
+        astroforge_core::fits::write_header(&header, &mut f).expect("write header");
+        let pixels = 64 * 64;
+        let mut data = Vec::with_capacity(pixels * 4);
+        for px in 0..pixels {
+            let v = (px % 200) as f32 / 240.0 + 0.04;
+            data.extend_from_slice(&v.to_be_bytes());
+        }
+        let block = 2880usize;
+        if data.len() % block != 0 {
+            data.resize(data.len() + (block - data.len() % block), 0);
+        }
+        use std::io::Write as _;
+        f.write_all(&data).expect("write pixels");
+    }
+    register_light(&store, &session_id, &master_path);
+
+    // 2. Understanding: the master must route to workflow A.
+    let assets = store.list_source_assets(&session_id).expect("assets");
+    assert_eq!(assets.len(), 1, "the single master registered");
+    let understanding =
+        astroforge_core::pipeline_plan::derive_understanding_from_session(None, &assets);
+    assert!(understanding.already_stacked, "master must be detected");
+
+    // 3. Plan: stacking stages disabled, post-stack stages live.
+    let plan_store = Arc::new(PipelinePlanStore::in_memory().expect("plan store"));
+    let (stages, target) = deep_sky_osc_balanced();
+    let ctx = GenerationContext {
+        project_id: project_id.clone(),
+        session_id: session_id.clone(),
+        session_understanding: understanding,
+        recipe_id: Some("recipe_deep_sky_osc_balanced".into()),
+        mode: "auto".into(),
+        generated_at_unix_ms: now_unix_ms(),
+    };
+    let plan = generate_plan(&ctx, &stages, target).expect("plan");
+    for stage_type in ["calibrate", "debayer", "register", "stack"] {
+        let stage = plan
+            .stages
+            .iter()
+            .find(|s| s.stage_type == stage_type)
+            .unwrap_or_else(|| panic!("{stage_type} stage missing"));
+        assert!(!stage.enabled, "workflow A disables {stage_type}");
+    }
+    let stretch = plan
+        .stages
+        .iter()
+        .find(|s| s.stage_type == "stretch")
+        .expect("stretch stage");
+    assert!(stretch.enabled, "stretch runs for a master");
+    plan_store.insert_plan(&plan).expect("insert plan");
+
+    // 4. Runner with the PRODUCTION registry (8 handlers — no
+    //    quality_filter/color handlers; those no-op exactly as the
+    //    live app ran them).
+    let mut registry = HandlerRegistry::new();
+    registry.insert("calibrate", Arc::new(CalibrateHandler));
+    registry.insert("debayer", Arc::new(DebayerHandler));
+    registry.insert("register", Arc::new(RegisterHandler));
+    registry.insert("stack", Arc::new(StackHandler));
+    registry.insert("background", Arc::new(BackgroundHandler));
+    registry.insert("stretch", Arc::new(StretchHandler));
+    registry.insert("denoise", Arc::new(DenoiseHandler));
+    registry.insert("export", Arc::new(ExportHandler));
+    let runner = PipelineRunner::with_engine(
+        plan_store.clone(),
+        Arc::new(registry),
+        Some(store.clone()),
+        None,
+    );
+
+    // 5. Run — must COMPLETE (before W6 this failed at stretch with
+    //    "no source frames found for session …").
+    let outcome = runner.start(&plan.plan_id).expect("run");
+    assert_eq!(
+        outcome,
+        astroforge_core::pipeline_plan::RunOutcome::Completed,
+        "workflow A must complete: stretch self-loads the master"
+    );
+
+    // 6. The stretch output persisted a Version with a real artifact.
+    let versions = store
+        .list_image_versions_for_project(&project_id)
+        .expect("versions");
+    assert!(
+        !versions.is_empty(),
+        "workflow A must produce an ImageVersion from the master"
+    );
+    for v in &versions {
+        let artifact = store
+            .get_artifact(&v.primary_artifact_id)
+            .expect("artifact readable");
+        assert!(
+            std::path::Path::new(&artifact.path).exists(),
+            "artifact TIFF must exist on disk: {}",
+            artifact.path
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

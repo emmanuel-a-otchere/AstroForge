@@ -1008,6 +1008,11 @@ pub fn retry_stage(
 /// distinction is recorded on the new exec row's parameters_json
 /// for traceability.
 #[derive(Debug, Clone, Copy, Deserialize)]
+// #465 W6 — the UI bridge sends "optimized" / "as_is" (snake_case,
+// matching the §9 RetryKind naming); without this rename serde
+// expected the Rust variant names and rejected every retry IPC
+// before the command body ran ("unknown variant `as_is`").
+#[serde(rename_all = "snake_case")]
 pub enum RetryKindDto {
     Optimized,
     AsIs,

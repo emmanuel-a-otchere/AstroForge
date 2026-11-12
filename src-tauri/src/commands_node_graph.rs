@@ -135,7 +135,8 @@ pub fn update_graph(
             enabled: n.enabled,
         })
         .collect::<Vec<_>>();
-    core_update_graph(&*state.store, &request.plan_id, &nodes).map_err(node_graph_err_to_string)
+    let store = &*state.store;
+    core_update_graph(store, &request.plan_id, &nodes).map_err(node_graph_err_to_string)
 }
 
 /// Remove an optional stage (refused for `required` stages — the
@@ -146,7 +147,8 @@ pub fn remove_stage(
     plan_id: String,
     stage_id: String,
 ) -> Result<DomainPipelinePlan, String> {
-    core_remove_stage(&*state.store, &plan_id, &stage_id).map_err(node_graph_err_to_string)
+    let store = &*state.store;
+    core_remove_stage(store, &plan_id, &stage_id).map_err(node_graph_err_to_string)
 }
 
 /// Move a stage to `new_sequence` (0-based, clamped to range).
@@ -157,8 +159,8 @@ pub fn reorder_stage(
     stage_id: String,
     new_sequence: usize,
 ) -> Result<DomainPipelinePlan, String> {
-    core_reorder_stage(&*state.store, &plan_id, &stage_id, new_sequence)
-        .map_err(node_graph_err_to_string)
+    let store = &*state.store;
+    core_reorder_stage(store, &plan_id, &stage_id, new_sequence).map_err(node_graph_err_to_string)
 }
 
 /// Enable or disable a stage. `enabled` and `required` are
@@ -170,8 +172,8 @@ pub fn set_stage_enabled(
     stage_id: String,
     enabled: bool,
 ) -> Result<DomainPipelinePlan, String> {
-    core_set_stage_enabled(&*state.store, &plan_id, &stage_id, enabled)
-        .map_err(node_graph_err_to_string)
+    let store = &*state.store;
+    core_set_stage_enabled(store, &plan_id, &stage_id, enabled).map_err(node_graph_err_to_string)
 }
 
 /// Map the slice's error enum to a `String` for the IPC layer.

@@ -82,10 +82,13 @@ pub const USER_FACING_STAGE_TYPES: &[&str] = &[
     "export",
 ];
 
-/// Canonical 8 classical + 2 AI stage types
-/// (the §7.7.9 mapping target vocabulary).
-/// Matches `AiBoundaryLabel::for_stage_type` and
-/// the `all_eight_classical_stage_types_are_not_ai`
+/// Canonical stage types (the §7.7.9 mapping target
+/// vocabulary): 9 classical + 3 AI-serving types.
+/// CR-10 P1.6.4.4 adds `crop` (classical geometry),
+/// `star_handling` and `creative_polish` (perceptual,
+/// descended from `detail`). Matches
+/// `AiBoundaryLabel::for_stage_type` and the
+/// `all_eight_classical_stage_types_are_not_ai`
 /// test in `ai_boundary.rs:144-163`.
 pub const CANONICAL_STAGE_TYPES: &[&str] = &[
     "calibrate",
@@ -98,6 +101,9 @@ pub const CANONICAL_STAGE_TYPES: &[&str] = &[
     "export",
     "denoise",
     "detail",
+    "crop",
+    "star_handling",
+    "creative_polish",
 ];
 
 /// Per the §7.7.9 mapping: the 12 user-facing
@@ -113,10 +119,11 @@ pub fn user_facing_to_canonical(stage_type: &str) -> &'static str {
         // canonical stage is `calibrate` (the
         // upstream analyser). CR-10 §7.7.9 row 1.
         "ingest" => "calibrate",
-        // Crop/rotate: framing stage; canonical is
-        // `calibrate` (geometry-adjacent). CR-10
-        // §7.7.9 row 2.
-        "crop_rotate" => "calibrate",
+        // Crop/rotate: framing stage; the CR-10 P1.6.4.4
+        // canonical `crop` handler serves it (was routed to
+        // `calibrate` before the canonical type existed).
+        // CR-10 §7.7.9 row 2.
+        "crop_rotate" => "crop",
         // Background extraction: gradient/DBE.
         // Canonical `background`. CR-10 §7.7.9 row 3.
         "background_extraction" => "background",
@@ -135,14 +142,16 @@ pub fn user_facing_to_canonical(stage_type: &str) -> &'static str {
         // Stretch: histogram transform. Canonical
         // `stretch`. CR-10 §7.7.9 row 9.
         "stretch" => "stretch",
-        // Star handling: layer separation. Canonical
-        // `detail` (perceptual AI for star
-        // detection). CR-10 §7.7.9 row 10.
-        "star_handling" => "detail",
+        // Star handling: layer separation. The CR-10
+        // P1.6.4.4 canonical `star_handling` handler
+        // serves it (was routed to `detail`). CR-10
+        // §7.7.9 row 10.
+        "star_handling" => "star_handling",
         // Creative polish: curves / narrowband mix.
-        // Canonical `detail` (perceptual AI for
-        // taste). CR-10 §7.7.9 row 11.
-        "creative_polish" => "detail",
+        // The CR-10 P1.6.4.4 canonical `creative_polish`
+        // handler serves it (was routed to `detail`).
+        // CR-10 §7.7.9 row 11.
+        "creative_polish" => "creative_polish",
         // Export: file write. Canonical `export`.
         // CR-10 §7.7.9 row 12.
         "export" => "export",

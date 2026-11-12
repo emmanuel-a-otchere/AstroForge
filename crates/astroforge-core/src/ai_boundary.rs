@@ -85,6 +85,25 @@ impl AiBoundaryLabel {
                 deterministic: true,
                 seed: Some(0),
             },
+            // CR-10 P1.6.4.4 — star separation is perceptual (the
+            // user-facing star_handling mapped to `detail` before the
+            // canonical type existed; same AI boundary carries over).
+            "star_handling" => Self {
+                uses_ai: true,
+                model_id: Some("astroforge_detail_v1.2".into()),
+                deterministic: true,
+                seed: Some(0),
+            },
+            // CR-10 P1.6.4.4 — taste-driven polish is perceptual
+            // (mapped to `detail` for the same reason).
+            "creative_polish" => Self {
+                uses_ai: true,
+                model_id: Some("astroforge_detail_v1.2".into()),
+                deterministic: true,
+                seed: Some(0),
+            },
+            // `crop` (CR-10 P1.6.4.4) is pure geometry — the classical
+            // default arm below already labels it not-AI.
             // Everything else is classical deterministic processing.
             _ => Self {
                 uses_ai: false,

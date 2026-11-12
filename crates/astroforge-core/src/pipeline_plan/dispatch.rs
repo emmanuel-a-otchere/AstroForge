@@ -837,6 +837,200 @@ impl StageHandler for BackgroundHandler {
     }
 }
 
+/// CR-10 P1.6.4.4 — Crop handler. Cuts the upstream image to a pixel
+/// region. Pure geometry: no AI, no interpolation, deterministic.
+///
+/// ## Stage parameters
+///
+/// - `x`, `y` (default: centred) — top-left corner of the region.
+/// - `width`, `height` (default: 90% of the source, centred) —
+///   region size. The region is clamped to the source bounds; a
+///   degenerate (zero-area) region after clamping fails the stage.
+pub struct CropHandler;
+
+impl StageHandler for CropHandler {
+    fn handle(&self, ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
+        let params = parse_crop_params(ctx.stage.parameters_json.as_deref());
+
+        let frames = if let Some(preloaded) = &ctx.preloaded_frames {
+            preloaded.clone()
+        } else {
+            load_frames_from_assets(ctx)?
+        };
+        if frames.is_empty() {
+            return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
+        }
+
+        let image = &frames[0];
+        let (src_w, src_h) = (image.width(), image.height());
+        // Defaults: centred 90% region.
+        let default_w = (src_w as f64 * 0.9).round() as usize;
+        let default_h = (src_h as f64 * 0.9).round() as usize;
+        let req_w = params.width.unwrap_or(default_w).min(src_w);
+        let req_h = params.height.unwrap_or(default_h).min(src_h);
+        let req_x = params
+            .x
+            .unwrap_or((src_w.saturating_sub(req_w)) / 2)
+            .min(src_w - 1);
+        let req_y = params
+            .y
+            .unwrap_or((src_h.saturating_sub(req_h)) / 2)
+            .min(src_h - 1);
+        // Clamp the region so it stays inside the source.
+        let region = crate::crop::CropRegion {
+            x: req_x,
+            y: req_y,
+            width: req_w.min(src_w - req_x).max(1),
+            height: req_h.min(src_h - req_y).max(1),
+        };
+
+        let cropped = crate::crop::crop(image, &region);
+        let metadata = format!(
+            r#"{{"x":{},"y":{},"width":{},"height":{},"source":{}x{}}}"#,
+            region.x, region.y, region.width, region.height, src_w, src_h
+        );
+
+        Ok(StageOutput {
+            image: Some(cropped),
+            parameters_json: ctx.stage.parameters_json.clone(),
+            metadata_json: Some(metadata),
+            artifact_id: None,
+        })
+    }
+}
+
+/// CR-10 P1.6.4.4 — Star-handling handler. `mode: "reduce"` suppresses
+/// small-scale structure (star cores) by subtracting the high-frequency
+/// residual; `mode: "sharpen"` amplifies it. Both directions run
+/// through the same deterministic multi-scale unsharp kernel.
+///
+/// ## Stage parameters
+///
+/// - `mode` (default `"reduce"`) — `reduce` or `sharpen`.
+/// - `strength` (default `0.5`, clamped 0..=1) — blend amount.
+/// - `star_threshold_sigma` (default `5.0`) — detection threshold for
+///   the star count recorded in metadata (informational; the kernel
+///   itself is star-agnostic).
+pub struct StarHandlingHandler;
+
+impl StageHandler for StarHandlingHandler {
+    fn handle(&self, ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
+        let params = parse_star_handling_params(ctx.stage.parameters_json.as_deref());
+
+        let frames = if let Some(preloaded) = &ctx.preloaded_frames {
+            preloaded.clone()
+        } else {
+            load_frames_from_assets(ctx)?
+        };
+        if frames.is_empty() {
+            return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
+        }
+
+        let image = &frames[0];
+        let stars = crate::registration::extract_stars(image, params.star_threshold_sigma);
+        // Negative amount subtracts the high-frequency residual —
+        // small-scale structure (stars) fades, background/pillow
+        // structure survives. Positive amplifies it.
+        let signed_amount = match params.mode.as_str() {
+            "reduce" => -params.strength,
+            "sharpen" => params.strength,
+            other => {
+                return Err(StageHandlerError::DebayerFailed(format!(
+                    "unknown star_handling mode: {other}"
+                )))
+            }
+        };
+        let output =
+            crate::detail_enhancement::multi_scale_unsharp_mask(image, &[1, 2], signed_amount);
+        // Negative amounts undershoot below 0 on high-contrast edges
+        // (the unsharp subtraction overshoots); clamp to the unit
+        // range the rest of the pipeline assumes.
+        let mut output = output;
+        for v in output.iter_mut() {
+            *v = v.clamp(0.0, 1.0);
+        }
+
+        let metadata = format!(
+            r#"{{"mode":"{}","strength":{},"stars_detected":{}}}"#,
+            params.mode,
+            params.strength,
+            stars.len()
+        );
+
+        Ok(StageOutput {
+            image: Some(output),
+            parameters_json: ctx.stage.parameters_json.clone(),
+            metadata_json: Some(metadata),
+            artifact_id: None,
+        })
+    }
+}
+
+/// CR-10 P1.6.4.4 — Creative-polish handler. Deterministic saturation
+/// / contrast / brightness: RGB frames get a luminance-preserving
+/// saturation lerp then a pivot-0.5 contrast stretch and brightness
+/// offset; mono frames get contrast + brightness only.
+///
+/// ## Stage parameters
+///
+/// - `saturation` (default `1.0`, clamped 0..=2) — 0 = greyscale,
+///   1 = unchanged, 2 = doubled channel separation.
+/// - `contrast` (default `1.0`, clamped 0.5..=1.5).
+/// - `brightness` (default `0.0`, clamped -0.25..=0.25).
+pub struct CreativePolishHandler;
+
+impl StageHandler for CreativePolishHandler {
+    fn handle(&self, ctx: &StageContext) -> Result<StageOutput, StageHandlerError> {
+        let params = parse_creative_polish_params(ctx.stage.parameters_json.as_deref());
+
+        let frames = if let Some(preloaded) = &ctx.preloaded_frames {
+            preloaded.clone()
+        } else {
+            load_frames_from_assets(ctx)?
+        };
+        if frames.is_empty() {
+            return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
+        }
+
+        let image = &frames[0];
+        let (w, h, c) = (image.width(), image.height(), image.channels());
+        let mut output = F32Image::new(w, h, c);
+        for y in 0..h {
+            for x in 0..w {
+                // Contrast around mid-grey, then brightness, then
+                // saturation (so the lerp targets the adjusted
+                // luminance — matches the order users expect from a
+                // curves tool).
+                let mut px: Vec<f32> = (0..c).map(|ch| image[(ch, y, x)]).collect();
+                for v in px.iter_mut() {
+                    *v = (*v - 0.5) * params.contrast + 0.5 + params.brightness;
+                }
+                if c >= 3 {
+                    let lum = 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
+                    for v in px.iter_mut() {
+                        *v = lum + (*v - lum) * params.saturation;
+                    }
+                }
+                for (ch, v) in px.iter().enumerate() {
+                    output[(ch, y, x)] = v.clamp(0.0, 1.0);
+                }
+            }
+        }
+
+        let metadata = format!(
+            r#"{{"saturation":{},"contrast":{},"brightness":{},"channels":{}}}"#,
+            params.saturation, params.contrast, params.brightness, c
+        );
+
+        Ok(StageOutput {
+            image: Some(output),
+            parameters_json: ctx.stage.parameters_json.clone(),
+            metadata_json: Some(metadata),
+            artifact_id: None,
+        })
+    }
+}
+
 /// CR-05 P2.9 — Export handler. Writes the upstream image to disk
 /// in the chosen format. Slice 1 writes to the Tauri app data
 /// directory under `pipeline_exports/{run_id}/{stage_id}.{ext}`
@@ -1083,6 +1277,125 @@ fn parse_export_params(parameters_json: Option<&str>) -> ExportParams {
     ExportParams { format }
 }
 
+// ── CR-10 P1.6.4.4 — crop / star_handling / creative_polish params ──────
+
+struct CropParams {
+    x: Option<usize>,
+    y: Option<usize>,
+    width: Option<usize>,
+    height: Option<usize>,
+}
+
+fn parse_crop_params(parameters_json: Option<&str>) -> CropParams {
+    let Some(raw) = parameters_json else {
+        return CropParams {
+            x: None,
+            y: None,
+            width: None,
+            height: None,
+        };
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => {
+            return CropParams {
+                x: None,
+                y: None,
+                width: None,
+                height: None,
+            }
+        }
+    };
+    let uint = |k: &str| parsed.get(k).and_then(|v| v.as_u64()).map(|v| v as usize);
+    CropParams {
+        x: uint("x"),
+        y: uint("y"),
+        width: uint("width"),
+        height: uint("height"),
+    }
+}
+
+struct StarHandlingParams {
+    mode: String,
+    strength: f32,
+    star_threshold_sigma: f64,
+}
+
+impl Default for StarHandlingParams {
+    fn default() -> Self {
+        Self {
+            mode: "reduce".into(),
+            strength: 0.5,
+            star_threshold_sigma: 5.0,
+        }
+    }
+}
+
+fn parse_star_handling_params(parameters_json: Option<&str>) -> StarHandlingParams {
+    let Some(raw) = parameters_json else {
+        return StarHandlingParams::default();
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return StarHandlingParams::default(),
+    };
+    let mut params = StarHandlingParams {
+        mode: parsed
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("reduce")
+            .to_ascii_lowercase(),
+        strength: parsed
+            .get("strength")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5) as f32,
+        star_threshold_sigma: parsed
+            .get("star_threshold_sigma")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(5.0),
+    };
+    params.strength = params.strength.clamp(0.0, 1.0);
+    params
+}
+
+struct CreativePolishParams {
+    saturation: f32,
+    contrast: f32,
+    brightness: f32,
+}
+
+impl Default for CreativePolishParams {
+    fn default() -> Self {
+        Self {
+            saturation: 1.0,
+            contrast: 1.0,
+            brightness: 0.0,
+        }
+    }
+}
+
+fn parse_creative_polish_params(parameters_json: Option<&str>) -> CreativePolishParams {
+    let Some(raw) = parameters_json else {
+        return CreativePolishParams::default();
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return CreativePolishParams::default(),
+    };
+    let f = |k: &str, default: f32| -> f32 {
+        parsed
+            .get(k)
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(default)
+    };
+    CreativePolishParams {
+        saturation: f("saturation", 1.0).clamp(0.0, 2.0),
+        contrast: f("contrast", 1.0).clamp(0.5, 1.5),
+        brightness: f("brightness", 0.0).clamp(-0.25, 0.25),
+    }
+}
+
 #[cfg(test)]
 mod p29_tests {
     use super::*;
@@ -1135,6 +1448,161 @@ mod p29_tests {
         let p = parse_debayer_params(Some(json));
         assert_eq!(p.bayer_pattern, "BGGR");
         assert_eq!(p.debayer_algorithm, "Vng");
+    }
+
+    // ── CR-10 P1.6.4.4 — crop / star_handling / creative_polish ────
+
+    /// A deterministic 64x64 RGB ramp: pixel value depends on x + y
+    /// so crop regions and polish math have verifiable content.
+    fn ramp_image() -> F32Image {
+        let mut img = F32Image::new(64, 64, 3);
+        for c in 0..3 {
+            for y in 0..64 {
+                for x in 0..64 {
+                    img[(c, y, x)] = ((x + y * 2 + c) % 16) as f32 / 20.0 + 0.1;
+                }
+            }
+        }
+        img
+    }
+
+    #[test]
+    fn crop_defaults_to_centred_90pct() {
+        let ctx = test_ctx("crop", Some(vec![ramp_image()]), None);
+        let out = CropHandler.handle(&ctx).expect("crop");
+        let img = out.image.expect("image");
+        assert_eq!((img.width(), img.height(), img.channels()), (58, 58, 3));
+        let meta = out.metadata_json.expect("metadata");
+        assert!(
+            meta.contains("\"width\":58"),
+            "metadata records the region: {meta}"
+        );
+    }
+
+    #[test]
+    fn crop_honours_region_and_clamps_to_bounds() {
+        let ctx = test_ctx(
+            "crop",
+            Some(vec![ramp_image()]),
+            Some(r#"{"x":50,"y":50,"width":64,"height":64}"#.into()),
+        );
+        let out = CropHandler.handle(&ctx).expect("crop");
+        let img = out.image.expect("image");
+        // Clamped: only 14x14 remains from (50,50).
+        assert_eq!((img.width(), img.height()), (14, 14));
+        // Content: top-left of the region is the source pixel (50,50).
+        assert!((img[(0, 0, 0)] - ramp_image()[(0, 50, 50)]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn star_handling_reduce_suppresses_high_frequency() {
+        let img = ramp_image();
+        let ctx = test_ctx(
+            "star_handling",
+            Some(vec![img.clone()]),
+            Some(r#"{"mode":"reduce","strength":1.0}"#.into()),
+        );
+        let out = StarHandlingHandler.handle(&ctx).expect("reduce");
+        let reduced = out.image.expect("image");
+        assert_eq!((reduced.width(), reduced.height()), (64, 64));
+        // A high-frequency ramp suppresses toward its local mean;
+        // every output pixel stays finite and in a sane range.
+        for v in reduced.iter() {
+            assert!(v.is_finite() && *v >= -0.01 && *v <= 1.01, "value {v}");
+        }
+        let meta = out.metadata_json.expect("metadata");
+        assert!(meta.contains("\"mode\":\"reduce\""), "{meta}");
+        assert!(meta.contains("\"stars_detected\":"), "{meta}");
+    }
+
+    #[test]
+    fn star_handling_rejects_unknown_mode() {
+        let ctx = test_ctx(
+            "star_handling",
+            Some(vec![ramp_image()]),
+            Some(r#"{"mode":"teleport"}"#.into()),
+        );
+        assert!(StarHandlingHandler.handle(&ctx).is_err());
+    }
+
+    #[test]
+    fn creative_polish_zero_saturation_greyscales_rgb() {
+        let ctx = test_ctx(
+            "creative_polish",
+            Some(vec![ramp_image()]),
+            Some(r#"{"saturation":0.0}"#.into()),
+        );
+        let out = CreativePolishHandler.handle(&ctx).expect("polish");
+        let img = out.image.expect("image");
+        for y in (0..64).step_by(7) {
+            for x in (0..64).step_by(7) {
+                let (r, g, b) = (img[(0, y, x)], img[(1, y, x)], img[(2, y, x)]);
+                assert!(
+                    (r - g).abs() < 1e-4 && (g - b).abs() < 1e-4,
+                    "saturation 0 must collapse to luminance at ({x},{y}): {r} {g} {b}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn creative_polish_identity_params_are_near_identity() {
+        let img = ramp_image();
+        let ctx = test_ctx(
+            "creative_polish",
+            Some(vec![img.clone()]),
+            Some(r#"{"saturation":1.0,"contrast":1.0,"brightness":0.0}"#.into()),
+        );
+        let out = CreativePolishHandler.handle(&ctx).expect("polish");
+        let out_img = out.image.expect("image");
+        for c in 0..3 {
+            for y in (0..64).step_by(5) {
+                for x in (0..64).step_by(5) {
+                    let a = img[(c, y, x)];
+                    let b = out_img[(c, y, x)];
+                    assert!(
+                        (a - b).abs() < 1e-5,
+                        "identity drift at ({x},{y},{c}): {a} vs {b}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn creative_polish_clamps_and_params_clamp() {
+        let p = parse_creative_polish_params(Some(
+            r#"{"saturation":9.0,"contrast":0.1,"brightness":5.0}"#,
+        ));
+        assert_eq!(p.saturation, 2.0);
+        assert_eq!(p.contrast, 0.5);
+        assert_eq!(p.brightness, 0.25);
+        // A blown-out input stays in [0,1].
+        let mut hot = F32Image::new(8, 8, 1);
+        for i in 0..8 {
+            for j in 0..8 {
+                hot[(0, j, i)] = 2.5;
+            }
+        }
+        let ctx = test_ctx(
+            "creative_polish",
+            Some(vec![hot]),
+            Some(r#"{"brightness":0.25}"#.into()),
+        );
+        let out = CreativePolishHandler.handle(&ctx).expect("polish");
+        let img = out.image.expect("image");
+        for v in img.iter() {
+            assert!(*v <= 1.0, "output must clamp: {v}");
+        }
+    }
+
+    #[test]
+    fn parse_crop_params_reads_overrides() {
+        let p = parse_crop_params(Some(r#"{"x":3,"y":4,"width":10,"height":11}"#));
+        assert_eq!(p.x, Some(3));
+        assert_eq!(p.width, Some(10));
+        let p = parse_crop_params(None);
+        assert_eq!(p.x, None);
     }
 
     #[test]

@@ -412,7 +412,8 @@ fn denoise_acceptance_over_sample_dataset_frame() {
     // version would carry it. (The old assertion expected 3 channels
     // from the decoder and predates the fixture/decoder reality.)
     let header = astroforge_core::fits::parse_header(&bytes).expect("sample frame header parses");
-    let mono = astroforge_core::fits::read_f32_image(&bytes, &header).expect("sample frame decodes");
+    let mono =
+        astroforge_core::fits::read_f32_image(&bytes, &header).expect("sample frame decodes");
     assert_eq!(
         (mono.width(), mono.height(), mono.channels()),
         (256, 256, 1),

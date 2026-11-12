@@ -63,7 +63,12 @@
       const frames = (raw as Array<Record<string, unknown>>).map(
         (f): ScannedFrame => ({
           path: String(f.path ?? ""),
-          frameType: String(f.frame_type ?? "unknown"),
+          // Canonicalize to the pipeline's casing ("Light"/"Dark"/
+          // "Flat"/"Bias") — the DTO ships the FITS-style uppercase
+          // label from FrameType::as_str.
+          frameType: String(f.frame_type ?? "unknown")
+            .toLowerCase()
+            .replace(/^\w/, (c) => c.toUpperCase()),
           exptime: typeof f.exptime === "number" ? f.exptime : null,
           filter: typeof f.filter === "string" ? f.filter : null,
           width: typeof f.width === "number" ? f.width : null,

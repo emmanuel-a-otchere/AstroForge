@@ -11,6 +11,7 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { get } from "svelte/store";
   import {
     goToStep,
     importWizard,
@@ -29,15 +30,13 @@
     running = true;
     error = null;
     try {
-      // The host shell wires the session + project ids
-      // into the wizard before transitioning to
-      // scanning. We read them from the store here.
-      const state = await new Promise<typeof $importWizard>((resolve) => {
-        const unsub = importWizard.subscribe((s) => {
-          unsub();
-          resolve(s);
-        });
-      });
+      // The host shell wires the session + project ids into the
+      // wizard before transitioning to scanning (Step 1's
+      // sessionCreate → setSessionContext). Read the state directly —
+      // the previous Promise-wrapped subscribe called `unsub()` inside
+      // the callback, before the const binding initialized (TDZ crash:
+      // "Cannot access 'unsub' before initialization").
+      const state = get(importWizard);
       if (!state.sessionId || !state.projectId) {
         // No ids — the host shell didn't wire them. For
         // the slice-level test we accept this and
@@ -68,15 +67,15 @@
       <li>✓ {$importWizard.frames.length} readable</li>
       <li>✓ Metadata extracted</li>
       <li>
-        ✓ {$importWizard.frames.filter((f) => f.frameType === "light").length} Light
+        ✓ {$importWizard.frames.filter((f) => f.frameType.toLowerCase() === "light").length} Light
         frames
       </li>
       <li>
-        ✓ {$importWizard.frames.filter((f) => f.frameType === "dark").length} Dark
+        ✓ {$importWizard.frames.filter((f) => f.frameType.toLowerCase() === "dark").length} Dark
         frames
       </li>
       <li>
-        ✓ {$importWizard.frames.filter((f) => f.frameType === "flat").length} Flat
+        ✓ {$importWizard.frames.filter((f) => f.frameType.toLowerCase() === "flat").length} Flat
         frames
       </li>
     </ul>

@@ -107,17 +107,23 @@
     </nav>
 
     <div class="studio-workspace" role="tabpanel" aria-label="{$studioViewport.view} workspace">
-      {#if snippetFor($studioViewport.view)}
-        {@render snippetFor($studioViewport.view)!()}
-      {:else}
-        <section class="placeholder-screen font-body" aria-live="polite">
-          <p>The {$studioViewport.view} workspace ships in a later phase.</p>
-          <p class="placeholder-hint">
-            P3 ships the Studio shell + Overview + persistent project context.
-            Import / Process / Enhance / Compare / Export land in P4.
-          </p>
-        </section>
-      {/if}
+      <!-- #460 W1 — keyed so each tab switch replays the screen-in
+           fade (previously hard cuts between workspaces). -->
+      {#key $studioViewport.view}
+        <div class="screen-in workspace-pane">
+          {#if snippetFor($studioViewport.view)}
+            {@render snippetFor($studioViewport.view)!()}
+          {:else}
+            <section class="placeholder-screen font-body" aria-live="polite">
+              <p>The {$studioViewport.view} workspace ships in a later phase.</p>
+              <p class="placeholder-hint">
+                P3 ships the Studio shell + Overview + persistent project context.
+                Import / Process / Enhance / Compare / Export land in P4.
+              </p>
+            </section>
+          {/if}
+        </div>
+      {/key}
     </div>
   </div>
 {/if}
@@ -258,6 +264,12 @@
   .studio-workspace {
     overflow: auto;
     background: var(--surface);
+  }
+
+  /* #460 W1 — pane wrapper for the keyed tab transition; keeps the
+     scroll region on the outer container, the fade on the inner. */
+  .workspace-pane {
+    min-height: 100%;
   }
 
   .placeholder-screen {

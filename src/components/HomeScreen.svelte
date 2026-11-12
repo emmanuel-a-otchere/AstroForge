@@ -219,17 +219,26 @@
     color: var(--on-surface);
     cursor: pointer;
     text-align: left;
-    transition: border-color 0.15s ease, background 0.15s ease;
+    /* #460 W1 — cards sat flush on the app plane (no elevation);
+       the shadow scale gives the contact + ambient depth, and hover
+       lifts with an accent hairline + glow instead of just a fill
+       change. */
+    box-shadow: var(--elevation-1);
+    transition: border-color var(--transition-fast), background var(--transition-fast),
+      box-shadow var(--transition-base), transform var(--transition-base);
   }
 
   .primary-action:hover {
     border-color: var(--outline);
     background: var(--surface-container);
+    box-shadow: var(--elevation-2);
+    transform: translateY(-1px);
   }
 
   .primary-action.primary {
     border-color: var(--primary);
     background: var(--surface-container);
+    box-shadow: var(--elevation-2), 0 0 12px var(--glow-cobalt-dim);
   }
 
   .icon {

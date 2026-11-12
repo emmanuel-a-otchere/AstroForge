@@ -130,18 +130,24 @@
 </aside>
 
 <style>
+  /* #460 W1 — the panel was a light-theme island (#fbeaea bg, #800
+     text) on the dark app. Restyled onto the dark-sky system: an
+     error-tinted dark surface, error-container border, error-fg
+     headings. The --color-error-* names it referenced had no
+     definitions; the fallbacks were the light theme. */
   .error-recovery-panel {
-    border: 1px solid var(--color-error-border, #c33);
-    background: var(--color-error-bg, #fbeaea);
-    border-radius: 6px;
+    border: 1px solid var(--error-container);
+    background: rgba(147, 0, 10, 0.16);
+    border-radius: var(--radius-md);
     padding: 1rem 1.25rem;
     margin: 0.75rem 0;
-    color: var(--color-error-text, #400);
+    color: var(--on-surface);
+    box-shadow: var(--elevation-1);
   }
 
   .error-recovery-panel header h3 {
     margin: 0 0 0.5rem 0;
-    color: var(--color-error-heading, #800);
+    color: var(--error);
     font-size: 1rem;
     font-weight: 600;
   }
@@ -157,11 +163,12 @@
 
   .error-recovery-grid dt {
     font-weight: 600;
-    color: var(--color-error-heading, #800);
+    color: var(--error);
   }
 
   .error-recovery-grid dd {
     margin: 0;
+    color: var(--on-surface-variant);
   }
 
   .actions {
@@ -173,28 +180,31 @@
 
   .action {
     appearance: none;
-    border: 1px solid var(--color-error-border, #c33);
-    background: white;
-    color: var(--color-error-heading, #800);
+    border: 1px solid var(--error-container);
+    background: var(--surface-container);
+    color: var(--on-surface);
     padding: 0.4rem 0.85rem;
-    border-radius: 4px;
+    border-radius: var(--radius-default);
     cursor: pointer;
     font: inherit;
     font-weight: 500;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
   }
 
   .action:hover {
-    background: var(--color-error-bg-hover, #f5d5d5);
+    background: var(--surface-container-high);
+    border-color: var(--error);
   }
 
   .action.primary {
-    background: var(--color-error-primary-bg, #800);
-    color: white;
-    border-color: var(--color-error-primary-bg, #800);
+    background: var(--error-container);
+    color: var(--on-error-container);
+    border-color: var(--error-container);
   }
 
   .action.primary:hover {
-    background: var(--color-error-primary-bg-hover, #600);
-    border-color: var(--color-error-primary-bg-hover, #600);
+    background: var(--error);
+    border-color: var(--error);
+    color: var(--on-error);
   }
 </style>

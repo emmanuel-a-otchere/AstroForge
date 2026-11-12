@@ -259,7 +259,7 @@
     padding: 0.75rem 1rem;
     margin: 0;
     border-left: 3px solid var(--color-accent, #4f9cff);
-    background: var(--color-surface-muted, rgba(79, 156, 255, 0.08));
+    background: var(--accent-tint);
     border-radius: 4px;
     display: flex;
     flex-direction: column;

@@ -131,7 +131,10 @@
   }
 
   .event.selected {
-    background: var(--color-tl-selected-bg, #e6f0ff);
+    /* #460 W1 — was a light-blue light-theme leftover; the accent
+       tint keeps the selection on-theme (readable text survives). */
+    background: var(--accent-tint);
+    outline: 1px solid var(--glow-cobalt-dim);
   }
 
   .time {
@@ -164,7 +167,7 @@
   }
 
   .label:hover:not(:disabled) {
-    background: var(--color-tl-hover-bg, #f0f0f0);
+    background: var(--surface-container);
   }
 
   .label:disabled {

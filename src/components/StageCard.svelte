@@ -72,17 +72,20 @@
 {/if}
 
 <style>
+  /* #460 W1 — the §23 AI-boundary card was a light lavender island
+     (#f4ecff bg, #2a1450 text) on the dark app. The violet identity
+     stays; it now reads as a dark-tinted badge on-theme. */
   .ai-boundary-card {
-    border: 1px solid var(--color-ai-border, #5b3aa8);
-    background: var(--color-ai-bg, #f4ecff);
-    border-radius: 6px;
+    border: 1px solid rgba(154, 128, 255, 0.35);
+    background: rgba(91, 58, 168, 0.16);
+    border-radius: var(--radius-md);
     padding: 0.75rem 1rem;
     margin: 0.75rem 0;
-    color: var(--color-ai-text, #2a1450);
+    color: #d8ccff;
   }
 
   .ai-heading {
-    color: var(--color-ai-heading, #5b3aa8);
+    color: #c9b8ff;
     font-size: 0.95rem;
     letter-spacing: 0.02em;
   }
@@ -98,7 +101,7 @@
 
   dt {
     font-weight: 600;
-    color: var(--color-ai-heading, #5b3aa8);
+    color: #c9b8ff;
   }
 
   dd {

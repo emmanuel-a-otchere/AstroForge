@@ -26,7 +26,9 @@ use astroforge_core::node_catalog::{
     node_catalog as core_node_catalog, NodeCatalog, CATALOG_VERSION,
 };
 use astroforge_core::node_graph::mutation::{
-    insert_stage as core_insert_stage, NodeGraphMutationError,
+    insert_stage as core_insert_stage, remove_stage as core_remove_stage,
+    reorder_stage as core_reorder_stage, set_stage_enabled as core_set_stage_enabled,
+    update_graph as core_update_graph, GraphNodeState, NodeGraphMutationError,
 };
 use astroforge_core::pipeline_plans_store::PipelinePlanStoreError;
 use serde::Deserialize;
@@ -95,6 +97,85 @@ pub fn insert_stage(
         .map_err(node_graph_err_to_string)
 }
 
+// ─── update_graph + mutations (P1.6.3.1) ────────────────────────────────
+
+/// One node's write-back state in `update_graph`. Mirrors the
+/// TS-side `UpdateGraphNode` interface.
+#[derive(Debug, Deserialize)]
+pub struct UpdateGraphNodeDto {
+    pub stage_id: String,
+    pub sequence: u32,
+    pub enabled: bool,
+}
+
+/// Request payload for `update_graph`: the full graph state the
+/// constrained-mode UI holds (nodes + order + enabled flags).
+#[derive(Debug, Deserialize)]
+pub struct UpdateGraphRequest {
+    pub plan_id: String,
+    pub nodes: Vec<UpdateGraphNodeDto>,
+}
+
+/// Write the full graph state in one pass. The node set must match
+/// the plan's stages exactly (`graph state does not match the plan
+/// stages: ...` on mismatch — the TS side re-syncs from the returned
+/// error rather than silently dropping or duplicating stages).
+/// Returns the updated plan so the caller can refresh its mirror.
+#[tauri::command]
+pub fn update_graph(
+    state: State<'_, PipelinePlanState>,
+    request: UpdateGraphRequest,
+) -> Result<DomainPipelinePlan, String> {
+    let nodes = request
+        .nodes
+        .into_iter()
+        .map(|n| GraphNodeState {
+            stage_id: n.stage_id,
+            sequence: n.sequence,
+            enabled: n.enabled,
+        })
+        .collect::<Vec<_>>();
+    let store = &*state.store;
+    core_update_graph(store, &request.plan_id, &nodes).map_err(node_graph_err_to_string)
+}
+
+/// Remove an optional stage (refused for `required` stages — the
+/// UI disables Remove for those; the error surfaces the reason).
+#[tauri::command]
+pub fn remove_stage(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+    stage_id: String,
+) -> Result<DomainPipelinePlan, String> {
+    let store = &*state.store;
+    core_remove_stage(store, &plan_id, &stage_id).map_err(node_graph_err_to_string)
+}
+
+/// Move a stage to `new_sequence` (0-based, clamped to range).
+#[tauri::command]
+pub fn reorder_stage(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+    stage_id: String,
+    new_sequence: usize,
+) -> Result<DomainPipelinePlan, String> {
+    let store = &*state.store;
+    core_reorder_stage(store, &plan_id, &stage_id, new_sequence).map_err(node_graph_err_to_string)
+}
+
+/// Enable or disable a stage. `enabled` and `required` are
+/// orthogonal (workflow-A ships required stages disabled).
+#[tauri::command]
+pub fn set_stage_enabled(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+    stage_id: String,
+    enabled: bool,
+) -> Result<DomainPipelinePlan, String> {
+    let store = &*state.store;
+    core_set_stage_enabled(store, &plan_id, &stage_id, enabled).map_err(node_graph_err_to_string)
+}
+
 /// Map the slice's error enum to a `String` for the IPC layer.
 ///
 /// The prefix conventions mirror the existing
@@ -109,6 +190,21 @@ fn node_graph_err_to_string(e: NodeGraphMutationError) -> String {
     match e {
         NodeGraphMutationError::InvalidStageType(s) => {
             format!("unknown stage_type '{}' (not in NodeCatalog)", s)
+        }
+        NodeGraphMutationError::UnknownStage(id) => {
+            format!("unknown stage_id '{}'", id)
+        }
+        NodeGraphMutationError::StageRequired(id) => {
+            format!(
+                "stage '{}' is required and cannot be removed (disable it instead)",
+                id
+            )
+        }
+        NodeGraphMutationError::GraphMismatch(ids) => {
+            format!(
+                "graph state does not match the plan stages: {}",
+                ids.join(", ")
+            )
         }
         NodeGraphMutationError::Store(PipelinePlanStoreError::NotFound(plan_id)) => {
             format!("plan not found: {}", plan_id)

@@ -55,12 +55,19 @@
   // RT-13-era wireflow fix (#461 S1): Home actions route through the
   // host (App.svelte) via an explicit callback — the P1 CustomEvent
   // had no listener, so every Home button was a dead click.
+  import { onMount } from "svelte";
   let { onAction } = $props<{
     onAction: (
       action: PrimaryAction["id"],
       project?: { name: string },
     ) => void;
   }>();
+
+  // #465 W5 — refresh on mount so the recent list + statuses reflect
+  // Studio lifecycle events (close, imports) that happened elsewhere.
+  onMount(() => {
+    void projectsStore.refresh();
+  });
 
   function handle(action: PrimaryAction["id"]) {
     onAction(action);
@@ -114,6 +121,10 @@
 
     {#if $projectsStore.loading}
       <p class="empty-body font-body" aria-live="polite">Loading projects…</p>
+    {:else if $projectsStore.error}
+      <p class="error-line font-body" role="alert">
+        Could not load projects: {$projectsStore.error}
+      </p>
     {:else if $projectsStore.items.length === 0}
       <div class="empty-state">
         <span class="material-symbols-outlined empty-icon" aria-hidden="true">

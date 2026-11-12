@@ -617,6 +617,22 @@ impl StageHandler for DebayerHandler {
             return Err(StageHandlerError::NoSourceFrames(ctx.session_id.clone()));
         }
 
+        // #465 W3-fix — an already-RGB frame (JPEG/PNG decode) is not a
+        // Bayer mosaic: pass it through instead of mosaicking from the
+        // red channel (which discarded G/B on the JPEG walkthrough).
+        if let Some(first) = frames.first() {
+            if first.channels() >= 3 {
+                return Ok(StageOutput {
+                    image: Some(frames[0].clone()),
+                    parameters_json: ctx.stage.parameters_json.clone(),
+                    metadata_json: Some(
+                        r#"{"mode":"passthrough","reason":"already RGB"}"#.to_string(),
+                    ),
+                    artifact_id: None,
+                });
+            }
+        }
+
         let pattern =
             crate::debayer::BayerPattern::parse(&params.bayer_pattern).ok_or_else(|| {
                 StageHandlerError::DebayerFailed(format!(

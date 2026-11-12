@@ -84,12 +84,19 @@ pub fn image_version_list(
         // Older writes may not include a payload; treat missing
         // fields as honest "unknown" (empty strings, sequence
         // derived from event order).
-        let (label, artifact_id) = match ev.payload_json.as_deref() {
+        let (label, artifact_id, payload_version_id) = match ev.payload_json.as_deref() {
             Some(s) => parse_version_payload(s),
-            None => (String::new(), String::new()),
+            None => (String::new(), String::new(), String::new()),
+        };
+        // #465 W2-fix — prefer the REAL image_versions table id from the
+        // payload; the event id cannot be resolved by read_image_artifact.
+        let version_id = if payload_version_id.is_empty() {
+            ev.event_id.clone()
+        } else {
+            payload_version_id
         };
         versions.push(ImageVersionDto {
-            version_id: ev.event_id.clone(),
+            version_id,
             project_id: project.project_id.clone(),
             label: if label.is_empty() {
                 format!("v{}", next_seq + 1)
@@ -115,15 +122,17 @@ pub fn image_version_list(
 /// forgiving: unknown fields are ignored, missing fields default
 /// to empty. The shape is the minimum needed for the Compare
 /// workspace to render real, durable state.
-fn parse_version_payload(s: &str) -> (String, String) {
+fn parse_version_payload(s: &str) -> (String, String, String) {
     #[derive(serde::Deserialize)]
     struct V {
         #[serde(default)]
         label: String,
         #[serde(default)]
         primary_artifact_id: String,
+        #[serde(default)]
+        version_id: String,
     }
     serde_json::from_str::<V>(s)
-        .map(|v| (v.label, v.primary_artifact_id))
+        .map(|v| (v.label, v.primary_artifact_id, v.version_id))
         .unwrap_or_default()
 }

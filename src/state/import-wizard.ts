@@ -51,7 +51,7 @@ export type WizardStep = "add-data" | "scanning" | "understanding" | "confirm";
 
 const VALID_TRANSITIONS: Record<WizardStep, WizardStep[]> = {
   "add-data": ["scanning"],
-  scanning: ["understanding"],
+  scanning: ["understanding", "add-data"],
   understanding: ["confirm", "add-data"],
   confirm: [],
 };

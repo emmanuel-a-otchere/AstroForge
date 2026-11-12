@@ -294,6 +294,14 @@ impl PipelineRunner {
         // loads from the session's SourceAssets instead).
         let mut current_frames: Option<Vec<crate::image::F32Image>> = None;
         for stage in &plan.stages {
+            // #465 W2-fix — recipe-disabled stages (and #461-S4-disabled
+            // stacking stages for already-stacked masters) are SKIPPED,
+            // not executed. Previously "enabled" was decorative: every
+            // stage ran regardless, executing 500-iteration denoise on
+            // the IPC thread and re-stacking already-stacked masters.
+            if !stage.enabled {
+                continue;
+            }
             // Skip already-completed stages on resume.
             if skip_completed {
                 let prior = self
@@ -918,12 +926,25 @@ fn persist_stage_version(
             .map_err(|e| e.to_string())?;
         exec.output_artifact_id = Some(artifact_id.clone());
 
+        // #465 W2-fix — next_image_version_sequence returns MAX(sequence);
+        // the new version takes the NEXT slot. A real version_id is
+        // generated here (INSERT OR REPLACE with "" previously collapsed
+        // all run versions into one row).
         let sequence = domain
             .next_image_version_sequence(project_id)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            + 1;
         let now = crate::comparison::now_iso8601();
+        let version_id = format!(
+            "ver_{}_{}",
+            now_unix_ms(),
+            crate::artifact::ContentStore::sha256_hex(exec.stage_execution_id.as_bytes())
+                .chars()
+                .take(8)
+                .collect::<String>()
+        );
         let version = crate::domain::ImageVersion {
-            version_id: String::new(),
+            version_id: version_id.clone(),
             project_id: project_id.to_string(),
             label: format!("{label} ({stage_type})"),
             sequence,
@@ -938,16 +959,20 @@ fn persist_stage_version(
         domain
             .upsert_image_version(&version)
             .map_err(|e| e.to_string())?;
+        // #465 W2-fix — the payload must carry primary_artifact_id (the
+        // frontend timeline/Compare parse that field) and the REAL table
+        // version_id (image_version_list previously fell back to the
+        // event id, which read_image_artifact cannot resolve).
         domain
             .record_event(
                 project_id,
                 crate::domain::ProjectEventKind::VersionCreated,
                 Some(
                     &serde_json::json!({
-                        "version_id": version.version_id,
+                        "version_id": version_id,
                         "label": version.label,
                         "sequence": sequence,
-                        "artifact_id": artifact_id,
+                        "primary_artifact_id": artifact_id,
                         "stage_execution_id": exec.stage_execution_id,
                     })
                     .to_string(),
@@ -1068,7 +1093,10 @@ mod tests {
         assert_eq!(loaded.status, PipelinePlanStatus::Completed);
 
         let execs = store.list_stage_executions_for_plan(&plan_id).unwrap();
-        assert_eq!(execs.len(), 10);
+        // #465 W2-fix — recipe-disabled stages (Background/Denoise/Detail
+        // are optional(enabled:false) in the balanced recipe) are SKIPPED,
+        // so only the 7 enabled stages produce exec rows.
+        assert_eq!(execs.len(), 7);
         for e in &execs {
             assert_eq!(e.status, "completed");
             assert!(e.started_at.is_some());
@@ -1261,15 +1289,18 @@ mod tests {
         assert_eq!(outcome, RunOutcome::Completed);
 
         let execs = store.list_stage_executions_for_plan(&plan_id).unwrap();
-        // 5 pre-existing + 5 new = 10 total.
-        assert_eq!(execs.len(), 10);
-        // The last 5 must be marked completed by the runner (started_at
+        // 5 pre-existing + new rows for the ENABLED remaining stages.
+        // Stages 5..9 = background(disabled), color, stretch,
+        // denoise(disabled), detail(disabled) — with the #465
+        // skip-disabled fix only color + stretch execute.
+        assert_eq!(execs.len(), 7);
+        // The last 2 must be marked completed by the runner (started_at
         // > unix_ms:2, since they were inserted by resume, not by us).
         let new_ones: Vec<_> = execs
             .iter()
             .filter(|e| e.started_at.as_deref() != Some("unix_ms:1"))
             .collect();
-        assert_eq!(new_ones.len(), 5);
+        assert_eq!(new_ones.len(), 2);
         for e in &new_ones {
             assert_eq!(e.status, "completed");
         }
@@ -1650,29 +1681,15 @@ mod tests {
         assert!(!stretch_label.uses_ai);
         assert_eq!(stretch_label.model_id, None);
 
-        let denoise_label: AiBoundaryLabel = execs
-            .iter()
-            .find(|e| {
-                store
-                    .load_plan(&plan_id)
-                    .unwrap()
-                    .stages
-                    .iter()
-                    .find(|s| s.stage_id == e.stage_id)
-                    .map(|s| s.stage_type == "denoise")
-                    .unwrap_or(false)
-            })
-            .expect("denoise stage exec must exist")
-            .ai_label_json
-            .as_deref()
-            .map(|s| serde_json::from_str(s).unwrap())
-            .expect("denoise must have ai_label_json");
-        assert!(denoise_label.uses_ai);
-        assert_eq!(
-            denoise_label.model_id.as_deref(),
-            Some("astroforge_denoise_v1")
-        );
-        assert_eq!(denoise_label.seed, Some(0));
+        // #465 W2-fix — denoise is recipe-disabled and is now SKIPPED
+        // by the runner, so no AI-labeled exec row exists in this run.
+        // Every executed row must still carry its (classical) label.
+        assert!(execs.iter().all(|e| e.ai_label_json.is_some()));
+        assert!(execs.iter().all(|e| {
+            let label: AiBoundaryLabel =
+                serde_json::from_str(e.ai_label_json.as_deref().unwrap()).unwrap();
+            !label.uses_ai
+        }));
     }
 
     /// CR-05 P6.1b (§9 Retry) — retry a failed stage, plan flips to Ready.
@@ -1788,13 +1805,20 @@ mod tests {
         let plan_id = plan_in_store(&store);
 
         // The plan has stage_ids of the form `stage_<hash>_<idx>`.
-        let plan = store.load_plan(&plan_id).unwrap();
+        // #465 W2-fix — denoise is recipe-DISABLED and the runner now
+        // skips disabled stages before dispatch, so enable it on this
+        // plan copy for skip_stage to have something to skip.
+        let mut plan = store.load_plan(&plan_id).unwrap();
         let denoise_stage = plan
             .stages
-            .iter()
+            .iter_mut()
             .find(|s| s.stage_type == "denoise")
             .expect("deep_sky_osc_balanced includes a denoise stage");
+        denoise_stage.enabled = true;
         let denoise_id = denoise_stage.stage_id.clone();
+        store
+            .update_plan_stages(&plan_id, plan.stages.clone())
+            .expect("persist enabled flip");
         let stack_stage = plan
             .stages
             .iter()

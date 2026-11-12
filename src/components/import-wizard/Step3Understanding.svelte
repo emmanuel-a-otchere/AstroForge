@@ -38,7 +38,7 @@
   let qualityError: string | null = $state(null);
   $effect(() => {
     const lights = $importWizard.frames
-      .filter((f) => f.frameType === "LIGHT")
+      .filter((f) => f.frameType.toLowerCase() === "light")
       .map((f) => f.path);
     if (lights.length === 0) {
       qualityReport = null;

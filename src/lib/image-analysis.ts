@@ -183,7 +183,7 @@ function guessObjectFromName(name: string): string | null {
 function inferObjectType(
   frames: ImageMetadata[]
 ): { type: "deep_sky" | "planetary" | "lunar"; confidence: "high" | "medium" | "low"; reason: string } | null {
-  const lights = frames.filter((f) => f.frameType === "LIGHT");
+  const lights = frames.filter((f) => f.frameType.toLowerCase() === "light");
   if (lights.length === 0) return null;
 
   const exposures = lights
@@ -342,13 +342,13 @@ export async function analyzeFiles(files: File[]): Promise<AnalysisResult> {
 
   const objectDetection = inferObjectType(frames);
 
-  const lightCount = frames.filter((f) => f.frameType === "LIGHT").length;
+  const lightCount = frames.filter((f) => f.frameType.toLowerCase() === "light").length;
   const darkCount = frames.filter((f) => f.frameType === "DARK").length;
   const flatCount = frames.filter((f) => f.frameType === "FLAT").length;
   const biasCount = frames.filter((f) => f.frameType === "BIAS").length;
 
   const exposures = frames
-    .filter((f) => f.frameType === "LIGHT")
+    .filter((f) => f.frameType.toLowerCase() === "light")
     .map((f) => f.exposureTime)
     .filter((e): e is number => e !== null);
   const avgExposure =

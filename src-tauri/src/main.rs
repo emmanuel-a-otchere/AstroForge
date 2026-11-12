@@ -2195,6 +2195,10 @@ fn main() {
             commands_node_graph::read_node_catalog,
             // CR-10 P1.6.2.4: append a new stage to a PipelinePlan.
             commands_node_graph::insert_stage,
+            commands_node_graph::update_graph,
+            commands_node_graph::remove_stage,
+            commands_node_graph::reorder_stage,
+            commands_node_graph::set_stage_enabled,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,
             diff_cache_clear,

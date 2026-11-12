@@ -2563,3 +2563,64 @@ export const insertStage = (
   request: InsertStageRequest,
 ): Promise<PipelinePlanDto> =>
   invoke("insert_stage", { request });
+
+/**
+ * One node's write-back state in `update_graph` (CR-10 P1.6.3.1).
+ * Mirrors the Rust-side `UpdateGraphNodeDto`.
+ */
+export interface UpdateGraphNode {
+  stage_id: string;
+  sequence: number;
+  enabled: boolean;
+}
+
+/**
+ * Write the full graph state (nodes + order + enabled flags) in one
+ * pass — the mutation write-path the NodeSidebar context menu goes
+ * through. The node set must match the plan's stages exactly.
+ *
+ * Errors:
+ * - `"graph state does not match the plan stages: ..."` => the
+ *   submitted set is stale (unknown / missing / duplicate ids).
+ *   Re-sync from the active plan and re-issue.
+ * - `"plan not found: ..."` => the plan is gone.
+ */
+export const updateGraph = (
+  planId: string,
+  nodes: UpdateGraphNode[],
+): Promise<PipelinePlanDto> =>
+  invoke("update_graph", { request: { plan_id: planId, nodes } });
+
+/**
+ * Remove an optional stage. Refused for `required` stages —
+ * `"stage '...' is required and cannot be removed (disable it
+ * instead)"`. Returns the updated plan.
+ */
+export const removeStage = (
+  planId: string,
+  stageId: string,
+): Promise<PipelinePlanDto> =>
+  invoke("remove_stage", { planId, stageId });
+
+/**
+ * Move a stage to `newSequence` (0-based, clamped to the valid
+ * range). Returns the updated plan with sequences re-compacted.
+ */
+export const reorderStage = (
+  planId: string,
+  stageId: string,
+  newSequence: number,
+): Promise<PipelinePlanDto> =>
+  invoke("reorder_stage", { planId, stageId, newSequence });
+
+/**
+ * Enable or disable a stage. `enabled` and `required` are
+ * orthogonal (workflow-A ships required stages disabled). Returns
+ * the updated plan.
+ */
+export const setStageEnabled = (
+  planId: string,
+  stageId: string,
+  enabled: boolean,
+): Promise<PipelinePlanDto> =>
+  invoke("set_stage_enabled", { planId, stageId, enabled });

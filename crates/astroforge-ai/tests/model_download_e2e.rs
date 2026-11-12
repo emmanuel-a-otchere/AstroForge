@@ -406,13 +406,26 @@ fn denoise_acceptance_over_sample_dataset_frame() {
         .unwrap_or_else(|e| panic!("sample frame missing at {}: {e}", frame.display()));
 
     // Decode with core's FITS reader (the same path the app uses).
+    // The fixture is MONO (256x256x1 — a Seestar luminance frame);
+    // the enhancement surface consumes RGB image versions, so the
+    // mono plane is replicated to 3 channels exactly as a processed
+    // version would carry it. (The old assertion expected 3 channels
+    // from the decoder and predates the fixture/decoder reality.)
     let header = astroforge_core::fits::parse_header(&bytes).expect("sample frame header parses");
-    let img = astroforge_core::fits::read_f32_image(&bytes, &header).expect("sample frame decodes");
+    let mono = astroforge_core::fits::read_f32_image(&bytes, &header).expect("sample frame decodes");
     assert_eq!(
-        (img.width(), img.height(), img.channels()),
-        (256, 256, 3),
-        "fixture frame is 256x256 RGB"
+        (mono.width(), mono.height(), mono.channels()),
+        (256, 256, 1),
+        "fixture frame is 256x256 mono"
     );
+    let mut img = astroforge_core::image::F32Image::new(256, 256, 3);
+    for c in 0..3 {
+        for y in 0..256 {
+            for x in 0..256 {
+                img[(c, y, x)] = mono[(0, y, x)];
+            }
+        }
+    }
 
     let spec = DOWNLOAD_SPECS
         .iter()

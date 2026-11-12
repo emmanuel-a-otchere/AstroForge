@@ -184,6 +184,50 @@
   --accent: var(--cobalt-accent);
   --accent-dim: var(--primary-container);
 
+  /* ── #460 W1 — orphaned-name bridge ────────────────────────────────
+     168 component usages of this --color-* vocabulary had no
+     definition anywhere, so every one rendered its hardcoded
+     fallback — a second, unthemed palette (generic blue accent,
+     tailwind grays, light-theme islands) fighting the dark-sky
+     system. These aliases resolve the names into the DESIGN.md
+     tokens so the whole surface obeys one theme. Intent-specific
+     stragglers (recovery panel, timeline selection, AI badge,
+     accent-tinted rows) are restyled in their components. */
+  --color-text: var(--on-surface);
+  --color-text-primary: var(--on-surface);
+  --color-text-secondary: var(--on-surface-variant);
+  --color-text-muted: var(--on-surface-variant);
+  --color-muted: var(--outline);
+  --color-surface: var(--surface-container-low);
+  --color-surface-muted: var(--surface-container);
+  --color-surface-elevated: var(--surface-container-high);
+  --color-surface-1: var(--surface-container-lowest);
+  --color-surface-2: var(--surface-container);
+  --color-surface-3: var(--surface-container-low);
+  --color-border: var(--outline-variant);
+  --color-accent: var(--cobalt-accent);
+  --color-on-accent: #ffffff;
+  --color-error: var(--error);
+  --color-error-text: var(--on-error-container);
+  --color-input-bg: var(--surface-container-lowest);
+  --color-warning: var(--warning);
+  --color-warning-border: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-dot-muted: var(--outline);
+
+  /* ── #460 W1 — elevation + state depth ─────────────────────────────
+     The surface scale existed but nothing lifted cards off it.
+     Real depth = contact shadow + ambient shadow + hairline. */
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --elevation-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --elevation-3: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  /* Accent-tinted fill for selected / recommended rows (the old
+     orphaned fallback was a generic blue tint). */
+  --accent-tint: rgba(203, 78, 61, 0.1);
+
+  /* Eased fade for screen/tab transitions (no more hard cuts). */
+  --screen-in-duration: 220ms;
+
   /* ReceiptsPanel status text colours — sit beside the existing
      success-* tokens, matching the visual hierarchy of gallery pills. */
   --warning-fg: #fcd9a6;
@@ -330,4 +374,28 @@ body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ── #460 W1 — screen transition + starfield empty states ─────────── */
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.screen-in {
+  animation: screen-in var(--screen-in-duration) ease-out;
+}
+
+/* Sparse star texture for empty states — uses the existing star
+   tokens so density/brightness stay theme-controlled. */
+.starfield {
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, var(--star-color-100) 50%, transparent 51%),
+    radial-gradient(1px 1px at 34% 64%, var(--star-color-67) 50%, transparent 51%),
+    radial-gradient(1px 1px at 55% 18%, var(--star-color-83) 50%, transparent 51%),
+    radial-gradient(1px 1px at 71% 48%, var(--star-color-58) 50%, transparent 51%),
+    radial-gradient(1px 1px at 86% 76%, var(--star-color-100) 50%, transparent 51%),
+    radial-gradient(1px 1px at 24% 84%, var(--star-color-58) 50%, transparent 51%),
+    radial-gradient(1px 1px at 62% 90%, var(--star-color-67) 50%, transparent 51%),
+    radial-gradient(1px 1px at 92% 12%, var(--star-color-83) 50%, transparent 51%);
 }

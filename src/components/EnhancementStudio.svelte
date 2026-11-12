@@ -441,7 +441,7 @@
     margin: 0;
     padding: var(--sp-xs, 0.25rem) var(--sp-sm, 0.5rem);
     border-left: 3px solid var(--color-accent, #4f9cff);
-    background: var(--color-surface-muted, rgba(79, 156, 255, 0.08));
+    background: var(--accent-tint);
     border-radius: 3px;
     font-size: 0.8rem;
   }

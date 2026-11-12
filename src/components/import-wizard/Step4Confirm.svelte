@@ -18,6 +18,7 @@
     fetchProvenance,
     goToStep,
     importWizard,
+    resetImportWizard,
     materialiseSession,
     narrowbandCompositionLabel,
     provenanceLabel,
@@ -77,14 +78,23 @@
     }));
     await importRegisterAssets(current.sessionId, current.projectId, frames);
     await materialiseSession();
-    // #465 W1.2: refresh the frozen project snapshot so the Process
-    // workspace sees the new active_session_id in the SAME sitting
-    // (previously AutoPlanPanel stayed suppressed until reopen).
+    // #465 W1.2 + W4-audit: refresh the frozen project snapshot, the
+    // Overview checklist, and the version timeline — all three were
+    // stale in the same sitting. Reset the wizard (goToStep("add-data")
+    // was a silent no-op: confirm has no outgoing transitions).
     const fresh = await projectGet(current.projectId);
     projectContext.replace(fresh);
     await projectsStore.refresh();
+    try {
+      const { versionStore } = await import("../../state/versions");
+      const { workspaceState } = await import("../../state/workspace");
+      await versionStore.load(current.projectId);
+      await workspaceState.refreshOverview();
+    } catch {
+      /* best-effort */
+    }
     studioViewport.setView("process");
-    goToStep("add-data");
+    resetImportWizard();
   }
 
   async function onConfirm(): Promise<void> {

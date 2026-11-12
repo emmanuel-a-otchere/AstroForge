@@ -201,6 +201,16 @@ pub fn project_rename(
         .store
         .get_project(&opened.manifest.project_id)
         .map_err(store_err_to_string)?;
+    // #465 W1-fix — mirror the rename into the GLOBAL projects.db
+    // (project_list / project_get read the global store; without this
+    // write-through the old name was served forever). Same pattern as
+    // project_create's write-through.
+    {
+        let global = state.store.lock().map_err(lock_err)?;
+        global
+            .rename_project(&opened.manifest.project_id, &new_name)
+            .map_err(store_err_to_string)?;
+    }
     Ok(ProjectSummary::from(&project))
 }
 

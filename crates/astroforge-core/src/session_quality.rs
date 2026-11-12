@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 /// Quality summary of one light frame, in capture order.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct FrameQuality {
     pub index: usize,
     pub name: String,
@@ -72,6 +73,7 @@ pub const TREND_METRICS: &[&str] = &["fwhm", "stars", "estimated_snr", "local_sn
 /// where available; for FWHM lower is better, stars/SNR higher is
 /// better.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct MetricTrend {
     pub metric: String,
     pub first: f64,
@@ -83,6 +85,7 @@ pub struct MetricTrend {
 
 /// A robust outlier flag for one frame + metric.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct OutlierFlag {
     pub frame_index: usize,
     pub frame_name: String,
@@ -96,6 +99,7 @@ pub struct OutlierFlag {
 
 /// Session-level rollup of the per-frame quality rows.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionQualityReport {
     pub frames: Vec<FrameQuality>,
     pub trends: Vec<MetricTrend>,

@@ -95,6 +95,17 @@ pub fn import_analyse_session(
         .set_session_classification(&session_id, &classification)
         .map_err(|e| e.to_string())?;
 
+    // #465 W4-fix — record the AnalysisCompleted project event: the
+    // Overview checklist's Analyze row derives from this event and was
+    // permanently pending because nothing emitted it.
+    store
+        .record_event(
+            &project_id,
+            astroforge_core::domain::ProjectEventKind::AnalysisCompleted,
+            Some(&session_id),
+        )
+        .map_err(|e| e.to_string())?;
+
     Ok(ImportAnalysisResult {
         session_id,
         analysis,

@@ -375,16 +375,31 @@ pub fn derive_understanding_from_session(
     // Stacked-master heuristic: a single light whose filename carries
     // the stacked/master/combined marker, or a session whose lights
     // ALL carry it. Never guessed from metadata alone.
+    // Filename marker + parent-directory marker: ~/Downloads/stacked/
+    // IMG_0933.JPG is a stacked master even though the filename has no
+    // marker. Both checks are lowercase.
     let marker = |name: &str| {
         let lower = name.to_lowercase();
         lower.contains("_stacked") || lower.contains("_master") || lower.contains("_combined")
+    };
+    let dir_marker = |asset: &crate::domain::SourceAsset| {
+        std::path::Path::new(&asset.original_path)
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|d| {
+                let lower = d.to_string_lossy().to_lowercase();
+                lower.contains("stack") || lower.contains("master")
+            })
+            .unwrap_or(false)
     };
     let all_marked = !lights.is_empty()
         && lights
             .iter()
             .all(|a| marker(&a.original_filename.to_lowercase()));
-    let already_stacked =
-        (lights.len() == 1 && marker(&lights[0].original_filename.to_lowercase())) || all_marked;
+    let already_stacked = (lights.len() == 1
+        && marker(&lights[0].original_filename.to_lowercase()))
+        || all_marked
+        || (lights.len() == 1 && dir_marker(lights[0]));
 
     let (capture_kind, composition) = match classification {
         Some(c) => (c.capture_kind.clone(), c.narrowband_composition.clone()),

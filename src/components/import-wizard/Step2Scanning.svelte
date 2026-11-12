@@ -110,4 +110,13 @@
     color: var(--color-error, #ff6b6b);
     margin: 0;
   }
+  .back-btn {
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    border: 1px solid var(--color-border, #444);
+    background: var(--color-surface, #222);
+    color: var(--color-text-primary, #eee);
+    cursor: pointer;
+    margin-top: 0.5rem;
+  }
 </style>

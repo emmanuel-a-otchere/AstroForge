@@ -2185,9 +2185,8 @@ export const skipStage = (
 // Read-only wrapper around the `ai_model_list` Tauri command. Surfaces the
 // canonical AI model list (denoise, super-resolution, de-jpeg, star
 // segmentation, cloud score, color calibration, trail inpainting) to the
-// application-level AI Models screen. No download flow is exposed in this
-// slice; `installed` always returns `false` and a follow-up tranche wires
-// the actual install path.
+// application-level AI Models screen. `installed` reflects on-disk
+// presence and `aiModelDownload` installs pinned models (W2-era).
 
 export interface AiModelInfo {
   name: string;

@@ -370,6 +370,46 @@ impl PipelinePlanStore {
     /// CR-05 P2 slice 1 — update the plan's status (Draft / Ready /
     /// Running / Paused / Completed / Failed / Cancelled). The P2.5
     /// pause/resume path will use this too.
+    /// #465 W2-fix — replace the persisted stage list (used by tests to
+    /// flip `enabled` flags; mirrors insert_plan's column set).
+    pub fn update_plan_stages(
+        &self,
+        plan_id: &str,
+        stages: Vec<crate::domain::PipelineStage>,
+    ) -> Result<(), PipelinePlanStoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .expect("pipeline plans store mutex poisoned");
+        conn.execute(
+            "DELETE FROM pipeline_stages WHERE plan_id = ?1",
+            params![plan_id],
+        )
+        .map_err(PipelinePlanStoreError::Sqlite)?;
+        for stage in &stages {
+            conn.execute(
+                "INSERT INTO pipeline_stages (
+                    stage_id, plan_id, stage_type, sequence, label, required,
+                    enabled, parameters_json, produces_image_version, undo_supported
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    stage.stage_id,
+                    stage.plan_id,
+                    stage.stage_type,
+                    stage.sequence as i64,
+                    stage.label,
+                    stage.required as i64,
+                    stage.enabled as i64,
+                    stage.parameters_json,
+                    stage.produces_image_version as i64,
+                    stage.undo_supported as i64,
+                ],
+            )
+            .map_err(PipelinePlanStoreError::Sqlite)?;
+        }
+        Ok(())
+    }
+
     pub fn update_plan_status(
         &self,
         plan_id: &str,

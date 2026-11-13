@@ -260,6 +260,20 @@
     border-bottom: none;
   }
 
+  /* #460 W2 — the table read as a spreadsheet; rows respond and the
+     container lifts off the app plane. */
+  .catalog {
+    box-shadow: var(--elevation-1);
+  }
+
+  .catalog tbody tr {
+    transition: background var(--transition-fast);
+  }
+
+  .catalog tbody tr:hover {
+    background: var(--surface-container-high);
+  }
+
   .model-name {
     font-weight: 600;
   }

@@ -160,6 +160,7 @@
     background: var(--surface-container-high);
     color: var(--on-surface);
     border: 1px solid var(--outline);
+    box-shadow: var(--elevation-1);
     border-radius: var(--radius-sm);
     padding: var(--sp-xs) var(--sp-sm);
   }

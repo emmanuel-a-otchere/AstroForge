@@ -277,12 +277,20 @@
   }
   .recommendation-card {
     padding: 0.75rem 1rem;
-    border: 1px solid var(--color-border, #2a2f3a);
-    border-radius: 6px;
-    background: var(--color-surface, #15181f);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    background: var(--surface-container-low);
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    /* #460 W2 — cards sat flush on the plane; lift + accent hover. */
+    box-shadow: var(--elevation-1);
+    transition: box-shadow var(--transition-base), border-color var(--transition-fast);
+  }
+
+  .recommendation-card:hover {
+    border-color: var(--outline);
+    box-shadow: var(--elevation-2);
   }
   .recommendation-card.generative {
     border-left: 3px solid var(--color-accent, #ff8a4f);

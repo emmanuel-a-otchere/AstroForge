@@ -2624,3 +2624,30 @@ export const setStageEnabled = (
   enabled: boolean,
 ): Promise<PipelinePlanDto> =>
   invoke("set_stage_enabled", { planId, stageId, enabled });
+
+/**
+ * Serialize the plan to `.astroforge-recipe` JSON (CR-10 P1.6.4.1,
+ * spec §7.7.7). Paths, GPS/timestamps and machine-specific keys are
+ * stripped per §11.2 — the artifact is portable.
+ */
+export const graphToRecipe = (
+  planId: string,
+  appVersion: string,
+): Promise<string> => invoke("graph_to_recipe", { planId, appVersion });
+
+/**
+ * Materialize a plan from recipe JSON (CR-10 P1.6.4.2). The result
+ * is NOT persisted: per §7.7.7 the UI prompts before replacing the
+ * active graph or creating a session.
+ *
+ * Errors:
+ * - `"unknown stage 'x' at pipeline entry N"` => the file references
+ *   a stage the catalog does not know; the index points at the row.
+ * - `"malformed recipe: ..."` => structurally invalid JSON.
+ */
+export const recipeToGraph = (
+  recipeJson: string,
+  projectId: string,
+  sessionId: string,
+): Promise<PipelinePlanDto> =>
+  invoke("recipe_to_graph", { recipeJson, projectId, sessionId });

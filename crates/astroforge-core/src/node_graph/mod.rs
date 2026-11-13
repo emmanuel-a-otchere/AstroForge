@@ -12,3 +12,4 @@
 //! primitives directly via the in-memory store constructor.
 
 pub mod mutation;
+pub mod recipe_io;

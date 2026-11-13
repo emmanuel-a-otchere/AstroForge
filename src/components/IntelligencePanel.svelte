@@ -376,6 +376,13 @@
     padding: var(--sp-xs) var(--sp-md);
     font-size: 0.85rem;
     cursor: pointer;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+
+  /* #460 W2 — Apply/Dismiss respond with the accent, not just a fill. */
+  .btn:hover:not(:disabled) {
+    border-color: var(--cobalt-accent);
+    box-shadow: 0 0 8px var(--glow-cobalt-dim);
   }
   .btn:disabled {
     opacity: 0.5;

@@ -30,6 +30,7 @@ use astroforge_core::node_graph::mutation::{
     reorder_stage as core_reorder_stage, set_stage_enabled as core_set_stage_enabled,
     update_graph as core_update_graph, GraphNodeState, NodeGraphMutationError,
 };
+use astroforge_core::node_graph::recipe_io::{plan_to_recipe_json, recipe_to_plan};
 use astroforge_core::pipeline_plans_store::PipelinePlanStoreError;
 use serde::Deserialize;
 use tauri::State;
@@ -174,6 +175,43 @@ pub fn set_stage_enabled(
 ) -> Result<DomainPipelinePlan, String> {
     let store = &*state.store;
     core_set_stage_enabled(store, &plan_id, &stage_id, enabled).map_err(node_graph_err_to_string)
+}
+
+// ─── recipe round-trip (P1.6.4.1 / P1.6.4.2) ────────────────────────────
+
+/// Serialize the plan to `.astroforge-recipe` JSON (§7.7.7). Paths,
+/// GPS/timestamps and machine-specific keys are stripped per §11.2.
+#[tauri::command]
+pub fn graph_to_recipe(
+    state: State<'_, PipelinePlanState>,
+    plan_id: String,
+    app_version: String,
+) -> Result<String, String> {
+    let store = &*state.store;
+    let plan = store.load_plan(&plan_id).map_err(store_err_string)?;
+    plan_to_recipe_json(&plan, &app_version).map_err(|e| e.to_string())
+}
+
+/// Materialize a plan from recipe JSON. The result is NOT persisted:
+/// per §7.7.7 the UI prompts before replacing the active graph or
+/// creating a session. Unknown stages fail with the pipeline entry
+/// index ("unknown stage 'x' at pipeline entry N").
+#[tauri::command]
+pub fn recipe_to_graph(
+    recipe_json: String,
+    project_id: String,
+    session_id: String,
+) -> Result<DomainPipelinePlan, String> {
+    recipe_to_plan(&recipe_json, &project_id, &session_id).map_err(|e| e.to_string())
+}
+
+/// Load-plan store errors surface through the same prefix the
+/// pipeline-plan commands use.
+fn store_err_string(e: PipelinePlanStoreError) -> String {
+    match e {
+        PipelinePlanStoreError::NotFound(id) => format!("plan not found: {}", id),
+        other => format!("pipeline-plan store error: {}", other),
+    }
 }
 
 /// Map the slice's error enum to a `String` for the IPC layer.

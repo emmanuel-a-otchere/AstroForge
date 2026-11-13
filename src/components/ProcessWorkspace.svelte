@@ -44,6 +44,7 @@
   import ProcessingControls from "./ProcessingControls.svelte";
   import SaveAsRecipePanel from "./SaveAsRecipePanel.svelte";
   import NodePalette from "./NodePalette.svelte";
+  import NodeStageList from "./NodeStageList.svelte";
   import { activeProject, projectContext } from "../state/project-context";
   import {
     activePlan,
@@ -193,6 +194,9 @@
   {#snippet sidebar()}
     {#if $isNodeMode}
       <NodePalette onSelect={handlePaletteSelect} />
+      <!-- CR-10 P1.6.3.2 — the constrained-layout stage stack with
+           the mutation context menu (enable / reorder / remove). -->
+      <NodeStageList />
     {/if}
   {/snippet}
   {#if $workspaceState.loading}

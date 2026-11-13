@@ -2218,6 +2218,8 @@ fn main() {
             commands_node_graph::remove_stage,
             commands_node_graph::reorder_stage,
             commands_node_graph::set_stage_enabled,
+            commands_node_graph::graph_to_recipe,
+            commands_node_graph::recipe_to_graph,
             diff_cache_get_or_compute,
             diff_cache_invalidate_version,
             diff_cache_clear,

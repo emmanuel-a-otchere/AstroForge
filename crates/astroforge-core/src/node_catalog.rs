@@ -93,6 +93,7 @@ pub const USER_FACING_STAGE_TYPES: &[&str] = &[
 pub const CANONICAL_STAGE_TYPES: &[&str] = &[
     "calibrate",
     "debayer",
+    "quality_filter",
     "register",
     "stack",
     "background",

@@ -218,10 +218,9 @@ pub fn list_project_graphs(
     project_id: String,
 ) -> Result<Vec<astroforge_core::pipeline_plans_store::PipelinePlanSummary>, String> {
     let store = &*state.store;
-    let summaries = store
+    store
         .list_plans_for_project(&project_id)
-        .map_err(store_err_string)?;
-    Ok(summaries.into_iter().map(Into::into).collect())
+        .map_err(store_err_string)
 }
 
 /// The plan pinned for the session, if any. `None` = the session

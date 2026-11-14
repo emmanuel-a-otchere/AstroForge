@@ -44,7 +44,7 @@
 </script>
 
 {#if $versionStore.versions.length === 0}
-  <p class="empty font-body">
+  <p class="empty starfield font-body">
     No image versions yet. A version appears in the timeline
     when the project records a `VersionCreated` event.
   </p>
@@ -180,7 +180,17 @@
     color: var(--on-surface-variant);
     font-size: 0.9rem;
     text-align: center;
-    padding: var(--sp-md);
+    padding: var(--sp-xl) var(--sp-md);
+    /* #460 W3 — the sky identity: a sparse star texture frames the
+       empty state instead of bare text on the app plane. */
+    border: 1px dashed var(--outline-variant);
+    border-radius: var(--radius-lg);
+    background-color: var(--surface-container-lowest);
+  }
+
+  .empty.starfield {
+    background-repeat: repeat;
+    background-size: 220px 220px;
   }
 
   @media (max-width: 720px) {

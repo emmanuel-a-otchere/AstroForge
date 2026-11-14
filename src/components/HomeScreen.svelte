@@ -126,7 +126,7 @@
         Could not load projects: {$projectsStore.error}
       </p>
     {:else if $projectsStore.items.length === 0}
-      <div class="empty-state">
+      <div class="empty-state starfield">
         <span class="material-symbols-outlined empty-icon" aria-hidden="true">
           collections
         </span>
@@ -302,10 +302,17 @@
     align-items: center;
     text-align: center;
     padding: var(--sp-xl);
-    background: var(--surface-container-low);
+    /* #460 W3 — deepest surface + sparse star texture: the empty
+       state reads as sky, not as missing content. */
+    background-color: var(--surface-container-lowest);
     border: 1px dashed var(--outline-variant);
     border-radius: var(--radius-lg);
     gap: var(--sp-md);
+  }
+
+  .empty-state.starfield {
+    background-repeat: repeat;
+    background-size: 220px 220px;
   }
 
   .empty-icon {

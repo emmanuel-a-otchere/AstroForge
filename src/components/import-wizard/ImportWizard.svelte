@@ -20,7 +20,23 @@
 
 <section class="wizard" aria-live="polite">
   <header class="stepper">
-    <span class="step-label font-body">{describeStep($importWizard.step)}</span>
+    <!-- #460 W3 — the step counter reads as a flat gray band; the
+         accent hairline + progress dots give it identity and state. -->
+    <div class="step-row">
+      <span class="step-label font-body">{describeStep($importWizard.step)}</span>
+      <ol class="step-dots" aria-hidden="true">
+        {#each ["add-data", "scanning", "understanding", "confirm"] as dot, i (dot)}
+          <li
+            class="dot"
+            class:dot-active={$importWizard.step === dot}
+            class:dot-done={i <
+              ["add-data", "scanning", "understanding", "confirm"].indexOf(
+                $importWizard.step,
+              )}
+          ></li>
+        {/each}
+      </ol>
+    </div>
   </header>
 
   <div class="step-content">
@@ -44,14 +60,48 @@
   }
   .stepper {
     padding: 0.75rem 1.5rem;
-    border-bottom: 1px solid var(--color-border, #444);
-    background: var(--color-surface-elevated, #1a1a1a);
+    border-bottom: 1px solid var(--outline-variant);
+    background: var(--surface-container-low);
+    /* Accent hairline on the leading edge — the banner carries the
+       theme's warm identity instead of anonymous gray. */
+    border-left: 2px solid var(--cobalt-accent);
+  }
+  .step-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-md);
   }
   .step-label {
-    color: var(--color-text-secondary, #999);
+    color: var(--on-surface-variant);
     font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+  .step-dots {
+    display: flex;
+    gap: 6px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--surface-container-highest);
+    border: 1px solid var(--outline-variant);
+    transition: background var(--transition-fast), border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
+  }
+  .dot-active {
+    background: var(--cobalt-accent);
+    border-color: var(--cobalt-accent);
+    box-shadow: 0 0 6px var(--glow-cobalt-mid);
+  }
+  .dot-done {
+    background: var(--outline);
+    border-color: var(--outline);
   }
   .step-content {
     flex: 1;

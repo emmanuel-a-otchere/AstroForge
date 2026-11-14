@@ -1,7 +1,7 @@
 # CR-10 Implementation Plan: Node-Based Editor
 
 **Date:** 2026-09-28
-**Status:** Proposed (P0 + P1.6.1.1 + P1.6.1.2 + P1.6.1.3 + P1.6.2.1 + P1.6.2.2 + P1.6.2.3 all shipped; P1.6.2.4 onwards pending)
+**Status:** Shipped through P1.6.4.5 (all slices except P1.6.3.4 parameter hints — see docs/CR-10-AUDIT.md; PRs #478-#485, 2026-11-13..15)
 **Source CR:** [`../../CR-10-NODE-BASED-EDITOR.md`](../../CR-10-NODE-BASED-EDITOR.md)
 **Spec carrier:** [`../../specs/AstroForge_Spec_v1.4.0.md`](../../specs/AstroForge_Spec_v1.4.0.md) §7.7 + Delta from 1.4.0
 **Strategy:** P0 docs-only (this PR), then four sub-milestones (1.6.1 through 1.6.4) decomposed into one-task-per-IPC slices per Decision D-CR-10-10. Each slice is one PR-sized tranche; each tranche is independently reviewable and CI-green before the next starts.

@@ -56,8 +56,9 @@ truth for the project's behavior, architecture, and feature set.
 > preserves the previous carrier's full content unchanged; the delta
 > section links to canonical CR documents rather than re-authoring prose.
 >
-> **CR-10 Node-Based Editor (proposed, this PR):**
-> [CR-10-NODE-BASED-EDITOR.md](../CR-10-NODE-BASED-EDITOR.md)
+> **CR-10 Node-Based Editor (shipped through P1.6.4.5; audit):**
+> [CR-10-NODE-BASED-EDITOR.md](../CR-10-NODE-BASED-EDITOR.md) ·
+> [CR-10-AUDIT.md](../CR-10-AUDIT.md)
 > establishes a user-facing node-based editor over the §7 deep-sky
 > pipeline. New spec section §7.7 Node-Based Editor Surface is
 > added in-place to

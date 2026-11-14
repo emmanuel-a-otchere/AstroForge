@@ -19,6 +19,7 @@
     removeStage,
     reorderStage,
     setStageEnabled,
+    resetSessionToProjectDefault,
     type PipelinePlanDto,
   } from "../lib/astroforge-api";
   import { activePlan } from "../lib/pipeline-plan-store";
@@ -134,12 +135,47 @@
   function cancelRemove() {
     confirmFor = null;
   }
+
+  // CR-10 P1.6.4.3 — materialize the project's default graph for the
+  // active session (round-trip re-bind, idempotent on an unchanged
+  // default) and clear any override row.
+  async function handleResetToDefault() {
+    const current = $activePlan;
+    if (!current || actionInFlight) return;
+    actionInFlight = true;
+    actionError = null;
+    try {
+      activePlan.set(
+        await resetSessionToProjectDefault(
+          current.project_id,
+          current.session_id,
+        ),
+      );
+    } catch (err) {
+      actionError = errText(err);
+    } finally {
+      actionInFlight = false;
+    }
+  }
 </script>
 
 <svelte:window onclick={closeMenu} />
 
 <section class="node-stage-list" aria-label="Pipeline stages (node mode)">
-  <h3 class="font-display">Stages</h3>
+  <div class="list-header">
+    <h3 class="font-display">Stages</h3>
+    {#if plan}
+      <button
+        type="button"
+        class="reset-btn font-body"
+        onclick={handleResetToDefault}
+        disabled={actionInFlight}
+        title="Materialize the project's default graph for this session"
+      >
+        Reset to project default
+      </button>
+    {/if}
+  </div>
   {#if actionError}
     <p class="action-error font-body" role="alert">{actionError}</p>
   {/if}
@@ -234,10 +270,39 @@
     margin-top: var(--sp-md);
   }
 
+  .list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-sm);
+  }
+
   h3 {
     margin: 0;
     font-size: 1rem;
     color: var(--on-surface);
+  }
+
+  .reset-btn {
+    appearance: none;
+    border: 1px solid var(--outline-variant);
+    background: var(--surface-container);
+    color: var(--on-surface);
+    border-radius: var(--radius-default);
+    padding: 3px var(--sp-sm);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: border-color var(--transition-fast);
+  }
+
+  .reset-btn:hover:not(:disabled) {
+    border-color: var(--cobalt-accent);
+    box-shadow: 0 0 8px var(--glow-cobalt-dim);
+  }
+
+  .reset-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .empty {

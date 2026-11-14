@@ -30,7 +30,10 @@ use astroforge_core::node_graph::mutation::{
     reorder_stage as core_reorder_stage, set_stage_enabled as core_set_stage_enabled,
     update_graph as core_update_graph, GraphNodeState, NodeGraphMutationError,
 };
-use astroforge_core::node_graph::recipe_io::{plan_to_recipe_json, recipe_to_plan};
+use astroforge_core::node_graph::recipe_io::{
+    plan_to_recipe_json, recipe_to_plan,
+    reset_session_to_project_default as core_reset_session_to_project_default,
+};
 use astroforge_core::pipeline_plans_store::PipelinePlanStoreError;
 use serde::Deserialize;
 use tauri::State;
@@ -203,6 +206,80 @@ pub fn recipe_to_graph(
     session_id: String,
 ) -> Result<DomainPipelinePlan, String> {
     recipe_to_plan(&recipe_json, &project_id, &session_id).map_err(|e| e.to_string())
+}
+
+// ─── per-project default + per-session overrides (P1.6.4.3) ────────────
+
+/// All graph (plan) summaries for a project, newest first. The first
+/// entry is the project's DEFAULT graph for the reset semantics.
+#[tauri::command]
+pub fn list_project_graphs(
+    state: State<'_, PipelinePlanState>,
+    project_id: String,
+) -> Result<Vec<astroforge_core::pipeline_plans_store::PipelinePlanSummary>, String> {
+    let store = &*state.store;
+    let summaries = store
+        .list_plans_for_project(&project_id)
+        .map_err(store_err_string)?;
+    Ok(summaries.into_iter().map(Into::into).collect())
+}
+
+/// The plan pinned for the session, if any. `None` = the session
+/// follows the project default.
+#[tauri::command]
+pub fn get_session_graph_override(
+    state: State<'_, PipelinePlanState>,
+    project_id: String,
+    session_id: String,
+) -> Result<Option<DomainPipelinePlan>, String> {
+    let store = &*state.store;
+    match store
+        .get_graph_override(&project_id, &session_id)
+        .map_err(store_err_string)?
+    {
+        Some(plan_id) => {
+            let plan = store.load_plan(&plan_id).map_err(store_err_string)?;
+            Ok(Some(plan))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Pin `plan_id` as the session's graph. The plan must belong to the
+/// project (`plan not part of project ...` otherwise).
+#[tauri::command]
+pub fn set_session_graph_override(
+    state: State<'_, PipelinePlanState>,
+    project_id: String,
+    session_id: String,
+    plan_id: String,
+) -> Result<DomainPipelinePlan, String> {
+    let store = &*state.store;
+    let plan = store.load_plan(&plan_id).map_err(store_err_string)?;
+    if plan.project_id != project_id {
+        return Err(format!(
+            "plan '{}' does not belong to project '{}'",
+            plan_id, project_id
+        ));
+    }
+    store
+        .set_graph_override(&project_id, &session_id, &plan_id)
+        .map_err(store_err_string)?;
+    Ok(plan)
+}
+
+/// Materialize the project's default graph for the session (the
+/// round-trip machinery re-binds it), persist it, clear any override
+/// row, and return the plan. Idempotent on an unchanged default.
+#[tauri::command]
+pub fn reset_session_to_project_default(
+    state: State<'_, PipelinePlanState>,
+    project_id: String,
+    session_id: String,
+) -> Result<DomainPipelinePlan, String> {
+    let store = &*state.store;
+    core_reset_session_to_project_default(store, &project_id, &session_id)
+        .map_err(|e| e.to_string())
 }
 
 /// Load-plan store errors surface through the same prefix the

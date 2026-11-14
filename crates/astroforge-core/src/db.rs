@@ -141,6 +141,19 @@ CREATE TABLE IF NOT EXISTS pipeline_stages (
     UNIQUE(plan_id, sequence)
 );
 
+-- CR-10 P1.6.4.3 — per-session graph overrides. A project carries a
+-- default graph (its latest plan); a session may pin a specific plan
+-- instead. Absence of a row = the session follows the project
+-- default ("Reset to project default" deletes the row and
+-- materializes the default graph for the session).
+CREATE TABLE IF NOT EXISTS graph_overrides (
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (project_id, session_id)
+);
+
 CREATE TABLE IF NOT EXISTS stage_executions (
     stage_execution_id TEXT PRIMARY KEY,
     plan_id TEXT NOT NULL,

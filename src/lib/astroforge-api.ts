@@ -2651,3 +2651,46 @@ export const recipeToGraph = (
   sessionId: string,
 ): Promise<PipelinePlanDto> =>
   invoke("recipe_to_graph", { recipeJson, projectId, sessionId });
+
+/**
+ * All graph (plan) summaries for a project, newest first (CR-10
+ * P1.6.4.3). The first entry is the project's DEFAULT graph for the
+ * reset semantics.
+ */
+export const listProjectGraphs = (
+  projectId: string,
+): Promise<PipelinePlanSummary[]> =>
+  invoke("list_project_graphs", { projectId });
+
+/**
+ * The plan pinned for the session, or `null` when the session
+ * follows the project default (CR-10 P1.6.4.3).
+ */
+export const getSessionGraphOverride = (
+  projectId: string,
+  sessionId: string,
+): Promise<PipelinePlanDto | null> =>
+  invoke("get_session_graph_override", { projectId, sessionId });
+
+/**
+ * Pin a plan as the session's graph. The plan must belong to the
+ * project.
+ */
+export const setSessionGraphOverride = (
+  projectId: string,
+  sessionId: string,
+  planId: string,
+): Promise<PipelinePlanDto> =>
+  invoke("set_session_graph_override", { projectId, sessionId, planId });
+
+/**
+ * Materialize the project's default graph for the session and clear
+ * any override row. Idempotent on an unchanged default. Errors:
+ * `"no default graph for project '...'"` when the project has no
+ * plans yet.
+ */
+export const resetSessionToProjectDefault = (
+  projectId: string,
+  sessionId: string,
+): Promise<PipelinePlanDto> =>
+  invoke("reset_session_to_project_default", { projectId, sessionId });

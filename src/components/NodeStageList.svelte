@@ -30,6 +30,31 @@
     type StageNodeView,
   } from "../lib/node-stage-list-logic";
   import DestructiveConfirmDialog from "./DestructiveConfirmDialog.svelte";
+  import NodeCanvas from "./NodeCanvas.svelte";
+
+  // CR-10 P1.6.3.3 — Constrained (list) vs Free-form (canvas) view,
+  // persisted per the plan's layout-mode toggle.
+  type StageView = "list" | "canvas";
+  const VIEW_PREF_KEY = "node-stage-view";
+  let stageView: StageView = $state(
+    ((): StageView => {
+      try {
+        const raw = localStorage.getItem(VIEW_PREF_KEY);
+        return raw === "canvas" ? "canvas" : "list";
+      } catch {
+        return "list";
+      }
+    })(),
+  );
+
+  function setStageView(view: StageView) {
+    stageView = view;
+    try {
+      localStorage.setItem(VIEW_PREF_KEY, view);
+    } catch {
+      /* best-effort persistence */
+    }
+  }
 
   let actionError: string | null = $state(null);
   let actionInFlight = $state(false);
@@ -164,6 +189,24 @@
 <section class="node-stage-list" aria-label="Pipeline stages (node mode)">
   <div class="list-header">
     <h3 class="font-display">Stages</h3>
+    <div class="view-toggle" role="group" aria-label="Layout mode">
+      <button
+        type="button"
+        class="view-btn font-body"
+        data-active={stageView === "list"}
+        onclick={() => setStageView("list")}
+      >
+        List
+      </button>
+      <button
+        type="button"
+        class="view-btn font-body"
+        data-active={stageView === "canvas"}
+        onclick={() => setStageView("canvas")}
+      >
+        Canvas
+      </button>
+    </div>
     {#if plan}
       <button
         type="button"
@@ -183,6 +226,8 @@
     <p class="empty font-body">No active plan — generate one to edit the graph.</p>
   {:else if nodes.length === 0}
     <p class="empty font-body">No stages yet — insert from the palette above.</p>
+  {:else if stageView === "canvas"}
+    <NodeCanvas />
   {:else}
     <ol class="stack">
       {#each nodes as node, i (node.stage_id)}
@@ -303,6 +348,28 @@
   .reset-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  .view-toggle {
+    display: flex;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-default);
+    overflow: hidden;
+  }
+
+  .view-btn {
+    appearance: none;
+    border: none;
+    background: var(--surface-container);
+    color: var(--on-surface-variant);
+    padding: 3px var(--sp-sm);
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  .view-btn[data-active="true"] {
+    background: var(--surface-container-high);
+    color: var(--on-surface);
   }
 
   .empty {

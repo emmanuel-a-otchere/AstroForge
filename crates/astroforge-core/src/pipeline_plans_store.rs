@@ -287,6 +287,67 @@ impl PipelinePlanStore {
         Ok(rows)
     }
 
+    // ─── Session graph overrides (CR-10 P1.6.4.3) ──────────────────────
+    //
+    // A project carries one default graph (its latest plan); a session
+    // may pin a specific plan instead. Absence of a row = the session
+    // follows the project default.
+
+    /// Pin `plan_id` as the graph override for `(project, session)`.
+    /// Re-pinning replaces the row (UPSERT).
+    pub fn set_graph_override(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        plan_id: &str,
+    ) -> Result<(), PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        conn.execute(
+            "INSERT INTO graph_overrides (project_id, session_id, plan_id, updated_at)
+             VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(project_id, session_id)
+             DO UPDATE SET plan_id = ?3, updated_at = datetime('now')",
+            params![project_id, session_id, plan_id],
+        )?;
+        Ok(())
+    }
+
+    /// The plan pinned for `(project, session)`, if any.
+    pub fn get_graph_override(
+        &self,
+        project_id: &str,
+        session_id: &str,
+    ) -> Result<Option<String>, PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT plan_id FROM graph_overrides
+             WHERE project_id = ?1 AND session_id = ?2",
+        )?;
+        let mut rows = stmt.query_map(params![project_id, session_id], |row| {
+            row.get::<_, String>(0)
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Clear the session's override (back to the project default).
+    /// Removing a non-existent row is a no-op, so "Reset to project
+    /// default" is idempotent.
+    pub fn delete_graph_override(
+        &self,
+        project_id: &str,
+        session_id: &str,
+    ) -> Result<(), PipelinePlanStoreError> {
+        let conn = self.conn.lock().expect("poisoned");
+        conn.execute(
+            "DELETE FROM graph_overrides WHERE project_id = ?1 AND session_id = ?2",
+            params![project_id, session_id],
+        )?;
+        Ok(())
+    }
+
     // ─── Stage execution CRUD (CR-05 P2 slice 1) ───────────────────────
     //
     // P2 ships start + cancel only; pause / resume land in P2.5. The

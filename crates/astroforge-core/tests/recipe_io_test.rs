@@ -212,3 +212,94 @@ fn plan_id_is_deterministic_per_project_and_session() {
     let c = recipe_to_plan(recipe, "proj_d", "sess_other").expect("c");
     assert_ne!(a.plan_id, c.plan_id, "different session, different id");
 }
+
+/// P1.6.4.3 — the session-override semantics: pin a plan, read it
+/// back, reset materializes the project default for the session,
+/// and the reset is idempotent on an unchanged default.
+#[test]
+fn session_overrides_pin_read_and_reset() {
+    use astroforge_core::node_graph::recipe_io::reset_session_to_project_default;
+    use astroforge_core::pipeline_plans_store::PipelinePlanStore;
+
+    let store = PipelinePlanStore::in_memory().expect("store");
+    // Two plans in the project; the NEWEST is the default.
+    let mut older = sample_plan();
+    older.plan_id = "plan_older".into();
+    older.created_at = "2026-11-13T00:00:00Z".into();
+    let mut newer = sample_plan();
+    newer.plan_id = "plan_newer".into();
+    newer.project_id = older.project_id.clone();
+    newer.created_at = "2026-11-14T00:00:00Z".into();
+    store.insert_plan(&older).expect("insert older");
+    store.insert_plan(&newer).expect("insert newer");
+
+    // No override yet: the session follows the default.
+    assert_eq!(
+        store
+            .get_graph_override(&older.project_id, "sess_ovr")
+            .expect("read"),
+        None
+    );
+
+    // Pin the older plan as the session's override.
+    store
+        .set_graph_override(&older.project_id, "sess_ovr", "plan_older")
+        .expect("pin");
+    assert_eq!(
+        store
+            .get_graph_override(&older.project_id, "sess_ovr")
+            .expect("read"),
+        Some("plan_older".into())
+    );
+    // Re-pinning replaces the row.
+    store
+        .set_graph_override(&older.project_id, "sess_ovr", "plan_newer")
+        .expect("re-pin");
+    assert_eq!(
+        store
+            .get_graph_override(&older.project_id, "sess_ovr")
+            .expect("read"),
+        Some("plan_newer".into())
+    );
+
+    // Reset materializes the DEFAULT (newest = plan_newer's graph)
+    // for the session and clears the override.
+    let reset =
+        reset_session_to_project_default(&store, &older.project_id, "sess_ovr").expect("reset");
+    assert_eq!(reset.project_id, older.project_id);
+    assert_eq!(reset.session_id, "sess_ovr");
+    assert!(
+        reset
+            .stages
+            .iter()
+            .zip(newer.stages.iter())
+            .all(|(a, b)| a.stage_type == b.stage_type),
+        "reset carries the default graph's stage types"
+    );
+    assert_eq!(
+        store
+            .get_graph_override(&older.project_id, "sess_ovr")
+            .expect("read"),
+        None,
+        "reset clears the override row"
+    );
+
+    // Idempotent: resetting again rewrites the same plan rows.
+    let again = reset_session_to_project_default(&store, &older.project_id, "sess_ovr")
+        .expect("reset again");
+    assert_eq!(reset.plan_id, again.plan_id, "deterministic plan id");
+}
+
+/// Reset without any plan in the project surfaces the honest error.
+#[test]
+fn reset_without_plans_fails_with_no_default() {
+    use astroforge_core::node_graph::recipe_io::{reset_session_to_project_default, RecipeIoError};
+    use astroforge_core::pipeline_plans_store::PipelinePlanStore;
+
+    let store = PipelinePlanStore::in_memory().expect("store");
+    let err = reset_session_to_project_default(&store, "proj_empty", "sess_e").unwrap_err();
+    match err {
+        RecipeIoError::NoDefaultGraph(id) => assert_eq!(id, "proj_empty"),
+        other => panic!("expected NoDefaultGraph, got {other:?}"),
+    }
+}

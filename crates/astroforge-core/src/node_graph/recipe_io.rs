@@ -36,6 +36,12 @@ pub enum RecipeIoError {
     Malformed(String),
     /// Serialization / deserialization of stage parameters failed.
     Serde(String),
+    /// No plan exists for the project — there is no default graph to
+    /// reset to (P1.6.4.3).
+    NoDefaultGraph(String),
+    /// A store operation failed while materializing the reset
+    /// (P1.6.4.3).
+    Store(crate::pipeline_plans_store::PipelinePlanStoreError),
 }
 
 impl std::fmt::Display for RecipeIoError {
@@ -46,7 +52,17 @@ impl std::fmt::Display for RecipeIoError {
             }
             Self::Malformed(m) => write!(f, "malformed recipe: {m}"),
             Self::Serde(e) => write!(f, "recipe parameter error: {e}"),
+            Self::NoDefaultGraph(id) => {
+                write!(f, "no default graph for project '{id}'")
+            }
+            Self::Store(e) => write!(f, "pipeline plan store error: {e}"),
         }
+    }
+}
+
+impl From<crate::pipeline_plans_store::PipelinePlanStoreError> for RecipeIoError {
+    fn from(e: crate::pipeline_plans_store::PipelinePlanStoreError) -> Self {
+        Self::Store(e)
     }
 }
 
@@ -307,4 +323,28 @@ fn short_hash(input: &str) -> String {
     let digest = Sha256::digest(input.as_bytes());
     let hex = format!("{:x}", digest);
     hex.chars().take(16).collect()
+}
+
+/// P1.6.4.3 — materialize the project's DEFAULT graph for a session
+/// ("Reset to project default"). The default graph is the project's
+/// latest plan; the round-trip machinery re-materializes it bound to
+/// `session_id` (deterministic id from project + session + content),
+/// persists it, and clears any session override row so the session
+/// follows the project default again. Re-running on an unchanged
+/// default rewrites the same rows — idempotent by construction.
+pub fn reset_session_to_project_default(
+    store: &crate::pipeline_plans_store::PipelinePlanStore,
+    project_id: &str,
+    session_id: &str,
+) -> Result<PipelinePlan, RecipeIoError> {
+    let summaries = store.list_plans_for_project(project_id)?;
+    let latest = summaries
+        .first()
+        .ok_or_else(|| RecipeIoError::NoDefaultGraph(project_id.to_string()))?;
+    let default = store.load_plan(&latest.plan_id)?;
+    let recipe = plan_to_recipe_json(&default, "0.1.0")?;
+    let plan = recipe_to_plan(&recipe, project_id, session_id)?;
+    store.insert_plan(&plan)?;
+    store.delete_graph_override(project_id, session_id)?;
+    Ok(plan)
 }

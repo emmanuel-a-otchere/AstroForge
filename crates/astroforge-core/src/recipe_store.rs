@@ -641,8 +641,17 @@ mod tests {
     use std::path::PathBuf;
 
     fn temp_db() -> PathBuf {
+        // Process-unique sequence + timestamp: on CI runners the wall
+        // clock can be coarse enough that two parallel tests calling
+        // this in the same tick got the SAME path, shared one DB, and
+        // the "DwarfII" fixtures collided on the profile UNIQUE key
+        // (observed 2026-11-14 on ubuntu). The counter alone
+        // guarantees per-process uniqueness.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "astroforge_recipe_test_{}",
+            "astroforge_recipe_test_{}_{}",
+            SEQ.fetch_add(1, Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

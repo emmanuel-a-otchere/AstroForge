@@ -233,7 +233,7 @@
         {:else if historyError}
           <p class="history-error font-body" role="alert">{historyError}</p>
         {:else if sessionHistory.length === 0}
-          <p class="history-line font-body">
+          <p class="history-line font-body starfield">
             No sessions yet — import captures to create one.
           </p>
         {:else}
@@ -544,6 +544,17 @@
   .history-error {
     margin: 0;
     font-size: 0.85rem;
+  }
+
+  /* #460 W3 — the sessions empty line gets the sky treatment. */
+  .history-line.starfield {
+    border: 1px dashed var(--outline-variant);
+    border-radius: var(--radius-md);
+    padding: var(--sp-md);
+    text-align: center;
+    background-color: var(--surface-container-lowest);
+    background-repeat: repeat;
+    background-size: 220px 220px;
   }
 
   .history-error {

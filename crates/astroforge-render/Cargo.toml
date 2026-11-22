@@ -8,6 +8,13 @@ authors.workspace = true
 [dependencies]
 astroforge-core = { workspace = true }
 egui = { workspace = true }
+egui-wgpu = { workspace = true }
+# Version must match the one eframe's wgpu renderer pulls in (see
+# Cargo.lock; both resolve to wgpu 30).
+wgpu = { workspace = true }
+# f32 -> f16 conversion for rgba16float texture uploads.
+half = { workspace = true }
+bytemuck = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -17,9 +17,11 @@
 
 pub mod color;
 pub mod demo;
+pub mod gpu;
 pub mod source;
 pub mod tone;
 
 pub use color::{prepare_display, to_color_image};
+pub use gpu::{GpuContext, ImagePipeline};
 pub use source::decode_image;
 pub use tone::ToneMap;

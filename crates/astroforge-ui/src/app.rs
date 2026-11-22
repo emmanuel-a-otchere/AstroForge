@@ -11,6 +11,7 @@ use std::sync::Arc;
 use egui::{CentralPanel, ColorImage, Frame, Key, Margin, Panel, RichText, TextEdit, Ui};
 
 use crate::api::project::{self, ProjectSummary};
+use crate::dialogs::{self, Confirm, ConfirmOutcome};
 use crate::image_canvas::ImageCanvas;
 use crate::semantics as s;
 use crate::services::Services;
@@ -103,6 +104,15 @@ pub struct AstroForgeApp {
     /// f32 sources for the wgpu upload path (P1b).
     sample_linear_f32: Option<astroforge_core::image::F32Image>,
     sample_stretched_f32: Option<astroforge_core::image::F32Image>,
+    /// P2 chrome: pending destructive-action confirmation.
+    pending_confirm: Option<(Confirm, ConfirmAction)>,
+}
+
+/// Irreversible actions gated by the confirm modal.
+#[derive(Clone, Debug)]
+pub enum ConfirmAction {
+    DeleteProject(String),
+    ArchiveProject(String),
 }
 
 impl AstroForgeApp {
@@ -150,6 +160,7 @@ impl AstroForgeApp {
             sample_autostretch: true,
             sample_linear_f32: Some(sample_linear_f32),
             sample_stretched_f32: Some(sample_stretched_f32),
+            pending_confirm: None,
         }
     }
 
@@ -353,7 +364,7 @@ impl AstroForgeApp {
             }
             Some(Ok(projects)) => {
                 egui::Grid::new("projects_grid")
-                    .num_columns(4)
+                    .num_columns(5)
                     .spacing([t::spacing::LG, t::spacing::SM])
                     .striped(true)
                     .show(ui, |ui| {
@@ -361,6 +372,7 @@ impl AstroForgeApp {
                         s::label_caps(ui, "Status");
                         s::label_caps(ui, "Created");
                         s::label_caps(ui, "Updated");
+                        s::label_caps(ui, "Actions");
                         ui.end_row();
                         for p in &projects {
                             s::data_text(ui, &p.name);
@@ -377,6 +389,44 @@ impl AstroForgeApp {
                                     .small()
                                     .color(t::text::SECONDARY),
                             );
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .small_button("Archive")
+                                    .on_hover_text("Move the project folder into the archive")
+                                    .clicked()
+                                {
+                                    self.pending_confirm = Some((
+                                        Confirm::new(
+                                            "Archive project",
+                                            &format!(
+                                                "Move \u{201c}{}\u{201d} into the project archive?                                                  It stays on disk and can be recovered.",
+                                                p.name
+                                            ),
+                                            "Archive",
+                                            false,
+                                        ),
+                                        ConfirmAction::ArchiveProject(p.project_id.clone()),
+                                    ));
+                                }
+                                if ui
+                                    .small_button("Delete")
+                                    .on_hover_text("Permanently remove this project from disk")
+                                    .clicked()
+                                {
+                                    self.pending_confirm = Some((
+                                        Confirm::new(
+                                            "Delete project",
+                                            &format!(
+                                                "Permanently delete \u{201c}{}\u{201d} and all of                                                  its sessions, versions, and exports from disk?                                                  This cannot be undone.",
+                                                p.name
+                                            ),
+                                            "Delete forever",
+                                            true,
+                                        ),
+                                        ConfirmAction::DeleteProject(p.project_id.clone()),
+                                    ));
+                                }
+                            });
                             ui.end_row();
                         }
                     });
@@ -456,6 +506,12 @@ impl eframe::App for AstroForgeApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.handle_screen_shortcuts(ui);
 
+        // Window title tracks the active screen (workflow context).
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(format!(
+            "AstroForge \u{2014} {}",
+            self.screen.label()
+        )));
+
         Panel::left("nav")
             .exact_size(220.0)
             .resizable(false)
@@ -479,5 +535,69 @@ impl eframe::App for AstroForgeApp {
                 Screen::Settings => self.draw_settings(ui),
                 Screen::Help => self.draw_placeholder(ui, "P4 (help)"),
             });
+
+        egui::Panel::bottom("statusbar")
+            .exact_size(t::spacing::LG)
+            .frame(
+                Frame::default()
+                    .fill(t::surface::CONTAINER_LOWEST)
+                    .inner_margin(Margin::symmetric(
+                        t::spacing::MD as i8,
+                        t::spacing::XS as i8,
+                    )),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "astroforge-ui {}",
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .small()
+                        .color(t::border::STRONG),
+                    );
+                    ui.label(
+                        RichText::new("Cmd/Ctrl+1..5 screens \u{00b7} Esc home")
+                            .small()
+                            .color(t::border::STRONG),
+                    );
+                });
+            });
+
+        // P2 chrome: destructive-action gate (drawn over everything).
+        if let Some((_confirm, _action)) = self.pending_confirm.as_ref() {
+            let confirm = _confirm.clone();
+            let action = _action.clone();
+            match dialogs::confirm_modal(ui.ctx(), &confirm) {
+                ConfirmOutcome::Pending => {}
+                ConfirmOutcome::Confirmed => {
+                    self.run_confirmed(action);
+                    self.pending_confirm = None;
+                }
+                ConfirmOutcome::Dismissed => {
+                    self.pending_confirm = None;
+                }
+            }
+        }
+    }
+}
+
+impl AstroForgeApp {
+    /// Execute a confirmed destructive action.
+    fn run_confirmed(&mut self, action: ConfirmAction) {
+        match action {
+            ConfirmAction::DeleteProject(slug) => {
+                if let Err(e) = project::project_delete(&self.services, &slug, true) {
+                    self.error = Some(e);
+                }
+                self.reload_projects();
+            }
+            ConfirmAction::ArchiveProject(slug) => {
+                if let Err(e) = project::project_archive(&self.services, &slug) {
+                    self.error = Some(e);
+                }
+                self.reload_projects();
+            }
+        }
     }
 }

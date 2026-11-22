@@ -1,0 +1,992 @@
+//! Port of `src-tauri/src/commands_pipeline_plan.rs` (migration P3a).
+//!
+//! CR-05 P1 — direct-call surface for PipelinePlan generation
+//! (Decision D-CR05-3 + PLAN.md P1), plus the CR-05 P2 runner
+//! commands (start / pause / resume / cancel), P3 recommendations,
+//! P4 preview-gated apply, P5 metrics/timeline and P6.1b
+//! retry / skip.
+//!
+//! State access mirrors Tauri's `PipelinePlanState` via
+//! `services.pipeline` (a `PipelineServices` with the same fields:
+//! store, cancel/pause handles, handler registry, optional domain
+//! store + recommendation engine, previews dir).
+
+use astroforge_core::adaptive::AdaptiveParameterSet;
+use astroforge_core::domain::{ObjectType, PipelinePlan};
+use astroforge_core::pipeline_plan::{
+    builtin::deep_sky_osc_balanced,
+    plan::{
+        derive_understanding_from_session, generate_plan as generate_plan_inner,
+        GenerationContext, SessionUnderstanding,
+    },
+    runner::{PipelineRunner, RetryKind, RunOutcome},
+    AcquisitionMode, CalibrationAvailability,
+};
+use astroforge_core::pipeline_plans_store::PipelinePlanStoreError;
+use serde::{Deserialize, Serialize};
+
+use crate::services::Services;
+
+// ─── CR-05 P1 — create + list + get ────────────────────────────────────
+
+/// CR-05 P1 — input to `create_pipeline_plan`. Mirrors the
+/// `astroforge-api.ts` `CreatePipelinePlanRequest` interface.
+#[derive(Debug, Deserialize)]
+pub struct CreatePipelinePlanRequest {
+    pub project_id: String,
+    pub session_id: String,
+    /// Built-in recipe id. P1 only supports "deep_sky_osc_balanced";
+    /// additional recipes land in later phases. Unknown ids fall back to
+    /// "deep_sky_osc_balanced" for now (P3 adds the registry).
+    pub recipe_id: Option<String>,
+    /// "auto" | "guided" | "expert". Default "auto".
+    pub mode: Option<String>,
+    /// Optional explicit Session Understanding from CR-04 (P3 wires this
+    /// for real; P1 lets the caller pass None to use a default).
+    pub session_understanding: Option<SessionUnderstandingPayload>,
+}
+
+/// CR-05 P1 — frontend-facing Session Understanding shape. Mirrors the
+/// TypeScript `SessionUnderstanding` interface.
+#[derive(Debug, Deserialize)]
+pub struct SessionUnderstandingPayload {
+    pub target_type: String,
+    pub acquisition: String,
+    pub light_frame_count: u32,
+    pub calibration: String,
+    pub bayer_pattern: Option<String>,
+    pub narrowband_filters: Vec<String>,
+    /// #461 S4 — the frontend may declare already-stacked inputs.
+    /// When the whole payload is absent the backend derives it from
+    /// the session's persisted classification + asset filenames.
+    #[serde(default)]
+    pub already_stacked: bool,
+}
+
+impl SessionUnderstandingPayload {
+    fn into_domain(self) -> SessionUnderstanding {
+        SessionUnderstanding {
+            target_type: parse_target_type(&self.target_type),
+            acquisition: parse_acquisition(&self.acquisition),
+            already_stacked: self.already_stacked,
+            light_frame_count: self.light_frame_count,
+            calibration: parse_calibration(&self.calibration),
+            bayer_pattern: self.bayer_pattern,
+            narrowband_filters: self.narrowband_filters,
+        }
+    }
+}
+
+fn parse_target_type(s: &str) -> ObjectType {
+    match s {
+        "deep_sky" | "deepsky" => ObjectType::DeepSky,
+        "planet" => ObjectType::Planet,
+        "lunar" => ObjectType::Lunar,
+        "solar" => ObjectType::Solar,
+        _ => ObjectType::Unknown,
+    }
+}
+
+fn parse_acquisition(s: &str) -> AcquisitionMode {
+    match s {
+        "osc" => AcquisitionMode::Osc,
+        "mono" => AcquisitionMode::Mono,
+        "narrowband" => AcquisitionMode::Narrowband,
+        "planetary" => AcquisitionMode::Planetary,
+        "lunar" => AcquisitionMode::Lunar,
+        "solar" => AcquisitionMode::Solar,
+        _ => AcquisitionMode::Osc,
+    }
+}
+
+fn parse_calibration(s: &str) -> CalibrationAvailability {
+    match s {
+        "none" => CalibrationAvailability::None,
+        "partial" => CalibrationAvailability::Partial,
+        "full" => CalibrationAvailability::Full,
+        _ => CalibrationAvailability::None,
+    }
+}
+
+/// CR-05 P1 — frontend-facing PipelinePlan summary (mirrors the
+/// TypeScript `PipelinePlan` interface). Returns the full plan including
+/// the ordered `stages` array — the P2 runner will re-load this by id.
+#[derive(Debug, Clone, Serialize)]
+pub struct PipelinePlanDto {
+    pub plan_id: String,
+    pub project_id: String,
+    pub session_id: String,
+    pub recipe_id: Option<String>,
+    pub mode: String,
+    pub target_type: String,
+    pub status: String,
+    pub created_at: String,
+    pub schema_version: u32,
+    pub stages: Vec<PipelineStageDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PipelineStageDto {
+    pub stage_id: String,
+    pub plan_id: String,
+    pub stage_type: String,
+    pub sequence: u32,
+    pub label: String,
+    pub required: bool,
+    pub enabled: bool,
+    pub parameters_json: Option<String>,
+    pub produces_image_version: bool,
+    pub undo_supported: bool,
+}
+
+impl From<&PipelinePlan> for PipelinePlanDto {
+    fn from(p: &PipelinePlan) -> Self {
+        Self {
+            plan_id: p.plan_id.clone(),
+            project_id: p.project_id.clone(),
+            session_id: p.session_id.clone(),
+            recipe_id: p.recipe_id.clone(),
+            mode: p.mode.clone(),
+            target_type: format!("{:?}", p.target_type).to_lowercase(),
+            status: format!("{:?}", p.status).to_lowercase(),
+            created_at: p.created_at.clone(),
+            schema_version: p.schema_version,
+            stages: p.stages.iter().map(PipelineStageDto::from).collect(),
+        }
+    }
+}
+
+impl From<&astroforge_core::domain::PipelineStage> for PipelineStageDto {
+    fn from(s: &astroforge_core::domain::PipelineStage) -> Self {
+        Self {
+            stage_id: s.stage_id.clone(),
+            plan_id: s.plan_id.clone(),
+            stage_type: s.stage_type.clone(),
+            sequence: s.sequence,
+            label: s.label.clone(),
+            required: s.required,
+            enabled: s.enabled,
+            parameters_json: s.parameters_json.clone(),
+            produces_image_version: s.produces_image_version,
+            undo_supported: s.undo_supported,
+        }
+    }
+}
+
+/// CR-05 P1 — create a plan for a session.
+///
+/// #461 S3 — when the caller ships no payload, the understanding is
+/// derived from the session's persisted classification + registered
+/// assets (CR-04: "understand before processing"). Falls back to the
+/// balanced default only when nothing has been analysed yet.
+pub fn create_pipeline_plan(
+    services: &Services,
+    request: CreatePipelinePlanRequest,
+) -> Result<PipelinePlanDto, String> {
+    let (recipe_stages, recipe_target) = match request.recipe_id.as_deref() {
+        None | Some("") | Some("deep_sky_osc_balanced") => deep_sky_osc_balanced(),
+        Some(other) => {
+            // P1 only ships one recipe; unknown ids fall back. P3 adds
+            // the registry and rejects unknown ids explicitly.
+            let _ = other;
+            deep_sky_osc_balanced()
+        }
+    };
+
+    // #461 S3 — when the caller ships no payload, derive the
+    // understanding from the session's persisted classification +
+    // registered assets (CR-04: "understand before processing").
+    // Falls back to the balanced default only when nothing has been
+    // analysed yet.
+    let session_understanding = match request.session_understanding {
+        Some(payload) => payload.into_domain(),
+        None => {
+            let store = services.domain_store.lock().map_err(lock_err)?;
+            let classification = store
+                .get_session_classification(&request.session_id)
+                .map_err(|e| e.to_string())?;
+            let assets = store
+                .list_source_assets(&request.session_id)
+                .map_err(|e| e.to_string())?;
+            derive_understanding_from_session(classification.as_ref(), &assets)
+        }
+    };
+
+    let ctx = GenerationContext {
+        project_id: request.project_id.clone(),
+        session_id: request.session_id.clone(),
+        session_understanding,
+        recipe_id: Some("recipe_deep_sky_osc_balanced".into()),
+        mode: request.mode.unwrap_or_else(|| "auto".into()),
+        generated_at_unix_ms: now_unix_ms(),
+    };
+
+    let plan = generate_plan_inner(&ctx, &recipe_stages, recipe_target)
+        .map_err(|e| format!("plan generation failed: {e}"))?;
+
+    let store = &*services.pipeline.store;
+    store.insert_plan(&plan).map_err(store_err_to_string)?;
+
+    Ok(PipelinePlanDto::from(&plan))
+}
+
+/// CR-05 P1 — list every plan for a project.
+pub fn pipeline_plan_list_for_project(
+    services: &Services,
+    project_id: String,
+) -> Result<Vec<astroforge_core::pipeline_plans_store::PipelinePlanSummary>, String> {
+    let store = &*services.pipeline.store;
+    store
+        .list_plans_for_project(&project_id)
+        .map_err(store_err_to_string)
+}
+
+/// CR-05 P1 — load one plan as its DTO.
+pub fn pipeline_plan_get(services: &Services, plan_id: String) -> Result<PipelinePlanDto, String> {
+    let store = &*services.pipeline.store;
+    let plan = store.load_plan(&plan_id).map_err(store_err_to_string)?;
+    Ok(PipelinePlanDto::from(&plan))
+}
+
+// ─── CR-05 P2 slice 1 — start + cancel commands ────────────────────────────
+//
+// Pause / resume land in P2.5. The runner is synchronous and small:
+// start walks the plan's stages, persisting stage_executions, and
+// returns RunOutcome. cancel flips an atomic flag that the runner
+// checks between stages; the current stage completes (no half-written
+// artifacts) before the runner returns RunOutcome::Cancelled.
+
+/// CR-05 P2 slice 1 — start a plan. Returns the run outcome
+/// (`completed` / `cancelled` / `failed`).
+///
+/// P2.5 — also registers the pause handle so the UI can pause during
+/// execution.
+///
+/// P2.6 — uses the handler registry + shared DomainStore so real
+/// stages (Stack) execute instead of no-op.
+///
+/// Note: the runner is synchronous, exactly like the Tauri command —
+/// the egui caller is expected to invoke this from a background
+/// thread and consume the outcome when it lands.
+pub fn start_pipeline_run(services: &Services, plan_id: String) -> Result<RunOutcomeResponse, String> {
+    let runner = {
+        let store = services.pipeline.store.clone();
+        PipelineRunner::with_engine(
+            store,
+            services.pipeline.handler_registry.clone(),
+            services.pipeline.domain_store.clone(),
+            services.pipeline.recommendation_engine.clone(),
+        )
+    };
+    let cancel_handle = runner.cancel_handle();
+    let pause_handle = runner.pause_handle();
+
+    // Register the handles so the UI can flip them later.
+    {
+        let mut cancels = services.pipeline.cancel_handles.lock().map_err(lock_err)?;
+        cancels.insert(plan_id.clone(), cancel_handle.clone());
+    }
+    {
+        let mut pauses = services.pipeline.pause_handles.lock().map_err(lock_err)?;
+        pauses.insert(plan_id.clone(), pause_handle.clone());
+    }
+
+    let result = runner.start(&plan_id);
+
+    // Clean up both handles now that the run has finished.
+    {
+        let mut cancels = services.pipeline.cancel_handles.lock().map_err(lock_err)?;
+        cancels.remove(&plan_id);
+    }
+    {
+        let mut pauses = services.pipeline.pause_handles.lock().map_err(lock_err)?;
+        pauses.remove(&plan_id);
+    }
+
+    match result {
+        Ok(outcome) => Ok(RunOutcomeResponse::from(outcome)),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// CR-05 P2.5 — pause a running plan. The runner notices the flag
+/// between stages, finishes the current stage, and exits with
+/// `RunOutcome::Paused`. Idempotent — returns `false` if no live run
+/// is in flight.
+pub fn pause_pipeline_run(services: &Services, plan_id: String) -> Result<bool, String> {
+    let mut handles = services.pipeline.pause_handles.lock().map_err(lock_err)?;
+    if let Some(handle) = handles.get_mut(&plan_id) {
+        handle.pause();
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// CR-05 P2.5 — resume a paused plan. Walks stages from the first one
+/// without a completed `StageExecution` row; returns the run outcome.
+pub fn resume_pipeline_run(services: &Services, plan_id: String) -> Result<RunOutcomeResponse, String> {
+    let runner = {
+        let store = services.pipeline.store.clone();
+        PipelineRunner::with_engine(
+            store,
+            services.pipeline.handler_registry.clone(),
+            services.pipeline.domain_store.clone(),
+            services.pipeline.recommendation_engine.clone(),
+        )
+    };
+    // Pause handle is re-registered so the UI can pause mid-resume.
+    let pause_handle = runner.pause_handle();
+    {
+        let mut pauses = services.pipeline.pause_handles.lock().map_err(lock_err)?;
+        pauses.insert(plan_id.clone(), pause_handle);
+    }
+
+    let result = runner.resume(&plan_id);
+
+    {
+        let mut pauses = services.pipeline.pause_handles.lock().map_err(lock_err)?;
+        pauses.remove(&plan_id);
+    }
+
+    match result {
+        Ok(outcome) => Ok(RunOutcomeResponse::from(outcome)),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// CR-05 P2.5 — list resumable plans for a project (status = Paused).
+/// Used by `RecoveryBanner.svelte` in Tauri; the egui Recovery banner
+/// consumes the same rows on Project open.
+pub fn pipeline_plan_list_resumable_for_project(
+    services: &Services,
+    project_id: String,
+) -> Result<Vec<astroforge_core::pipeline_plans_store::PipelinePlanSummary>, String> {
+    let store = &*services.pipeline.store;
+    store
+        .list_resumable_plans_for_project(&project_id)
+        .map_err(store_err_to_string)
+}
+
+/// CR-05 P2 slice 1 — cancel a running plan. The runner notices the
+/// flag between stages, finishes the current stage, and exits with
+/// `RunOutcome::Cancelled`. Idempotent — calling cancel on a plan that
+/// has no live handle is a no-op (returns `false` so the UI can show
+/// "no run to cancel").
+pub fn cancel_pipeline_run(services: &Services, plan_id: String) -> Result<bool, String> {
+    let mut handles = services.pipeline.cancel_handles.lock().map_err(lock_err)?;
+    if let Some(handle) = handles.get_mut(&plan_id) {
+        handle.cancel();
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// CR-05 P2.5 — frontend-facing outcome shape.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunOutcomeResponse {
+    Completed,
+    Cancelled,
+    Failed,
+    Paused,
+}
+
+impl From<RunOutcome> for RunOutcomeResponse {
+    fn from(o: RunOutcome) -> Self {
+        match o {
+            RunOutcome::Completed => Self::Completed,
+            RunOutcome::Cancelled => Self::Cancelled,
+            RunOutcome::Failed => Self::Failed,
+            RunOutcome::Paused => Self::Paused,
+        }
+    }
+}
+
+/// CR-05 P2 slice 1 — frontend-facing stage execution summary.
+#[derive(Debug, Clone, Serialize)]
+pub struct StageExecutionSummary {
+    pub stage_execution_id: String,
+    pub plan_id: String,
+    pub stage_id: String,
+    pub attempt: u32,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub error_json: Option<String>,
+}
+
+impl From<&astroforge_core::domain::StageExecution> for StageExecutionSummary {
+    fn from(e: &astroforge_core::domain::StageExecution) -> Self {
+        Self {
+            stage_execution_id: e.stage_execution_id.clone(),
+            plan_id: e.plan_id.clone(),
+            stage_id: e.stage_id.clone(),
+            attempt: e.attempt,
+            status: e.status.clone(),
+            started_at: e.started_at.clone(),
+            completed_at: e.completed_at.clone(),
+            error_json: e.error_json.clone(),
+        }
+    }
+}
+
+/// CR-05 P2 slice 1 — list stage executions for a plan. Used by the
+/// ProcessingControls component to render per-stage state.
+pub fn pipeline_plan_list_stage_executions(
+    services: &Services,
+    plan_id: String,
+) -> Result<Vec<StageExecutionSummary>, String> {
+    let store = &*services.pipeline.store;
+    let execs = store
+        .list_stage_executions_for_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    Ok(execs.iter().map(StageExecutionSummary::from).collect())
+}
+
+fn now_unix_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn lock_err<E: std::fmt::Display>(e: E) -> String {
+    format!("lock poisoned: {e}")
+}
+
+fn store_err_to_string(e: PipelinePlanStoreError) -> String {
+    e.to_string()
+}
+
+// ─── CR-05 P3 slice 2 — recommendation calls ─────────────────────────
+
+/// CR-05 P3 slice 2 — DTO mirroring `Recommendation`. The JSON shape
+/// is stable so the UI side can serialise / deserialise without
+/// translation.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecommendationDto {
+    pub id: String,
+    pub stage_execution_id: String,
+    pub rule_id: String,
+    pub stage_type: String,
+    pub decision_json: serde_json::Value,
+    pub confidence: f64,
+    pub evidence_summary: String,
+    pub created_at: String,
+    /// CR-05 P3 slice 2.5 — user decision lifecycle. One of
+    /// "pending" (engine-only), "applied" (parameters merged into
+    /// the next stage's `parameters_json`), or "dismissed" (user
+    /// rejected). `None` rows round-trip as `null` on the
+    /// frontend; the UI treats that as "pending".
+    pub user_decision: Option<String>,
+    /// CR-05 P3 slice 2.5 — `unix_ms:<ms>` timestamp of the user
+    /// decision, if any.
+    pub user_decision_at: Option<String>,
+    /// CR-05 P3 slice 2.5 — when applied, the `pipeline_stages.stage_id`
+    /// whose `parameters_json` was rewritten by the apply.
+    pub applied_stage_id: Option<String>,
+    /// CR-05 P4 slice 6 — id of the `preview_run` that satisfied
+    /// the §11 preview-before-commit gate when this recommendation
+    /// was applied. `None` for not-yet-applied or legacy rows.
+    pub applied_with_preview_id: Option<String>,
+}
+
+impl From<&astroforge_core::recommendation::Recommendation> for RecommendationDto {
+    fn from(r: &astroforge_core::recommendation::Recommendation) -> Self {
+        // Re-serialise the decision so the frontend gets
+        // `{stage_type, parameters, rationale}` in the standard
+        // shape rather than the `parameters` flattened.
+        let decision_json = serde_json::to_value(&r.decision)
+            .unwrap_or_else(|_| serde_json::json!({"error": "serialise"}));
+        Self {
+            id: r.id.clone(),
+            stage_execution_id: r.stage_execution_id.clone(),
+            rule_id: r.rule_id.clone(),
+            stage_type: r.decision.stage_type.clone(),
+            decision_json,
+            confidence: r.confidence,
+            evidence_summary: r.evidence_summary.clone(),
+            created_at: r.created_at.clone(),
+            user_decision: r.user_decision.clone(),
+            user_decision_at: r.user_decision_at.clone(),
+            applied_stage_id: r.applied_stage_id.clone(),
+            applied_with_preview_id: r.applied_with_preview_id.clone(),
+        }
+    }
+}
+
+/// CR-05 P3 slice 2 — list every recommendation emitted for a
+/// given stage execution. Returns an empty list when no
+/// recommendation has been generated (no metric snapshot yet, or
+/// snapshot was uniform / failed).
+pub fn get_recommendations_for_stage_execution(
+    services: &Services,
+    stage_execution_id: String,
+) -> Result<Vec<RecommendationDto>, String> {
+    let store = &*services.pipeline.store;
+    let recs = store
+        .list_recommendations_for_stage_execution(&stage_execution_id)
+        .map_err(store_err_to_string)?;
+    Ok(recs.iter().map(RecommendationDto::from).collect())
+}
+
+/// CR-05 P3 slice 2 — list every recommendation emitted for every
+/// stage execution in a plan. Used by the IntelligencePanel to
+/// show the full set of current picks without the UI needing to
+/// iterate over stage executions.
+pub fn get_recommendations_for_plan(
+    services: &Services,
+    plan_id: String,
+) -> Result<Vec<RecommendationDto>, String> {
+    let store = &*services.pipeline.store;
+    let recs = store
+        .list_recommendations_for_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    Ok(recs.iter().map(RecommendationDto::from).collect())
+}
+
+// ─── CR-05 P3 slice 2.5 — user-decision calls ───────────────────────────
+//
+// `apply_recommendation` merges the recommended `parameters` into
+// the next pipeline stage's `parameters_json` and marks the
+// recommendation as `applied`. `dismiss_recommendation` flips
+// the recommendation to `dismissed` without touching stage
+// parameters. `reset_recommendation` returns the row to
+// `pending` (lets the user re-apply).
+//
+// All three return the updated `RecommendationDto` so the
+// caller can refresh the panel in one round-trip without a
+// second `get_recommendations_for_plan` call.
+
+/// CR-05 P3 slice 2.5 — response shape returned by apply /
+/// dismiss / reset. Same as the list endpoint, but a single
+/// object so the UI can update the row in place.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecommendationUpdateResult {
+    pub recommendation: RecommendationDto,
+    pub applied_stage_id: Option<String>,
+}
+
+/// CR-05 P3 slice 2.5 — generate an `unix_ms:<ms>` timestamp in
+/// the same shape the rest of the pipeline uses.
+fn now_unix_ms_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("unix_ms:{}", ms)
+}
+
+/// CR-05 P4 slice 6 — inverse of `now_unix_ms_string`. Extracts
+/// the integer millisecond value from a `unix_ms:<n>` string.
+/// Returns `None` for any other shape (defensive — we don't want
+/// the gate to silently bypass on bad input).
+fn parse_unix_ms(s: &str) -> Option<i64> {
+    s.strip_prefix("unix_ms:")
+        .and_then(|tail| tail.parse().ok())
+}
+
+pub fn apply_recommendation(
+    services: &Services,
+    recommendation_id: String,
+) -> Result<RecommendationUpdateResult, String> {
+    let timestamp = now_unix_ms_string();
+    // CR-05 P4 slice 6 — preview-before-commit gate (§11).
+    //
+    // Resolve the recommendation's stage_execution_id first so we
+    // can look up a qualifying preview in the domain store. The
+    // preview must:
+    //   - belong to the same stage_execution_id
+    //   - have status = completed
+    //   - have completed_at > recommendation.created_at
+    // (the last condition ensures the user previewed after the
+    // recommendation was emitted — i.e. they actually saw what
+    // the recommendation is changing).
+    //
+    // If no qualifying preview exists, return a typed error so
+    // the UI can surface "preview required" instead of allowing
+    // a blind apply.
+    let stage_execution_id = {
+        let store = &*services.pipeline.store;
+        store
+            .stage_execution_id_for_recommendation(&recommendation_id)
+            .map_err(store_err_to_string)?
+    };
+
+    let preview = {
+        let domain_store = services
+            .pipeline
+            .domain_store
+            .clone()
+            .ok_or_else(|| "domain store is unavailable".to_string())?;
+        let store = &*services.pipeline.store;
+        let rec = store
+            .get_recommendation_by_id(&recommendation_id)
+            .map_err(store_err_to_string)?;
+        // The recommendation.created_at is `unix_ms:<ms>`; extract
+        // the integer part for the cutoff comparison.
+        let cutoff_ms = parse_unix_ms(&rec.created_at).ok_or_else(|| {
+            format!(
+                "recommendation has malformed created_at: {}",
+                rec.created_at
+            )
+        })?;
+        domain_store
+            .latest_completed_preview_for_stage_execution(&stage_execution_id, cutoff_ms)
+            .map_err(|e| format!("preview gate lookup failed: {e}"))?
+    };
+    let preview_id = match preview {
+        Some(p) => p.preview_id,
+        None => {
+            return Err(format!(
+                "preview required: no completed preview found for stage_execution '{stage_execution_id}' after the recommendation was emitted"
+            ));
+        }
+    };
+
+    // Two passes: first mutate (commit), then re-read inside the
+    // same store so the returned row reflects the post-update
+    // state. The connection lock is released between passes so the
+    // re-read path stays simple.
+    let applied_stage_id = {
+        let store = &*services.pipeline.store;
+        let (_id, applied_stage_id) = store
+            .apply_recommendation(&recommendation_id, &timestamp, &preview_id)
+            .map_err(store_err_to_string)?;
+        applied_stage_id
+    };
+    let store = &*services.pipeline.store;
+    let recs = store
+        .list_recommendations_for_stage_execution(&stage_execution_id)
+        .map_err(store_err_to_string)?;
+    let rec = recs
+        .into_iter()
+        .find(|r| r.id == recommendation_id)
+        .ok_or_else(|| format!("recommendation vanished after apply: {recommendation_id}"))?;
+    Ok(RecommendationUpdateResult {
+        recommendation: RecommendationDto::from(&rec),
+        applied_stage_id,
+    })
+}
+
+/// CR-05 P3 slice 2.5 — resolve a recommendation id back to its
+/// `stage_execution_id` so the row can be reloaded after the
+/// apply / dismiss / reset pass. Done via a dedicated store
+/// method (it runs inside an already-locked connection).
+fn stage_execution_id_for_recommendation(
+    store: &astroforge_core::pipeline_plans_store::PipelinePlanStore,
+    recommendation_id: &str,
+) -> Result<String, astroforge_core::pipeline_plans_store::PipelinePlanStoreError> {
+    store.stage_execution_id_for_recommendation(recommendation_id)
+}
+
+pub fn dismiss_recommendation(
+    services: &Services,
+    recommendation_id: String,
+) -> Result<RecommendationUpdateResult, String> {
+    let timestamp = now_unix_ms_string();
+    {
+        let store = &*services.pipeline.store;
+        store
+            .dismiss_recommendation(&recommendation_id, &timestamp)
+            .map_err(store_err_to_string)?;
+    }
+    let store = &*services.pipeline.store;
+    let stage_execution_id = stage_execution_id_for_recommendation(store, &recommendation_id)
+        .map_err(store_err_to_string)?;
+    let recs = store
+        .list_recommendations_for_stage_execution(&stage_execution_id)
+        .map_err(store_err_to_string)?;
+    let rec = recs
+        .into_iter()
+        .find(|r| r.id == recommendation_id)
+        .ok_or_else(|| format!("recommendation vanished after dismiss: {recommendation_id}"))?;
+    Ok(RecommendationUpdateResult {
+        recommendation: RecommendationDto::from(&rec),
+        applied_stage_id: rec.applied_stage_id.clone(),
+    })
+}
+
+pub fn reset_recommendation(
+    services: &Services,
+    recommendation_id: String,
+) -> Result<RecommendationUpdateResult, String> {
+    {
+        let store = &*services.pipeline.store;
+        store
+            .reset_recommendation(&recommendation_id)
+            .map_err(store_err_to_string)?;
+    }
+    let store = &*services.pipeline.store;
+    let stage_execution_id = stage_execution_id_for_recommendation(store, &recommendation_id)
+        .map_err(store_err_to_string)?;
+    let recs = store
+        .list_recommendations_for_stage_execution(&stage_execution_id)
+        .map_err(store_err_to_string)?;
+    let rec = recs
+        .into_iter()
+        .find(|r| r.id == recommendation_id)
+        .ok_or_else(|| format!("recommendation vanished after reset: {recommendation_id}"))?;
+    Ok(RecommendationUpdateResult {
+        recommendation: RecommendationDto::from(&rec),
+        applied_stage_id: None,
+    })
+}
+
+// ─── CR-05 P5 slice 4 — §24 Pipeline Visualization + §27 metrics ─────────
+
+/// CR-05 P5 slice 4 (§27) — UI payload for `get_processing_metrics`.
+/// Mirror of `astroforge_core::processing_metrics::ProcessingMetrics`;
+/// lives in the UI layer so the contract is stable when the
+/// core type evolves.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessingMetricsDto {
+    pub plan_id: String,
+    pub stage_count: u32,
+    pub completed_count: u32,
+    /// `0.0..=1.0`. `0.0` when no stages have completed yet.
+    pub completion_ratio: f64,
+    pub latest_stage_id: Option<String>,
+    pub latest_stage_type: Option<String>,
+    pub latest_metrics: Option<astroforge_core::adaptive::ImageMetrics>,
+    /// Persisted `resource_usage_json` from the most recent completed
+    /// stage, deserialised into `ExecutionBudget`. `None` when no
+    /// stage has completed or the runner hasn't persisted a budget yet.
+    pub latest_resource_budget: Option<astroforge_core::resource::ExecutionBudget>,
+    /// §12 adaptive output derived from `latest_metrics`. `None` when
+    /// no metrics are available yet (the §12 promise of "never refuse
+    /// to make progress" means the engine always returns *something*,
+    /// but we surface the absence to the UI rather than fabricate).
+    pub adaptive_parameters: Option<AdaptiveParameterSet>,
+    /// CR-05 P6.2 (§23 AI Boundary) — AI label from the most-recent
+    /// stage execution. `None` when `ai_label_json` is missing
+    /// (pre-P6.2 row) or unparseable.
+    pub latest_ai_label: Option<astroforge_core::ai_boundary::AiBoundaryLabel>,
+    /// CR-05 P6.1 (§28) — structured error from the most-recent
+    /// failed stage, parsed from `error_json`. `None` when no stage
+    /// has failed or the persisted shape is pre-P6.1.
+    pub latest_stage_error: Option<astroforge_core::stage_error::StageError>,
+}
+
+impl From<astroforge_core::processing_metrics::ProcessingMetrics> for ProcessingMetricsDto {
+    fn from(m: astroforge_core::processing_metrics::ProcessingMetrics) -> Self {
+        Self {
+            plan_id: m.plan_id,
+            stage_count: m.stage_count,
+            completed_count: m.completed_count,
+            completion_ratio: m.completion_ratio,
+            latest_stage_id: m.latest_stage_id,
+            latest_stage_type: m.latest_stage_type,
+            latest_metrics: m.latest_metrics,
+            latest_resource_budget: m.latest_resource_budget,
+            adaptive_parameters: m.adaptive_parameters,
+            latest_ai_label: m.latest_ai_label,
+            latest_stage_error: m.latest_stage_error,
+        }
+    }
+}
+
+/// CR-05 P5 slice 4 (§24 + §27) — `get_processing_metrics`.
+///
+/// Aggregates persisted stage executions into a single UI-friendly
+/// payload so `ExpertDagView` doesn't need to make 5+ round trips.
+/// Pure function of the store — no IO, no system calls.
+pub fn get_processing_metrics(
+    services: &Services,
+    plan_id: String,
+) -> Result<ProcessingMetricsDto, String> {
+    let store = &*services.pipeline.store;
+    let plan = store.load_plan(&plan_id).map_err(store_err_to_string)?;
+    let execs = store
+        .list_stage_executions_for_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    // §27 aggregate lives in astroforge-core so it can be unit-tested
+    // as part of the workspace `cargo test --workspace` run that CI
+    // executes.
+    let payload = astroforge_core::processing_metrics::aggregate_processing_metrics(&plan, &execs);
+    Ok(payload.into())
+}
+
+/// CR-05 P6 slice 3 (§25) — `get_processing_timeline`.
+///
+/// Derives the per-stage pipeline timeline (§25) from the same
+/// stage executions that `get_processing_metrics` already reads.
+/// Pure function of the store — no IO, no system calls. Aggregation
+/// lives in `astroforge_core::processing_timeline` so it's caught
+/// by `cargo test --workspace`.
+pub fn get_processing_timeline(
+    services: &Services,
+    plan_id: String,
+) -> Result<ProcessingTimelineDto, String> {
+    let store = &*services.pipeline.store;
+    let plan = store.load_plan(&plan_id).map_err(store_err_to_string)?;
+    let execs = store
+        .list_stage_executions_for_plan(&plan_id)
+        .map_err(store_err_to_string)?;
+    let timeline = astroforge_core::processing_timeline::build_processing_timeline(&plan, &execs);
+    Ok(timeline.into())
+}
+
+/// CR-05 P6 slice 3 (§25) — UI payload for `get_processing_timeline`.
+/// Mirrors `astroforge_core::processing_timeline::ProcessingTimeline`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessingTimelineDto {
+    pub plan_id: String,
+    pub events: Vec<TimelineEventDto>,
+}
+
+/// CR-05 P6 slice 3 (§25) — single event on the processing timeline.
+/// Mirrors `astroforge_core::processing_timeline::TimelineEvent`.
+#[derive(Debug, Clone, Serialize)]
+pub struct TimelineEventDto {
+    pub stage_id: String,
+    pub stage_label: String,
+    pub stage_type: String,
+    pub sequence: u32,
+    /// Unix milliseconds; `None` for events with no parseable
+    /// start time (legacy rows, unparseable encoding).
+    pub timestamp_unix_ms: Option<u64>,
+    /// Wall-clock duration; `None` when start or end is missing or
+    /// clock-skew-negative.
+    pub duration_ms: Option<u64>,
+    /// `ImageVersion.version_id` this stage produced.
+    pub output_version_id: Option<String>,
+    pub status: String,
+}
+
+impl From<astroforge_core::processing_timeline::TimelineEvent> for TimelineEventDto {
+    fn from(e: astroforge_core::processing_timeline::TimelineEvent) -> Self {
+        Self {
+            stage_id: e.stage_id,
+            stage_label: e.stage_label,
+            stage_type: e.stage_type,
+            sequence: e.sequence,
+            timestamp_unix_ms: e.timestamp_unix_ms,
+            duration_ms: e.duration_ms,
+            output_version_id: e.output_version_id,
+            status: e.status,
+        }
+    }
+}
+
+impl From<astroforge_core::processing_timeline::ProcessingTimeline> for ProcessingTimelineDto {
+    fn from(t: astroforge_core::processing_timeline::ProcessingTimeline) -> Self {
+        Self {
+            plan_id: t.plan_id,
+            events: t.events.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// CR-05 P6.1b (§9) — UI payload for `retry_stage` / `skip_stage`.
+/// Mirrors the new `StageExecution` row produced by the runner.
+#[derive(Debug, Clone, Serialize)]
+pub struct StageExecutionDto {
+    pub stage_execution_id: String,
+    pub plan_id: String,
+    pub stage_id: String,
+    pub attempt: u32,
+    pub status: String,
+    pub output_artifact_id: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub error_json: Option<String>,
+}
+
+impl From<astroforge_core::domain::StageExecution> for StageExecutionDto {
+    fn from(e: astroforge_core::domain::StageExecution) -> Self {
+        Self {
+            stage_execution_id: e.stage_execution_id,
+            plan_id: e.plan_id,
+            stage_id: e.stage_id,
+            attempt: e.attempt,
+            status: e.status,
+            output_artifact_id: e.output_artifact_id,
+            started_at: e.started_at,
+            completed_at: e.completed_at,
+            error_json: e.error_json,
+        }
+    }
+}
+
+/// CR-05 P6.1b (§9) — `retry_stage`.
+///
+/// Re-dispatches a single stage that previously failed. The
+/// runner validates that the plan is in `Failed` state and that
+/// the named stage exists on the plan. On success the new exec
+/// row carries `attempt = prev + 1` and `status = "completed"`;
+/// on failure the row carries the structured §28 error and the
+/// plan stays `Failed`.
+pub fn retry_stage(
+    services: &Services,
+    plan_id: String,
+    stage_id: String,
+    kind: RetryKindDto,
+) -> Result<StageExecutionDto, String> {
+    let runner = {
+        let store = services.pipeline.store.clone();
+        PipelineRunner::with_engine(
+            store,
+            services.pipeline.handler_registry.clone(),
+            services.pipeline.domain_store.clone(),
+            services.pipeline.recommendation_engine.clone(),
+        )
+    };
+    let rust_kind = match kind {
+        RetryKindDto::Optimized => RetryKind::Optimized,
+        RetryKindDto::AsIs => RetryKind::AsIs,
+    };
+    runner
+        .retry_stage(&plan_id, &stage_id, rust_kind)
+        .map(Into::into)
+        .map_err(runner_err_to_string)
+}
+
+/// CR-05 P6.1b (§9) — UI representation of the retry variant.
+/// Today both variants produce the same runner behaviour; the
+/// distinction is recorded on the new exec row's parameters_json
+/// for traceability.
+#[derive(Debug, Clone, Copy, Deserialize)]
+// #465 W6 — the UI bridge sends "optimized" / "as_is" (snake_case,
+// matching the §9 RetryKind naming); without this rename serde
+// expected the Rust variant names and rejected every retry call
+// before the body ran ("unknown variant `as_is`").
+#[serde(rename_all = "snake_case")]
+pub enum RetryKindDto {
+    Optimized,
+    AsIs,
+}
+
+/// CR-05 P6.1b (§9) — `skip_stage`.
+///
+/// Marks a stage's latest exec row as `skipped` and flips the
+/// plan back to `Ready`. Refuses on required stages per §9.
+pub fn skip_stage(
+    services: &Services,
+    plan_id: String,
+    stage_id: String,
+) -> Result<StageExecutionDto, String> {
+    let runner = {
+        let store = services.pipeline.store.clone();
+        PipelineRunner::with_engine(
+            store,
+            services.pipeline.handler_registry.clone(),
+            services.pipeline.domain_store.clone(),
+            services.pipeline.recommendation_engine.clone(),
+        )
+    };
+    runner
+        .skip_stage(&plan_id, &stage_id)
+        .map(Into::into)
+        .map_err(runner_err_to_string)
+}
+
+/// CR-05 P6.1b — translate `RunnerError` to a user-facing string.
+/// Mirrors `store_err_to_string` for store errors.
+fn runner_err_to_string(e: astroforge_core::pipeline_plan::runner::RunnerError) -> String {
+    e.to_string()
+}

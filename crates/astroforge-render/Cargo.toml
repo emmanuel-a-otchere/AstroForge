@@ -1,0 +1,18 @@
+[package]
+name = "astroforge-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+astroforge-core = { workspace = true }
+egui = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+# Valid TIFF encoding for decoder tests. NOTE: astroforge-core's own
+# export_tiff_16bit currently emits an invalid BitsPerSample IFD entry
+# for RGB (inline value instead of an offset array), so core exports
+# can't be roundtripped through from_tiff_bytes — flagged separately.
+tiff = "0.11"

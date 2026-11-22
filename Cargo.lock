@@ -360,6 +360,12 @@ dependencies = [
 [[package]]
 name = "astroforge-render"
 version = "0.1.0"
+dependencies = [
+ "astroforge-core",
+ "egui",
+ "tempfile",
+ "tiff",
+]
 
 [[package]]
 name = "astroforge-tauri"
@@ -383,6 +389,7 @@ name = "astroforge-ui"
 version = "0.1.0"
 dependencies = [
  "astroforge-core",
+ "astroforge-render",
  "dirs 6.0.0",
  "eframe",
  "egui",

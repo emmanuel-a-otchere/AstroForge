@@ -19,6 +19,7 @@
 pub mod api;
 pub mod app;
 pub mod fonts;
+pub mod image_canvas;
 pub mod semantics;
 pub mod services;
 pub mod theme;

@@ -8,9 +8,10 @@
 
 use std::sync::Arc;
 
-use egui::{CentralPanel, Frame, Key, Margin, Panel, RichText, TextEdit, Ui};
+use egui::{CentralPanel, ColorImage, Frame, Key, Margin, Panel, RichText, TextEdit, Ui};
 
 use crate::api::project::{self, ProjectSummary};
+use crate::image_canvas::ImageCanvas;
 use crate::semantics as s;
 use crate::services::Services;
 use crate::tokens as t;
@@ -93,12 +94,30 @@ pub struct AstroForgeApp {
     projects_loaded: bool,
     new_project_name: String,
     error: Option<String>,
+    /// P1 sample view: synthetic frame through the render pipeline.
+    /// NOT user data — proves the display path without artifacts.
+    sample_canvas: ImageCanvas,
+    sample_linear: Option<ColorImage>,
+    sample_stretched: Option<ColorImage>,
+    sample_autostretch: bool,
 }
 
 impl AstroForgeApp {
     pub fn new(cc: &eframe::CreationContext<'_>, services: Arc<Services>) -> Self {
         crate::fonts::install(&cc.egui_ctx);
         crate::theme::install(&cc.egui_ctx);
+
+        // Render-pipeline sample: synthetic field -> tone map ->
+        // display images (computed once; the canvas toggles between
+        // them).
+        let sample = astroforge_render::demo::synthetic_deep_sky(512, 384);
+        let sample_linear = Some(astroforge_render::to_color_image(
+            &astroforge_render::ToneMap::None.apply(&sample).0,
+        ));
+        let sample_stretched = Some(astroforge_render::to_color_image(
+            &astroforge_render::ToneMap::AutoStretch.apply(&sample).0,
+        ));
+
         AstroForgeApp {
             services,
             screen: Screen::Home,
@@ -106,6 +125,10 @@ impl AstroForgeApp {
             projects_loaded: false,
             new_project_name: String::new(),
             error: None,
+            sample_canvas: ImageCanvas::new(),
+            sample_linear,
+            sample_stretched,
+            sample_autostretch: true,
         }
     }
 
@@ -190,6 +213,51 @@ impl AstroForgeApp {
                 .size(t::type_scale::DATA.size)
                 .family(t::type_scale::DATA.family.clone()),
         );
+        ui.add_space(t::spacing::MD);
+
+        // P1 sample view — the render pipeline end-to-end on a
+        // synthetic frame (clearly labeled; not user data).
+        s::section(ui, "Sample frame \u{2014} synthetic", |ui| {
+            ui.horizontal(|ui| {
+                s::body_muted(ui, "Tone map:");
+                let linear_clicked = ui
+                    .selectable_label(!self.sample_autostretch, "Linear")
+                    .clicked();
+                let stretch_clicked = ui
+                    .selectable_label(self.sample_autostretch, "Screen stretch")
+                    .clicked();
+                if linear_clicked && self.sample_autostretch {
+                    self.sample_autostretch = false;
+                    self.sample_canvas.refit();
+                }
+                if stretch_clicked && !self.sample_autostretch {
+                    self.sample_autostretch = true;
+                    self.sample_canvas.refit();
+                }
+            });
+            let image = if self.sample_autostretch {
+                self.sample_stretched.clone()
+            } else {
+                self.sample_linear.clone()
+            };
+            if let Some(image) = image {
+                self.sample_canvas
+                    .set_image(image, self.sample_autostretch as u64 + 1);
+            }
+            // Keep the canvas inside the viewport regardless of what
+            // sits above it.
+            let canvas_height = (ui.available_height() * 0.45).clamp(160.0, 320.0);
+            crate::image_canvas::framed_canvas(ui, "Canvas", canvas_height, |ui| {
+                self.sample_canvas.show(ui, "sample")
+            });
+            ui.add_space(t::spacing::XS);
+            s::body_muted(
+                ui,
+                "Procedural star field through the P1 display pipeline \
+                 (decode -> tone map -> texture). Not real session data — \
+                 replaces it only until preview artifacts land in P3.",
+            );
+        });
         ui.add_space(t::spacing::MD);
         s::body_muted(
             ui,

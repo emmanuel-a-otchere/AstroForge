@@ -1,15 +1,25 @@
-//! AstroForge render engine — wgpu-backed display layer for the egui
-//! desktop app (`astroforge-ui`).
+//! AstroForge render engine — display pipeline for the egui desktop
+//! app (`astroforge-ui`).
 //!
-//! Scope (migration P1; see docs in the egui-migration plan):
-//! - Float texture upload (16-bit TIFF previews -> rgba16float)
-//! - MTF stretch render, reusing the canonical math in
-//!   `astroforge_core::stretching` (the GLSL `shaders.ts` layer is NOT
-//!   ported — the Rust side is the source of truth)
-//! - Bilinear resampling + zoom/pan, mirroring `image-canvas-webgl.ts`
-//! - Before/after + per-pixel diff, reusing the WGSL from
-//!   `src/lib/webgpu-shaders.ts` verbatim (wgpu consumes it unchanged)
-//! - CPU fallback path (egui `ColorImage`) for machines without wgpu
+//! Slice P1 (CPU path): artifact bytes -> decode -> tone map ->
+//! `egui::ColorImage`, with pan/zoom interaction handled by the
+//! `image_canvas` component in the UI crate. The math is NOT
+//! re-implemented here: decoding delegates to `astroforge_core::
+//! decoders`, tone mapping to `astroforge_core::stretching` (the
+//! canonical sources behind the web app's GLSL/WGSL layers).
 //!
-//! Intentionally empty for now: this crate exists so the workspace
-//! wiring lands early and later slices have a stable home.
+//! Later slices:
+//! - wgpu path: rgba16float textures + the WGSL compute shaders from
+//!   `src/lib/webgpu-*.ts` for interactive diff/compare, painted into
+//!   egui via `CallbackTrait` hooks.
+//! - Histogram rendering (Solar Flare Red curve on darkest neutral,
+//!   per DESIGN.md).
+
+pub mod color;
+pub mod demo;
+pub mod source;
+pub mod tone;
+
+pub use color::{prepare_display, to_color_image};
+pub use source::decode_image;
+pub use tone::ToneMap;

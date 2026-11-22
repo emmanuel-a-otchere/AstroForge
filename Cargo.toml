@@ -18,6 +18,7 @@ authors = ["AstroForge Contributors"]
 [workspace.dependencies]
 astroforge-core = { path = "crates/astroforge-core" }
 astroforge-ai = { path = "crates/astroforge-ai" }
+astroforge-render = { path = "crates/astroforge-render" }
 # egui migration — desktop UI stack (strangler pattern; src-tauri stays
 # the shipping app until crates/astroforge-ui reaches feature parity).
 eframe = "0.37"

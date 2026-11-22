@@ -4,6 +4,8 @@ members = [
     "crates/astroforge-core",
     "crates/astroforge-ai",
     "crates/astroforge-app",
+    "crates/astroforge-render",
+    "crates/astroforge-ui",
     "src-tauri",
 ]
 
@@ -16,6 +18,11 @@ authors = ["AstroForge Contributors"]
 [workspace.dependencies]
 astroforge-core = { path = "crates/astroforge-core" }
 astroforge-ai = { path = "crates/astroforge-ai" }
+# egui migration — desktop UI stack (strangler pattern; src-tauri stays
+# the shipping app until crates/astroforge-ui reaches feature parity).
+eframe = "0.37"
+egui = "0.37"
+dirs = "6"
 ndarray = "0.16"
 # W3 (#465) — PNG/JPEG decode via the image-rs crate (pulls only the
 # png + jpeg-decoder features; the rest are disabled)

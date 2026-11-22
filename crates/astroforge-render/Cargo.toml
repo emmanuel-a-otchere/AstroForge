@@ -1,0 +1,11 @@
+[package]
+name = "astroforge-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+# P1 adds wgpu + egui here when the display engine lands. Kept
+# dependency-free for now so the workspace stays green while the
+# egui shell is scaffolded.

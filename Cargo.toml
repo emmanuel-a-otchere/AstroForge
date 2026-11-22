@@ -28,6 +28,7 @@ wgpu = "30"
 half = "2"
 bytemuck = "1"
 dirs = "6"
+rfd = "0.18"
 ndarray = "0.16"
 # W3 (#465) — PNG/JPEG decode via the image-rs crate (pulls only the
 # png + jpeg-decoder features; the rest are disabled)

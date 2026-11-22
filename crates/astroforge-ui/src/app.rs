@@ -100,6 +100,9 @@ pub struct AstroForgeApp {
     sample_linear: Option<ColorImage>,
     sample_stretched: Option<ColorImage>,
     sample_autostretch: bool,
+    /// f32 sources for the wgpu upload path (P1b).
+    sample_linear_f32: Option<astroforge_core::image::F32Image>,
+    sample_stretched_f32: Option<astroforge_core::image::F32Image>,
 }
 
 impl AstroForgeApp {
@@ -118,6 +121,22 @@ impl AstroForgeApp {
             &astroforge_render::ToneMap::AutoStretch.apply(&sample).0,
         ));
 
+        // P1b: attach the wgpu display pipeline when eframe's wgpu
+        // renderer is active; the canvas then paints rgba16float
+        // textures via custom paint callbacks (CPU fallback keeps
+        // working otherwise).
+        let mut sample_canvas = ImageCanvas::new();
+        if let Some(rs) = &cc.wgpu_render_state {
+            let ctx = astroforge_render::GpuContext::from_render_state(rs);
+            log::info!("wgpu display path active on: {}", ctx.adapter_info);
+            let pipeline = astroforge_render::ImagePipeline::new(&ctx);
+            sample_canvas.attach_gpu(pipeline, ctx);
+        }
+
+        // Keep tone-mapped f32 sources for the GPU upload path.
+        let (sample_linear_f32, _) = astroforge_render::ToneMap::None.apply(&sample);
+        let (sample_stretched_f32, _) = astroforge_render::ToneMap::AutoStretch.apply(&sample);
+
         AstroForgeApp {
             services,
             screen: Screen::Home,
@@ -125,10 +144,12 @@ impl AstroForgeApp {
             projects_loaded: false,
             new_project_name: String::new(),
             error: None,
-            sample_canvas: ImageCanvas::new(),
+            sample_canvas,
             sample_linear,
             sample_stretched,
             sample_autostretch: true,
+            sample_linear_f32: Some(sample_linear_f32),
+            sample_stretched_f32: Some(sample_stretched_f32),
         }
     }
 
@@ -240,7 +261,17 @@ impl AstroForgeApp {
             } else {
                 self.sample_linear.clone()
             };
-            if let Some(image) = image {
+            if self.sample_canvas.has_gpu() {
+                let src = if self.sample_autostretch {
+                    self.sample_stretched_f32.clone()
+                } else {
+                    self.sample_linear_f32.clone()
+                };
+                if let Some(img) = src {
+                    self.sample_canvas
+                        .set_image_f32(&img, self.sample_autostretch as u64 + 1);
+                }
+            } else if let Some(image) = image {
                 self.sample_canvas
                     .set_image(image, self.sample_autostretch as u64 + 1);
             }

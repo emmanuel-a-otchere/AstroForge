@@ -36,6 +36,15 @@ pub struct ImageCanvas {
     pending: Option<ColorImage>,
     pending_rev: u64,
     uploaded_rev: u64,
+    /// wgpu display pipeline (P1b). When present and a texture is
+    /// uploaded, the canvas paints through the GPU callback instead
+    /// of an egui texture.
+    gpu: Option<(
+        astroforge_render::GpuContext,
+        astroforge_render::ImagePipeline,
+    )>,
+    gpu_pending: Option<astroforge_core::image::F32Image>,
+    gpu_uploaded_rev: u64,
     pub state: CanvasState,
 }
 
@@ -46,8 +55,25 @@ impl ImageCanvas {
             pending: None,
             pending_rev: 0,
             uploaded_rev: 0,
+            gpu: None,
+            gpu_pending: None,
+            gpu_uploaded_rev: 0,
             state: CanvasState::default(),
         }
+    }
+
+    /// Attach the wgpu display pipeline (call once, after `new`, from
+    /// a context that has eframe's render state).
+    pub fn attach_gpu(
+        &mut self,
+        pipeline: astroforge_render::ImagePipeline,
+        ctx: astroforge_render::GpuContext,
+    ) {
+        self.gpu = Some((ctx, pipeline));
+    }
+
+    pub fn has_gpu(&self) -> bool {
+        self.gpu.is_some()
     }
 
     /// Supply a new display image. `rev` should change whenever the
@@ -59,6 +85,22 @@ impl ImageCanvas {
         }
         self.pending = Some(image);
         self.pending_rev = rev;
+    }
+
+    /// Supply a linear-light `F32Image` — uploads through the wgpu
+    /// path as rgba16float when the GPU pipeline is attached, falling
+    /// back to the CPU texture otherwise.
+    pub fn set_image_f32(&mut self, image: &astroforge_core::image::F32Image, rev: u64) {
+        if let Some((ctx, gpu)) = &mut self.gpu {
+            if rev != self.gpu_uploaded_rev {
+                gpu.upload_f32_image(ctx, image);
+                self.gpu_uploaded_rev = rev;
+            }
+            self.gpu_pending = None;
+        } else {
+            self.gpu_pending = Some(image.clone());
+            self.set_image(astroforge_render::to_color_image(image), rev);
+        }
     }
 
     /// Reset to fit (zoom 1, no pan).
@@ -79,6 +121,11 @@ impl ImageCanvas {
             }
         }
         let _ = self.uploaded_rev;
+        let gpu_ready = self
+            .gpu
+            .as_ref()
+            .map(|(_, p)| p.has_texture())
+            .unwrap_or(false);
 
         let desired = Vec2::new(ui.available_width(), ui.available_height());
         let (canvas_rect, _) = ui.allocate_exact_size(desired, Sense::hover());
@@ -103,8 +150,21 @@ impl ImageCanvas {
             )
             .on_hover_text("Scroll to zoom, drag to pan, double-click to refit");
 
-        if let Some(handle) = &self.handle {
-            let size = Vec2::new(handle.size()[0] as f32, handle.size()[1] as f32);
+        // Source of truth for dimensions: the GPU texture when the
+        // wgpu path owns this canvas, else the CPU texture handle.
+        let gpu_dims = self
+            .gpu
+            .as_ref()
+            .and_then(|(_, p)| p.has_texture().then(|| p.dims()));
+        let cpu_handle = self.handle.clone();
+        let dims_px: [u32; 2] = match (&cpu_handle, gpu_dims) {
+            (_, Some(d)) => d,
+            (Some(h), None) => [h.size()[0] as u32, h.size()[1] as u32],
+            _ => [0, 0],
+        };
+
+        if dims_px[0] > 0 && dims_px[1] > 0 {
+            let size = Vec2::new(dims_px[0] as f32, dims_px[1] as f32);
             let fit = (canvas_rect.width() / size.x)
                 .min(canvas_rect.height() / size.y)
                 .clamp(f32::EPSILON, 1.0);
@@ -143,12 +203,20 @@ impl ImageCanvas {
             state.pan = state.pan.clamp(-max_offset, max_offset);
 
             let image_rect = Rect::from_center_size(canvas_rect.center() + state.pan, display);
-            painter.image(
-                handle.id(),
-                image_rect,
-                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
+            if gpu_ready {
+                // wgpu path: custom paint callback samples the
+                // rgba16float texture inside the viewport.
+                if let Some((_, pipeline)) = &self.gpu {
+                    painter.add(astroforge_render::gpu::paint_callback(pipeline, image_rect));
+                }
+            } else if let Some(handle) = &cpu_handle {
+                painter.image(
+                    handle.id(),
+                    image_rect,
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
 
             // Focus ring on hover (Solar Flare hairline, per DESIGN.md
             // "Active Focus").
@@ -161,12 +229,15 @@ impl ImageCanvas {
                 );
             }
 
-            // Statusline inside the canvas: dims + zoom (DATA token).
+            // Statusline inside the canvas: dims + zoom + backend
+            // (DATA token).
+            let backend = if gpu_ready { "gpu" } else { "cpu" };
             let status = format!(
-                "{} \u{00d7}{} px   {:.0}%",
-                handle.size()[0],
-                handle.size()[1],
-                state.zoom * 100.0
+                "{} \u{00d7}{} px   {:.0}%   {}",
+                dims_px[0],
+                dims_px[1],
+                state.zoom * 100.0,
+                backend
             );
             painter.text(
                 canvas_rect.left_bottom() + egui::vec2(t::spacing::SM, -t::spacing::SM),

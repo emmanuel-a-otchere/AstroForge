@@ -362,9 +362,13 @@ name = "astroforge-render"
 version = "0.1.0"
 dependencies = [
  "astroforge-core",
+ "bytemuck",
  "egui",
+ "egui-wgpu",
+ "half",
  "tempfile",
  "tiff",
+ "wgpu",
 ]
 
 [[package]]

@@ -72,6 +72,17 @@ AstroForge is a [Tauri 2](https://tauri.app) app: a Rust workspace (three crates
 
 ### Build & run
 
+**Native egui app** (the migration target — see
+[`docs/EGUI_MIGRATION.md`](docs/EGUI_MIGRATION.md); shares the same data
+directory as the Tauri app):
+
+```bash
+cargo run -p astroforge-ui
+```
+
+**Tauri + Svelte app** (still the shipping front-end during the migration
+window):
+
 ```bash
 npm install        # frontend dependencies
 npm run tauri dev  # launch the desktop app in dev mode (Vite on port 1420 + Rust shell)
@@ -86,10 +97,11 @@ npm run tauri build
 ### Tests
 
 ```bash
-npm run test             # frontend unit tests (vitest)
-npm run check            # Svelte/TypeScript type check
-cargo test --workspace   # Rust unit + integration tests
+npm run test                       # frontend unit tests (vitest)
+npm run check                      # Svelte/TypeScript type check
+cargo test --workspace             # Rust unit + integration tests (incl. egui crates)
 cargo clippy --workspace --all-targets -- -D warnings
+python3 scripts/parity_audit.py    # egui api vs Tauri command parity (CI-gated)
 ```
 
 CI runs all of the above on Linux, macOS, and Windows ([`ci.yml`](.github/workflows/ci.yml)).

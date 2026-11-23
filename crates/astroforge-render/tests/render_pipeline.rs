@@ -54,7 +54,7 @@ fn autostretch_lifts_the_field_into_display_range() {
 /// decoder against standards-compliant TIFFs.
 fn encode_valid_tiff16_rgb(width: u32, height: u32, shading: f32) -> Vec<u8> {
     let mut data = Vec::with_capacity((width * height * 3) as usize);
-    for y in 0..height {
+    for _y in 0..height {
         for x in 0..width {
             for c in 0..3u32 {
                 let v = ((x + c * 7) as f32 / (width as f32 + 14.0) * shading).clamp(0.0, 1.0);
@@ -65,7 +65,7 @@ fn encode_valid_tiff16_rgb(width: u32, height: u32, shading: f32) -> Vec<u8> {
     let mut out = std::io::Cursor::new(Vec::new());
     {
         let mut enc = tiff::encoder::TiffEncoder::new(&mut out).expect("encoder");
-        let mut img = enc
+        let img = enc
             .new_image::<tiff::encoder::colortype::RGB16>(width, height)
             .expect("image");
         img.write_data(&data).expect("write data");

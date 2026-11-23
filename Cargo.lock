@@ -392,8 +392,10 @@ dependencies = [
 name = "astroforge-ui"
 version = "0.1.0"
 dependencies = [
+ "astroforge-ai",
  "astroforge-core",
  "astroforge-render",
+ "base64 0.22.1",
  "dirs 6.0.0",
  "eframe",
  "egui",

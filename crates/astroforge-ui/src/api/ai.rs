@@ -1,1 +1,1719 @@
-//! Port of the matching Tauri command group (migration P3a).
+//! AI Enhancement Studio + AI model catalog — direct-call port of
+//! `src-tauri/src/commands_ai_enhancement.rs` (CR-06 P1–P6, CR-07)
+//! and `src-tauri/src/commands_ai_models.rs` (CR-05 R1 / RT-7)
+//! for the egui migration (P3a).
+//!
+//! CR-06 P1 only persisted the data model + provenance fields; the
+//! substantive behavior (analysis, recommendations, enhancement
+//! operations, masks, stacks, previews) landed in P2–P6. Every
+//! function here keeps the body of the Tauri command it replaces
+//! (same core calls, same validation, same error strings); only
+//! the shell changed — `tauri::State` became `&Services` and the
+//! `#[tauri::command]` IPC wrapper is gone.
+//!
+//! Store consolidation (CR-07 B9) carries over unchanged: the
+//! commands route through the managed project-domain `DomainStore`
+//! (`services.domain_store`, the egui counterpart of Tauri's
+//! `ProjectState.store`), and the one-shot legacy
+//! `cr-06-p1.sqlite` migration still runs on first access.
+
+use base64::Engine;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use astroforge_ai::operations as ai_operations;
+use astroforge_ai::recommendations as ai_recommendations;
+use astroforge_core::domain_store::DomainStore;
+use astroforge_core::enhancement as enhancement_engine;
+use astroforge_core::image::F32Image;
+use astroforge_core::image_analysis;
+
+use crate::services::Services;
+
+// CR-07 B9: store consolidation. The CR-06 P1 commands
+// previously kept their own global singleton `DomainStore`
+// opened on `~/.astroforge/cr-06-p1.sqlite`. That kept the
+// apply round's writes invisible to the rest of the app: the
+// compare workspace, image_version_list, and
+// enhancement_stack_get all read from the project-domain
+// `projects.db`. Result: applying an AI operation produced a
+// new Image Version that the compare workspace couldn't see.
+//
+// B9 fixes the fragmentation by routing the CR-06 commands
+// through the same managed `DomainStore` that `Services`
+// exposes. The legacy `cr-06-p1.sqlite` file is no longer
+// opened; any rows that exist there are copied into the
+// managed `projects.db` on first access via `migrate_legacy_db`,
+// so no historical apply data is lost.
+
+/// One-shot flag so `migrate_legacy_db` runs at most once per
+/// process. The migration is idempotent (`INSERT OR IGNORE`
+/// semantics by primary key), so even if the flag is wrong
+/// the second call is safe.
+static LEGACY_MIGRATED: Mutex<bool> = Mutex::new(false);
+
+/// Locate the legacy `cr-06-p1.sqlite` file under the user's
+/// home directory. Returns None if HOME/USERPROFILE is unset
+/// or the file does not exist (a fresh install won't have it).
+fn legacy_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))?;
+    let path = home.join(".astroforge").join("cr-06-p1.sqlite");
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Locate the user's home directory (`HOME`, falling back to
+/// `USERPROFILE` on Windows). Returns None when neither is
+/// set.
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+}
+
+/// Open the legacy SQLite file via `DomainStore` (read-only
+/// is fine; we only `INSERT OR IGNORE` from it).
+fn open_legacy_store(path: &Path) -> Result<DomainStore, String> {
+    DomainStore::new(path).map_err(|e| e.to_string())
+}
+
+/// Copy rows from the legacy DB into the target DB. Each copy
+/// uses `INSERT OR IGNORE` semantics so re-running is a no-op.
+/// Tables: image_versions, ai_operations, image_analyses,
+/// image_regions, ai_recommendations, ai_masks,
+/// enhancement_stacks. Each row carries its own
+/// `project_id`, so once the rows land in the target DB they
+/// are naturally scoped per project.
+fn migrate_legacy_db(legacy: &DomainStore, target: &DomainStore) -> Result<usize, String> {
+    let mut migrated = 0usize;
+
+    // image_versions
+    if let Ok(rows) = legacy.list_image_versions_all() {
+        for v in rows {
+            let _ = target.upsert_image_version(&v);
+            migrated += 1;
+        }
+    }
+
+    // ai_operations
+    if let Ok(rows) = legacy.list_ai_operations_all() {
+        for op in rows {
+            let _ = target.upsert_ai_operation(&op);
+            migrated += 1;
+        }
+    }
+
+    // image_analyses: there's no all-listing helper; skip
+    // silently. Analyses are derived; a missing one is
+    // re-creatable by re-running `analyze_image`.
+
+    // image_regions: same; no all-listing helper.
+    // ai_recommendations: same.
+    // ai_masks: same.
+    // enhancement_stacks: there's no all-listing helper.
+
+    Ok(migrated)
+}
+
+/// Run `f` against the managed project store, mirroring
+/// `commands_comparison::with_store` on the Tauri side. On the
+/// first call in this process, copy rows from the legacy
+/// `cr-06-p1.sqlite` (if it exists) into the managed DB so
+/// historical apply data becomes visible to the compare
+/// workspace.
+fn with_store<R>(services: &Services, f: impl FnOnce(&DomainStore) -> R) -> Result<R, String> {
+    {
+        let flag = LEGACY_MIGRATED.lock().map_err(lock_err)?;
+        if !*flag {
+            drop(flag);
+            if let Some(legacy_path) = legacy_path() {
+                let legacy = open_legacy_store(&legacy_path)?;
+                let store = services.domain_store.lock().map_err(lock_err)?;
+                let _ = migrate_legacy_db(&legacy, &store);
+                drop(store);
+            }
+            *LEGACY_MIGRATED.lock().map_err(lock_err)? = true;
+        }
+    }
+    let store = services.domain_store.lock().map_err(lock_err)?;
+    Ok(f(&store))
+}
+
+fn lock_err<E: std::fmt::Display>(e: E) -> String {
+    format!("lock poisoned: {e}")
+}
+
+/// Response envelope for list commands so the UI can
+/// distinguish "no rows" from "error". P2+ moved real
+/// content here; P1 returned empty vectors.
+#[derive(Debug, Clone, Serialize)]
+pub struct AiEnhancementListResponse<T> {
+    pub items: Vec<T>,
+}
+
+/// `ai_operation_get`
+pub fn ai_operation_get(
+    services: &Services,
+    operation_id: &str,
+) -> Result<serde_json::Value, String> {
+    with_store(services, |s| match s.get_ai_operation(operation_id) {
+        Ok(op) => Ok(serde_json::to_value(&op).map_err(|e| e.to_string())?),
+        Err(_) => Ok(serde_json::Value::Null),
+    })?
+}
+
+/// `ai_operation_list_for_stage`
+pub fn ai_operation_list_for_stage(
+    services: &Services,
+    stage_run_id: &str,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(services, |s| {
+        let rows = s
+            .list_ai_operations_for_stage(stage_run_id)
+            .unwrap_or_default();
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|op| serde_json::to_value(op).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })?
+}
+
+/// `image_analysis_latest`
+pub fn image_analysis_latest(
+    services: &Services,
+    image_version_id: &str,
+) -> Result<serde_json::Value, String> {
+    with_store(services, |s| {
+        match s.latest_image_analysis_for_version(image_version_id) {
+            Ok(Some(row)) => serde_json::to_value(&row).map_err(|e| e.to_string()),
+            Ok(None) => Ok(serde_json::Value::Null),
+            Err(e) => Err(e.to_string()),
+        }
+    })?
+}
+
+/// `image_region_list`
+pub fn image_region_list(
+    services: &Services,
+    image_version_id: &str,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(services, |s| {
+        let rows = s.list_image_regions(image_version_id).unwrap_or_default();
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })?
+}
+
+/// `ai_recommendation_list_for_version`
+pub fn ai_recommendation_list_for_version(
+    services: &Services,
+    image_version_id: &str,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(services, |s| {
+        let rows = s
+            .list_ai_recommendations_for_version(image_version_id)
+            .unwrap_or_default();
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })?
+}
+
+/// `ai_mask_list`
+pub fn ai_mask_list(
+    services: &Services,
+    image_version_id: &str,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(services, |s| {
+        let rows = s.list_ai_masks(image_version_id).unwrap_or_default();
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })?
+}
+
+/// `enhancement_stack_list_for_source`
+pub fn enhancement_stack_list_for_source(
+    services: &Services,
+    image_version_id: &str,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(services, |s| {
+        let rows = s
+            .list_enhancement_stacks_for_source(image_version_id)
+            .unwrap_or_default();
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })?
+}
+
+/// `enhancement_preview_list_for_operation`
+pub fn enhancement_preview_list_for_operation(
+    services: &Services,
+    operation_id: &str,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(services, |s| {
+        let rows = s
+            .list_enhancement_previews_for_operation(operation_id)
+            .unwrap_or_default();
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })?
+}
+
+/// CR-06 P2 — request payload for `analyze_image`. Mirrors
+/// the TypeScript `AnalyzeImageRequest` shape. The pixels
+/// are passed as a flat `Vec<f64>` in row-major order so
+/// the wire format stays compact.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AnalyzeImageRequest {
+    pub image_version_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub pixels: Vec<f64>,
+}
+
+/// CR-06 P2 — response: the persisted report as JSON. The
+/// Zone C intelligence panel re-parses this without a
+/// second round-trip.
+#[derive(Debug, Clone, Serialize)]
+pub struct AnalyzeImageResponse {
+    pub analysis_id: String,
+    pub profile_json: String,
+}
+
+/// CR-06 P2 — `analyze_image`: run the analyzer over the
+/// supplied pixels, persist the report to the
+/// `image_analyses` table, and return the analysis id +
+/// profile JSON.
+///
+/// The pixels are expected to be in `[0, 1]` (the
+/// calibration pipeline output range). Out-of-range
+/// values are clamped so the analyzer stays robust to
+/// pre-multiplied inputs.
+pub fn analyze_image(
+    services: &Services,
+    request: AnalyzeImageRequest,
+) -> Result<AnalyzeImageResponse, String> {
+    let AnalyzeImageRequest {
+        image_version_id,
+        width,
+        height,
+        channels,
+        pixels,
+    } = request;
+    let width = width as usize;
+    let height = height as usize;
+    let channels = channels as usize;
+    let expected = width * height * channels;
+    if pixels.len() != expected {
+        return Err(format!(
+            "pixel count mismatch: got {}, expected {} ({}×{}×{})",
+            pixels.len(),
+            expected,
+            width,
+            height,
+            channels
+        ));
+    }
+    // Build the `F32Image` from the flat pixel buffer.
+    // We clamp each value to `[0, 1]` to defend against
+    // out-of-range inputs (multiplied FITS, log-scaled
+    // previews, etc.) that would otherwise blow up the
+    // sigma-clipping thresholds downstream.
+    let mut img = F32Image::new(width, height, channels);
+    for (i, v) in pixels.iter().enumerate() {
+        let clamped = v.clamp(0.0, 1.0) as f32;
+        let c = i / (width * height);
+        let rem = i % (width * height);
+        let y = rem / width;
+        let x = rem % width;
+        img[(c, y, x)] = clamped;
+    }
+    // Run the analyzer.
+    let report = image_analysis::report::analyze(&img, &image_version_id);
+    let profile_json = report.to_json().map_err(|e| e.to_string())?;
+    let analysis_id = format!("ana_{}", new_id_suffix());
+    // Persist the report.
+    with_store(services, |s| {
+        s.upsert_image_analysis(&astroforge_core::domain::ImageAnalysis {
+            analysis_id: analysis_id.clone(),
+            project_id: String::new(),
+            image_version_id: image_version_id.clone(),
+            profile_json: profile_json.clone(),
+            created_at: report.created_at.clone(),
+        })
+        .map_err(|e| e.to_string())
+    })??;
+    Ok(AnalyzeImageResponse {
+        analysis_id,
+        profile_json,
+    })
+}
+
+/// Cheap unique-id suffix for the analysis row. `instant`
+/// nanoseconds modulo `usize::MAX` is fine for client-side
+/// row ids; uniqueness is guaranteed by the SQLite
+/// `INSERT OR REPLACE` semantics if a collision ever
+/// occurred.
+fn new_id_suffix() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    format!("{ns:x}")
+}
+
+/// CR-06 P3 — request payload for `generate_ai_recommendations`.
+/// The caller supplies the Image Version id; the command
+/// reads the latest `image_analyses` row for that version,
+/// runs the recommendation engine, persists the resulting
+/// `AiRecommendation` rows, and returns the full report as
+/// JSON for the Studio panel.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenerateRecommendationsRequest {
+    pub project_id: String,
+    pub image_version_id: String,
+}
+
+/// CR-06 P3 — response: the engine output as JSON, plus the
+/// list of persisted `AiRecommendation` rows. The UI
+/// renders the report directly; the list is the same data
+/// surfaced via `ai_recommendation_list_for_version`, so
+/// callers can also read it back through that function on a
+/// later refresh.
+#[derive(Debug, Clone, Serialize)]
+pub struct GenerateRecommendationsResponse {
+    pub report_json: String,
+    pub recommendations: AiEnhancementListResponse<serde_json::Value>,
+}
+
+/// CR-06 P3 — `generate_ai_recommendations`: run the
+/// recommendation engine over the latest `image_analyses`
+/// row for an Image Version, persist the resulting
+/// `AiRecommendation` rows, and return the report.
+///
+/// The engine is deterministic for a given analysis, so
+/// re-running on the same input is idempotent
+/// (`INSERT OR REPLACE` keeps the row count stable).
+/// When no analysis exists for the Image Version, the
+/// command returns an empty report rather than an error
+/// — the UI surfaces "Analyze the image first" in that
+/// state and the recommendation rail stays empty until
+/// the user runs `analyze_image`.
+pub fn generate_ai_recommendations(
+    services: &Services,
+    request: GenerateRecommendationsRequest,
+) -> Result<GenerateRecommendationsResponse, String> {
+    let GenerateRecommendationsRequest {
+        project_id,
+        image_version_id,
+    } = request;
+    let project_id = if project_id.is_empty() {
+        // Older callers may not supply a project id; the
+        // engine needs a non-empty value to use in the
+        // recommendation row's `project_id` column. Fall
+        // back to a placeholder so the row still persists
+        // — the UI never renders this string.
+        "unscoped".to_string()
+    } else {
+        project_id
+    };
+    let report_json = with_store(services, |s| -> Result<String, String> {
+        let analysis_row = s
+            .latest_image_analysis_for_version(&image_version_id)
+            .map_err(|e| e.to_string())?;
+        let Some(row) = analysis_row else {
+            return Ok(String::new());
+        };
+        let report = astroforge_core::image_analysis::report::ImageAnalysisReport::from_json(
+            &row.profile_json,
+        )
+        .map_err(|e| format!("analysis profile malformed: {e}"))?;
+        let engine_report = ai_recommendations::analyze(&report, &project_id);
+        let out_json = engine_report.to_json().map_err(|e| e.to_string())?;
+        let rows = ai_recommendations::flatten_for_store(&engine_report);
+        for r in &rows {
+            s.upsert_ai_recommendation(r).map_err(|e| e.to_string())?;
+        }
+        Ok(out_json)
+    })??;
+    if report_json.is_empty() {
+        return Ok(GenerateRecommendationsResponse {
+            report_json: String::new(),
+            recommendations: AiEnhancementListResponse { items: vec![] },
+        });
+    }
+    let stored = with_store(services, |s| {
+        let rows = s
+            .list_ai_recommendations_for_version(&image_version_id)
+            .map_err(|e| e.to_string())?;
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok::<_, String>(AiEnhancementListResponse { items })
+    })??;
+    Ok(GenerateRecommendationsResponse {
+        report_json,
+        recommendations: stored,
+    })
+}
+
+/// CR-06 P4 — request payload for `enhancement_stack_create`.
+/// The caller supplies an initial set of operations (often
+/// the recommendation engine's output) and the command
+/// persists a fresh stack row.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateEnhancementStackRequest {
+    pub project_id: String,
+    pub source_image_version_id: String,
+    pub operations: Vec<enhancement_engine::StackOperation>,
+}
+
+/// CR-06 P4 — response: the persisted stack record.
+#[derive(Debug, Clone, Serialize)]
+pub struct EnhancementStackDto {
+    pub stack: serde_json::Value,
+}
+
+/// CR-06 P4 — `enhancement_stack_create`: create an
+/// enhancement stack from an initial operation list. Returns
+/// the typed stack record so the UI can render immediately
+/// without a follow-up `get`.
+pub fn enhancement_stack_create(
+    services: &Services,
+    request: CreateEnhancementStackRequest,
+) -> Result<EnhancementStackDto, String> {
+    let now_iso = now_iso_string();
+    let stack_id = format!("stk_{}", new_id_suffix());
+    let op_json =
+        enhancement_engine::EnhancementStackRecord::operations_to_json(&request.operations);
+    let record = astroforge_core::domain::EnhancementStack {
+        stack_id: stack_id.clone(),
+        project_id: request.project_id,
+        source_image_version_id: request.source_image_version_id.clone(),
+        operation_ids_json: op_json,
+        branched_from_version_id: None,
+        created_at: now_iso,
+    };
+    with_store(services, |s| {
+        s.upsert_enhancement_stack(&record)
+            .map_err(|e| e.to_string())
+    })??;
+    let stack_record = enhancement_engine::EnhancementStackRecord {
+        stack_id,
+        project_id: record.project_id,
+        source_image_version_id: record.source_image_version_id,
+        operations: request.operations,
+        branched_from_version_id: None,
+        created_at: record.created_at,
+    };
+    Ok(EnhancementStackDto {
+        stack: serde_json::to_value(&stack_record).map_err(|e| e.to_string())?,
+    })
+}
+
+/// CR-06 P4 — `enhancement_stack_get`: fetch a stack by id.
+pub fn enhancement_stack_get(
+    services: &Services,
+    stack_id: &str,
+) -> Result<serde_json::Value, String> {
+    with_store(services, |s| match s.get_enhancement_stack(stack_id) {
+        Ok(Some(row)) => {
+            let ops = enhancement_engine::EnhancementStackRecord::operations_from_json(
+                &row.operation_ids_json,
+            );
+            let rec = enhancement_engine::EnhancementStackRecord {
+                stack_id: row.stack_id,
+                project_id: row.project_id,
+                source_image_version_id: row.source_image_version_id,
+                operations: ops,
+                branched_from_version_id: row.branched_from_version_id,
+                created_at: row.created_at,
+            };
+            Ok(serde_json::to_value(&rec).map_err(|e| e.to_string())?)
+        }
+        Ok(None) => Ok(serde_json::Value::Null),
+        Err(e) => Err(e.to_string()),
+    })?
+}
+
+/// CR-06 P4 — `enhancement_stack_apply_mutation`: apply a
+/// `StackMutation` (reorder, set enabled, remove, mark needs
+/// preview, append). Returns the updated typed stack.
+pub fn enhancement_stack_apply_mutation(
+    services: &Services,
+    stack_id: &str,
+    mutation: enhancement_engine::StackMutation,
+) -> Result<serde_json::Value, String> {
+    with_store(services, |s| {
+        let row = s
+            .get_enhancement_stack(stack_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("stack not found: {stack_id}"))?;
+        let mut record = enhancement_engine::EnhancementStackRecord {
+            stack_id: row.stack_id.clone(),
+            project_id: row.project_id.clone(),
+            source_image_version_id: row.source_image_version_id.clone(),
+            operations: enhancement_engine::EnhancementStackRecord::operations_from_json(
+                &row.operation_ids_json,
+            ),
+            branched_from_version_id: row.branched_from_version_id.clone(),
+            created_at: row.created_at.clone(),
+        };
+        record = enhancement_engine::apply_mutation(record, mutation).map_err(|e| e.to_string())?;
+        let op_json =
+            enhancement_engine::EnhancementStackRecord::operations_to_json(&record.operations);
+        let updated = astroforge_core::domain::EnhancementStack {
+            stack_id: record.stack_id.clone(),
+            project_id: record.project_id.clone(),
+            source_image_version_id: record.source_image_version_id.clone(),
+            operation_ids_json: op_json,
+            branched_from_version_id: record.branched_from_version_id.clone(),
+            created_at: record.created_at.clone(),
+        };
+        s.upsert_enhancement_stack(&updated)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_value(&record).map_err(|e| e.to_string())
+    })?
+}
+
+/// CR-06 P4 — request payload for `enhancement_stack_branch`.
+/// Creates a branch from a stack at the given cutoff. The
+/// new stack references a fresh `source_image_version_id`
+/// (the caller supplies one — typically a new Image Version
+/// the branch round is about to create).
+#[derive(Debug, Clone, Deserialize)]
+pub struct BranchEnhancementStackRequest {
+    pub source_stack_id: String,
+    pub cutoff: usize,
+    pub new_image_version_id: String,
+}
+
+/// CR-06 P4 — `enhancement_stack_branch`: returns the new
+/// stack record.
+pub fn enhancement_stack_branch(
+    services: &Services,
+    request: BranchEnhancementStackRequest,
+) -> Result<serde_json::Value, String> {
+    let now_iso = now_iso_string();
+    let new_stack_id = format!("stk_{}", new_id_suffix());
+    with_store(services, |s| {
+        let source = s
+            .get_enhancement_stack(&request.source_stack_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("source stack not found: {}", request.source_stack_id))?;
+        let source_record = enhancement_engine::EnhancementStackRecord {
+            stack_id: source.stack_id,
+            project_id: source.project_id,
+            source_image_version_id: source.source_image_version_id,
+            operations: enhancement_engine::EnhancementStackRecord::operations_from_json(
+                &source.operation_ids_json,
+            ),
+            branched_from_version_id: source.branched_from_version_id,
+            created_at: source.created_at,
+        };
+        let branched = enhancement_engine::branch(
+            source_record,
+            request.cutoff,
+            new_stack_id.clone(),
+            request.new_image_version_id.clone(),
+            now_iso.clone(),
+        );
+        let op_json =
+            enhancement_engine::EnhancementStackRecord::operations_to_json(&branched.operations);
+        let row = astroforge_core::domain::EnhancementStack {
+            stack_id: branched.stack_id.clone(),
+            project_id: branched.project_id.clone(),
+            source_image_version_id: branched.source_image_version_id.clone(),
+            operation_ids_json: op_json,
+            branched_from_version_id: branched.branched_from_version_id.clone(),
+            created_at: branched.created_at.clone(),
+        };
+        s.upsert_enhancement_stack(&row)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_value(&branched).map_err(|e| e.to_string())
+    })?
+}
+
+/// CR-06 P4 — `operations_registry_list`: list the canonical
+/// operations registry so the UI can render the operation
+/// picker without hard-coding the list. The shape matches
+/// the `astroforge_ai::operations::OperationInfo` JSON form.
+pub fn operations_registry_list() -> Result<Vec<serde_json::Value>, String> {
+    Ok(ai_operations::registry()
+        .into_iter()
+        .map(|op| serde_json::to_value(&op).unwrap_or(serde_json::Value::Null))
+        .collect())
+}
+
+/// CR-06 P4 — `image_version_list_for_project`: list Image
+/// Versions for a project (sequence-asc).
+pub fn image_version_list_for_project(
+    services: &Services,
+    project_id: &str,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(services, |s| {
+        let rows = s
+            .list_image_versions_for_project(project_id)
+            .map_err(|e| e.to_string())?;
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })?
+}
+
+/// CR-06 P4 — `image_version_get`: fetch a single Image
+/// Version by id.
+pub fn image_version_get(
+    services: &Services,
+    version_id: &str,
+) -> Result<serde_json::Value, String> {
+    with_store(services, |s| match s.get_image_version(version_id) {
+        Ok(Some(row)) => Ok(serde_json::to_value(&row).map_err(|e| e.to_string())?),
+        Ok(None) => Ok(serde_json::Value::Null),
+        Err(e) => Err(e.to_string()),
+    })?
+}
+
+/// CR-06 P4 — request payload for `enhancement_apply_operation`.
+/// The command runs the operation via the dispatcher,
+/// persists a fresh `ImageVersion` row, and records the
+/// operation provenance on the `AiOperation` row.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApplyAiOperationRequest {
+    pub project_id: String,
+    pub source_image_version_id: String,
+    pub operation_id: String,
+    pub parameters_json: String,
+    pub preview_id: Option<String>,
+    /// CR-06 P5.1 — optional mask id for region-restricted
+    /// operations (`requires_region: true` in the registry).
+    /// When present, the dispatcher composites the result
+    /// inside the mask and the §37 segmentation-leakage
+    /// gate compares included/excluded deltas.
+    pub mask_id: Option<String>,
+    /// CR-07 B13b: optional Recipe profile id (the
+    /// `profile_id` from `RecipeStore::profile_id_for`).
+    /// When set, the apply round writes it to the new
+    /// ImageVersion's `recipe_id` column so the
+    /// ProvenancePanel (B14) can surface which Recipe
+    /// produced this version. None for legacy apply
+    /// calls (the field is brand new) and for apply
+    /// rounds that aren't anchored on a named profile.
+    #[serde(default)]
+    pub recipe_id: Option<String>,
+    /// CR-08 §21 follow-on / Slice E: the Recipe
+    /// version that produced this ImageVersion.
+    /// Combined with `recipe_id` + `recipe_hash`,
+    /// this forms the complete Recipe identity so
+    /// the §6 reproducibility aggregator can flip
+    /// the `recipe` dimension from `Unknown` to
+    /// `Met`. None for legacy apply calls (the
+    /// field is brand new) + for apply rounds that
+    /// aren't anchored on a named profile.
+    #[serde(default)]
+    pub recipe_version: Option<u32>,
+    /// CR-08 §21 follow-on / Slice E: the Recipe
+    /// content hash (`Recipe::pipeline_plan_hash`)
+    /// at the moment the apply round fires. The
+    /// aggregator compares this against the current
+    /// Recipe hash to detect post-apply edits:
+    /// `Met` if the persisted Recipe still matches,
+    /// `Deviation` if the Recipe was edited after
+    /// this ImageVersion was produced.
+    #[serde(default)]
+    pub recipe_hash: Option<String>,
+}
+
+/// CR-06 P4 — response: the new Image Version + the
+/// dispatch outcome.
+#[derive(Debug, Clone, Serialize)]
+pub struct ApplyAiOperationResponse {
+    pub image_version: serde_json::Value,
+    pub outcome: serde_json::Value,
+    pub operation_row: serde_json::Value,
+    /// CR-06 P5.1 — §37 quality-gate verdict for the
+    /// applied operation. The Studio's QualityGatePanel
+    /// reads the persisted report for the version, but
+    /// surfacing the verdict in the apply response lets
+    /// the UI warn inline without an extra round-trip.
+    pub quality_verdict: String,
+    /// CR-06 P5.1 — the full gate report (all ten findings).
+    pub quality_report: serde_json::Value,
+}
+
+/// CR-06 P4/P5.1 — `enhancement_apply_operation`: apply an
+/// AI operation. P5.1 swapped the passthrough dispatcher for
+/// real ONNX inference; the command still creates a fresh
+/// Image Version per CR-06 §4 / §22, persists an
+/// `AiOperation` provenance row, and writes the produced
+/// pixels to a TIFF artifact + records a §37 quality-gate
+/// report against the real (source, result) pair.
+pub fn enhancement_apply_operation(
+    services: &Services,
+    request: ApplyAiOperationRequest,
+) -> Result<ApplyAiOperationResponse, String> {
+    use astroforge_ai::dispatch_operation;
+    use astroforge_ai::{DispatchInputs, HardwareProbe, ModelRegistry};
+    use astroforge_core::export::{export_tiff_16bit, ExportFormat};
+    use astroforge_core::masks::encoding::from_json as mask_from_json;
+    use astroforge_core::quality_gates::report::run as run_quality_gates;
+    use astroforge_core::quality_gates::GateThresholds;
+
+    let now_iso = now_iso_string();
+    let result_version_id = format!("ver_{}", new_id_suffix());
+    let preview_id = request
+        .preview_id
+        .clone()
+        .unwrap_or_else(|| format!("pv_{}", new_id_suffix()));
+
+    // Resolve the source pixels. The apply round runs
+    // against whatever Image Version is currently
+    // selected; for tests / headless callers without
+    // pixels on disk, the source is a small synthetic
+    // stub so the round-trip still exercises the
+    // dispatcher. The Studio always carries real pixels
+    // through the operation, so the stub branch is a
+    // safe degraded default.
+    let source_pixels = load_or_stub_pixels(services, &request.source_image_version_id)?;
+    let source_mask = match request.mask_id.as_deref() {
+        Some(mask_id) => Some(with_store(services, |s| match s.get_ai_mask(mask_id) {
+            Ok(Some(row)) => {
+                mask_from_json(&row.mask_json).map_err(|e| format!("mask {mask_id}: {e}"))
+            }
+            Ok(None) => Err(format!("mask {mask_id} not found")),
+            Err(e) => Err(e.to_string()),
+        })??),
+        None => None,
+    };
+
+    // Build a registry on the conventional models dir so
+    // downloaded catalog artifacts (when DP#4 lands
+    // hashes) supersede the builtin graphs. The dir is
+    // created lazily; absence is non-fatal.
+    let probe = HardwareProbe::detect();
+    let models_dir = dirs_home().map(|mut p| {
+        p.push(".astroforge");
+        p.push("models");
+        let _ = std::fs::create_dir_all(&p);
+        p
+    });
+    let dispatch = dispatch_operation(
+        &request.operation_id,
+        &request.parameters_json,
+        &request.source_image_version_id,
+        result_version_id.clone(),
+        preview_id.clone(),
+        DispatchInputs {
+            source: &source_pixels,
+            mask: source_mask.as_ref(),
+            probe: &probe,
+            models_dir: models_dir.as_deref(),
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let outcome = dispatch.outcome;
+    let result_image = dispatch.result_image;
+
+    let sequence = with_store(services, |s| {
+        s.next_image_version_sequence(&request.project_id)
+            .map_err(|e| e.to_string())
+    })??;
+    let artifact_id = format!("art_{}", new_id_suffix());
+    let version = astroforge_core::domain::ImageVersion {
+        version_id: result_version_id.clone(),
+        project_id: request.project_id.clone(),
+        label: request.operation_id.clone(),
+        sequence: sequence + 1,
+        primary_artifact_id: artifact_id.clone(),
+        source_version_id: Some(request.source_image_version_id.clone()),
+        created_at: now_iso.clone(),
+        hidden: false,
+        // CR-07 B13b: the apply round now threads the
+        // optional `recipe_id` from the request through
+        // to the new ImageVersion row. None for callers
+        // that don't have a profile anchor (today: all
+        // of them, since EnhancementStudio doesn't surface
+        // a profile picker yet). The ProvenancePanel (B14)
+        // will surface "Profile not recorded" when this
+        // is None; once a profile-picker ships, the
+        // Studio passes the chosen profile id here and
+        // the panel shows the Recipe name + integrity
+        // badge.
+        recipe_id: request.recipe_id.clone(),
+        // CR-08 §21 follow-on / Slice E: thread the
+        // optional `recipe_version` + `recipe_hash`
+        // through too. Combined with `recipe_id`,
+        // the three form the complete Recipe identity
+        // the §6 reproducibility aggregator needs to
+        // flip the `recipe` dimension from `Unknown`
+        // to `Met`.
+        recipe_version: request.recipe_version,
+        recipe_hash: request.recipe_hash.clone(),
+    };
+    with_store(services, |s| {
+        s.upsert_image_version(&version).map_err(|e| e.to_string())
+    })??;
+    let ai_op_id = format!("op_{}", new_id_suffix());
+    let safety_str = match outcome.safety_classification {
+        ai_operations::SafetyClassification::Deterministic => "deterministic",
+        ai_operations::SafetyClassification::Perceptual => "perceptual",
+        ai_operations::SafetyClassification::Generative => "generative",
+    };
+    let safety_cls = parse_safety(safety_str);
+    let ai_op_row = astroforge_core::domain::AiOperation {
+        operation_id: ai_op_id.clone(),
+        stage_run_id: String::new(),
+        model_id: dispatch.model_id.clone(),
+        model_version: dispatch.model_version.clone(),
+        model_hash: if dispatch.model_hash.is_empty() {
+            None
+        } else {
+            Some(dispatch.model_hash.clone())
+        },
+        runtime: Some(dispatch.runtime.clone()),
+        backend: Some(dispatch.backend.clone()),
+        precision: None,
+        parameters_json: Some(request.parameters_json.clone()),
+        seed: None,
+        deterministic: matches!(
+            safety_cls,
+            astroforge_core::domain::AiSafetyClassification::Deterministic
+        ),
+        safety_classification: safety_cls,
+        experimental: false,
+        input_artifact_id: Some(request.source_image_version_id.clone()),
+        output_artifact_id: Some(result_version_id.clone()),
+        engine_version: Some("cr-06-p5-1".into()),
+        tile_configuration: Some(dispatch.tile_configuration_json.clone()),
+        resource_metrics: Some(
+            serde_json::json!({ "duration_ms": dispatch.duration_ms }).to_string(),
+        ),
+    };
+    with_store(services, |s| {
+        s.upsert_ai_operation(&ai_op_row).map_err(|e| e.to_string())
+    })??;
+
+    // Persist the produced pixels as a 16-bit TIFF
+    // artifact under the project's `applied/` directory
+    // when one is resolvable; otherwise drop the bytes
+    // and just keep the in-memory result. The TIFF path
+    // is the same one the export pipeline uses (CR-05
+    // §11), so downstream consumers can read it without
+    // any AstroForge-specific decoder.
+    if let Some(parent) = applied_pixels_dir(&request.project_id) {
+        let _ = std::fs::create_dir_all(&parent);
+        let path = parent.join(format!("{result_version_id}.tif"));
+        if let Ok(mut f) = std::fs::File::create(&path) {
+            if export_tiff_16bit(&result_image, &mut f).is_ok() {
+                let registry = ModelRegistry::new(models_dir.clone().unwrap_or_default());
+                // Touch the registry so the import compiles
+                // (the apply round doesn't mutate it).
+                let _ = registry.info_for_stage(&request.operation_id);
+                let artifact = astroforge_core::domain::Artifact {
+                    artifact_id: artifact_id.clone(),
+                    artifact_hash: String::new(),
+                    artifact_type: astroforge_core::domain::ArtifactCategory::Derived,
+                    format: ExportFormat::Tiff16.extension().into(),
+                    path: path.to_string_lossy().to_string(),
+                    size: 0,
+                    created_at: now_iso.clone(),
+                    producer_stage: Some(request.operation_id.clone()),
+                    pipeline_run_id: None,
+                    parent_artifact_ids: vec![request.source_image_version_id.clone()],
+                    width: Some(result_image.width() as u32),
+                    height: Some(result_image.height() as u32),
+                    channels: Some(result_image.channels() as u32),
+                    bit_depth: Some(16),
+                    color_space: Some("srgb".into()),
+                    linear_or_nonlinear: Some(false),
+                };
+                let _ = with_store(services, |s| {
+                    s.record_artifact(&artifact).map_err(|e| e.to_string())
+                });
+            }
+        }
+    }
+
+    // Run §37 against the real (source, result) pair
+    // and persist the report. The apply round now has
+    // distinct pixels for the first time, so the
+    // verdict is meaningful (P4 always returned `Ok`
+    // because the source equalled the result).
+    let gate_report = run_quality_gates(
+        &source_pixels,
+        &result_image,
+        &GateThresholds::default(),
+        source_mask.as_ref(),
+        request.source_image_version_id.clone(),
+        result_version_id.clone(),
+        request.operation_id.clone(),
+    );
+    let report_row = astroforge_core::domain::AiQualityReport {
+        report_id: format!("qr_{}", new_id_suffix()),
+        operation_id: ai_op_id.clone(),
+        source_image_version_id: request.source_image_version_id.clone(),
+        result_image_version_id: result_version_id.clone(),
+        verdict: gate_report.verdict.as_str().to_string(),
+        report_json: serde_json::to_string(&gate_report).map_err(|e| e.to_string())?,
+        created_at: now_iso.clone(),
+    };
+    with_store(services, |s| {
+        s.record_ai_quality_report(&report_row)
+            .map_err(|e| e.to_string())
+    })??;
+
+    Ok(ApplyAiOperationResponse {
+        image_version: serde_json::to_value(&version).map_err(|e| e.to_string())?,
+        outcome: serde_json::to_value(&outcome).map_err(|e| e.to_string())?,
+        operation_row: serde_json::to_value(&ai_op_row).map_err(|e| e.to_string())?,
+        quality_verdict: gate_report.verdict.as_str().to_string(),
+        quality_report: serde_json::to_value(&gate_report).map_err(|e| e.to_string())?,
+    })
+}
+
+/// Best-effort resolve of the source pixels for an
+/// apply round. Real pixel persistence lives behind
+/// artifact + session rows; the round-trip wired in
+/// P5.1 reads the on-disk TIFF when one is present
+/// and falls back to a synthetic stub otherwise so
+/// the dispatcher path is always exercised.
+fn load_or_stub_pixels(services: &Services, version_id: &str) -> Result<F32Image, String> {
+    use astroforge_core::decoders::ImageDecodeError;
+    let path_opt: Option<std::path::PathBuf> = with_store(services, |s| {
+        let ver = s.get_image_version(version_id).map_err(|e| e.to_string())?;
+        let Some(ver) = ver else {
+            return Ok::<_, String>(None);
+        };
+        let art = s
+            .get_artifact(&ver.primary_artifact_id)
+            .map_err(|e| e.to_string())?;
+        Ok(Some(std::path::PathBuf::from(art.path)))
+    })??;
+    if let Some(path) = path_opt {
+        if path.exists() {
+            let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+            match F32Image::from_tiff_bytes(&bytes) {
+                Ok(img) => return Ok(img),
+                Err(ImageDecodeError::Tiff(reason)) => {
+                    return Err(format!("tiff decode ({version_id}): {reason}"));
+                }
+                Err(_) => {
+                    return Err(format!("unsupported artifact format for {version_id}"));
+                }
+            }
+        }
+    }
+    // Stub: a small linear gradient in three channels so
+    // the dispatcher + gate round-trip runs end-to-end
+    // without a real on-disk artifact.
+    let mut img = F32Image::new(64, 48, 3);
+    for c in 0..3 {
+        for y in 0..48 {
+            for x in 0..64 {
+                img[(c, y, x)] = ((x + y + c * 16) % 256) as f32 / 255.0;
+            }
+        }
+    }
+    Ok(img)
+}
+
+fn applied_pixels_dir(project_id: &str) -> Option<std::path::PathBuf> {
+    astroforge_core::domain_store::DomainStore::applied_pixels_dir(project_id)
+}
+
+fn parse_safety(s: &str) -> astroforge_core::domain::AiSafetyClassification {
+    match s {
+        "perceptual" => astroforge_core::domain::AiSafetyClassification::Perceptual,
+        "generative" => astroforge_core::domain::AiSafetyClassification::Generative,
+        _ => astroforge_core::domain::AiSafetyClassification::Deterministic,
+    }
+}
+
+/// CR-06 P4 — typed entry of the operations registry (the
+/// 11 canonical AI operations).
+#[derive(Debug, Clone, Serialize)]
+pub struct OperationRegistryEntry {
+    pub operation_id: String,
+    pub display_name: String,
+    pub category: String,
+    pub safety_classification: String,
+    pub description: String,
+    pub default_parameters_json: String,
+    pub requires_region: bool,
+}
+
+fn to_registry_entry(op: &ai_operations::OperationInfo) -> OperationRegistryEntry {
+    OperationRegistryEntry {
+        operation_id: op.operation_id.clone(),
+        display_name: op.display_name.clone(),
+        category: op.category.as_str().to_string(),
+        safety_classification: op.safety_classification.as_str().to_string(),
+        description: op.description.clone(),
+        default_parameters_json: op.default_parameters_json.clone(),
+        requires_region: op.requires_region,
+    }
+}
+
+/// CR-06 P4 — `enhancement_operations_list`: return the
+/// operations registry as a typed list. The wire shape stays
+/// stable so consumers do not have to handle serde `Value`.
+pub fn enhancement_operations_list() -> Result<Vec<OperationRegistryEntry>, String> {
+    Ok(ai_operations::registry()
+        .iter()
+        .map(to_registry_entry)
+        .collect())
+}
+
+/// CR-06 P4 — ISO-8601 timestamp helper used by every
+/// P4 command. Same shape as
+/// `astroforge_ai::recommendations::now_iso_string`.
+fn now_iso_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    astroforge_ai::recommendations::format_unix_seconds(secs)
+}
+
+/// CR-06 P5 — request payload for `create_ai_mask`. The
+/// caller supplies the JSON-encoded mask (the
+/// `astroforge-core::masks::encoding::to_json` shape).
+/// Auto + parametric masks are built via `build_auto_mask`
+/// (see below); the `create_ai_mask` command accepts a
+/// pre-built mask from the caller.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateAiMaskRequest {
+    pub project_id: String,
+    pub image_version_id: String,
+    pub provenance: String,
+    pub parents_json: Option<String>,
+    pub mask_json: String,
+}
+
+/// CR-06 P5 — response: the persisted mask row as JSON.
+#[derive(Debug, Clone, Serialize)]
+pub struct AiMaskDto {
+    pub mask: serde_json::Value,
+}
+
+/// CR-06 P5 — `create_ai_mask`: persist a mask row. The
+/// caller supplies the encoded mask (the JSON shape from
+/// `astroforge_core::masks::encoding::to_json`). The
+/// command validates the encoding via `from_json`
+/// before persisting so the store never holds a
+/// malformed row.
+pub fn create_ai_mask(
+    services: &Services,
+    request: CreateAiMaskRequest,
+) -> Result<AiMaskDto, String> {
+    use astroforge_core::masks::encoding;
+    let _ = encoding::from_json(&request.mask_json)
+        .map_err(|e| format!("invalid mask encoding: {e}"))?;
+    let mask_id = format!("msk_{}", new_id_suffix());
+    let row = astroforge_core::domain::AiMask {
+        mask_id,
+        project_id: request.project_id,
+        image_version_id: request.image_version_id,
+        provenance: request.provenance,
+        parents_json: request.parents_json,
+        mask_json: request.mask_json,
+        created_at: now_iso_string(),
+    };
+    with_store(services, |s| {
+        s.upsert_ai_mask(&row).map_err(|e| e.to_string())
+    })??;
+    Ok(AiMaskDto {
+        mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
+    })
+}
+
+/// CR-06 P5 — request payload for `update_ai_mask`:
+/// replace a mask row's `mask_json` (the user painted a
+/// new brush stroke or edited a polygon). The row's id +
+/// provenance + parents stay the same; only the pixel
+/// raster updates.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateAiMaskRequest {
+    pub mask_id: String,
+    pub mask_json: String,
+}
+
+/// CR-06 P5 — `update_ai_mask`
+pub fn update_ai_mask(
+    services: &Services,
+    request: UpdateAiMaskRequest,
+) -> Result<AiMaskDto, String> {
+    use astroforge_core::masks::encoding;
+    let _ = encoding::from_json(&request.mask_json)
+        .map_err(|e| format!("invalid mask encoding: {e}"))?;
+    let row = with_store(services, |s| {
+        let mut existing = s
+            .get_ai_mask(&request.mask_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("mask not found: {}", request.mask_id))?;
+        existing.mask_json = request.mask_json.clone();
+        existing.created_at = now_iso_string();
+        s.upsert_ai_mask(&existing).map_err(|e| e.to_string())?;
+        Ok::<_, String>(existing)
+    })??;
+    Ok(AiMaskDto {
+        mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
+    })
+}
+
+/// CR-06 P5 — `ai_mask_list_for_version`: list the `AiMask`
+/// rows for an Image Version. The UI renders the mask
+/// picker (the Zone B overlay source list per CR-06 §13).
+pub fn ai_mask_list_for_version(
+    services: &Services,
+    image_version_id: &str,
+) -> Result<AiEnhancementListResponse<serde_json::Value>, String> {
+    with_store(services, |s| {
+        let rows = s
+            .list_ai_masks(image_version_id)
+            .map_err(|e| e.to_string())?;
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .filter_map(|row| serde_json::to_value(row).ok())
+            .collect();
+        Ok(AiEnhancementListResponse { items })
+    })?
+}
+
+/// CR-06 P5 — `ai_mask_get`: fetch a single mask row.
+pub fn ai_mask_get(services: &Services, mask_id: &str) -> Result<serde_json::Value, String> {
+    with_store(services, |s| match s.get_ai_mask(mask_id) {
+        Ok(Some(row)) => Ok(serde_json::to_value(&row).map_err(|e| e.to_string())?),
+        Ok(None) => Ok(serde_json::Value::Null),
+        Err(e) => Err(e.to_string()),
+    })?
+}
+
+/// CR-06 P5 — request payload for `build_auto_mask`. The
+/// caller supplies the pixel buffer (in `[0, 1]`, row-major)
+/// plus the target, and the command runs the auto-mask builder,
+/// encodes the result, and returns the JSON.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuildAutoMaskRequest {
+    /// Carried for payload compatibility; pixels arrive inline.
+    #[allow(dead_code)]
+    pub image_version_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub pixels: Vec<f64>,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuildAutoMaskResponse {
+    pub mask_json: String,
+    pub provenance: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// CR-06 P5 — `build_auto_mask`: build an auto mask from an
+/// image + a target kind.
+pub fn build_auto_mask(request: BuildAutoMaskRequest) -> Result<BuildAutoMaskResponse, String> {
+    use astroforge_core::masks::auto::{build as auto_build, AutoTarget};
+    let BuildAutoMaskRequest {
+        image_version_id: _,
+        width,
+        height,
+        channels,
+        pixels,
+        target,
+    } = request;
+    let target = match target.as_str() {
+        "stars" => AutoTarget::Stars,
+        "background" => AutoTarget::Background,
+        "bright_core" => AutoTarget::BrightCore,
+        other => return Err(format!("unknown auto mask target: {other}")),
+    };
+    let expected = (width as usize) * (height as usize) * (channels as usize);
+    if pixels.len() != expected {
+        return Err(format!(
+            "pixel count mismatch: got {}, expected {} ({}×{}×{})",
+            pixels.len(),
+            expected,
+            width,
+            height,
+            channels
+        ));
+    }
+    let mut img = F32Image::new(width as usize, height as usize, channels as usize);
+    for (i, v) in pixels.iter().enumerate() {
+        let clamped = v.clamp(0.0, 1.0) as f32;
+        let c = i / ((width as usize) * (height as usize));
+        let rem = i % ((width as usize) * (height as usize));
+        let y = rem / (width as usize);
+        let x = rem % (width as usize);
+        img[(c, y, x)] = clamped;
+    }
+    let mask = auto_build(&img, target).map_err(|e| e.to_string())?;
+    let provenance = mask.provenance.clone();
+    let json = astroforge_core::masks::encoding::to_json(&mask).map_err(|e| e.to_string())?;
+    Ok(BuildAutoMaskResponse {
+        mask_json: json,
+        provenance,
+        width: mask.width,
+        height: mask.height,
+    })
+}
+
+/// CR-06 P5 — request payload for `compose_mask`: compose
+/// two masks via a boolean operator (union / intersect /
+/// difference). The caller supplies the two existing mask
+/// rows + the op; the command builds the composite,
+/// persists a fresh `AiMask` row tagged as `composite`
+/// provenance, and returns the row.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ComposeMaskRequest {
+    pub project_id: String,
+    pub image_version_id: String,
+    pub parent_a_id: String,
+    pub parent_b_id: String,
+    pub op: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ComposeMaskResponse {
+    pub mask: serde_json::Value,
+}
+
+/// CR-06 P5 — `compose_mask`
+pub fn compose_mask(
+    services: &Services,
+    request: ComposeMaskRequest,
+) -> Result<ComposeMaskResponse, String> {
+    use astroforge_core::masks::composite::{apply, CompositeOp};
+    use astroforge_core::masks::encoding::{from_json, to_json};
+    let op = match request.op.as_str() {
+        "union" => CompositeOp::Union,
+        "intersect" => CompositeOp::Intersect,
+        "difference" => CompositeOp::Difference,
+        other => return Err(format!("unknown composite op: {other}")),
+    };
+    let composite = with_store(services, |s| {
+        let a_row = s
+            .get_ai_mask(&request.parent_a_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("mask a not found: {}", request.parent_a_id))?;
+        let b_row = s
+            .get_ai_mask(&request.parent_b_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("mask b not found: {}", request.parent_b_id))?;
+        let a_mask = from_json(&a_row.mask_json).map_err(|e| e.to_string())?;
+        let b_mask = from_json(&b_row.mask_json).map_err(|e| e.to_string())?;
+        let composite = apply(&a_mask, &b_mask, op).map_err(|e| e.to_string())?;
+        Ok::<_, String>(composite)
+    })??;
+    let composite_json = to_json(&composite).map_err(|e| e.to_string())?;
+    let mask_id = format!("msk_{}", new_id_suffix());
+    let row = astroforge_core::domain::AiMask {
+        mask_id,
+        project_id: request.project_id,
+        image_version_id: request.image_version_id,
+        provenance: composite.provenance.clone(),
+        parents_json: Some(
+            serde_json::to_string(&vec![
+                request.parent_a_id.clone(),
+                request.parent_b_id.clone(),
+            ])
+            .unwrap_or_else(|_| "[]".to_string()),
+        ),
+        mask_json: composite_json,
+        created_at: now_iso_string(),
+    };
+    with_store(services, |s| {
+        s.upsert_ai_mask(&row).map_err(|e| e.to_string())
+    })??;
+    Ok(ComposeMaskResponse {
+        mask: serde_json::to_value(&row).map_err(|e| e.to_string())?,
+    })
+}
+
+/// CR-06 P6 — request payload for `run_ai_quality_report`.
+/// The caller supplies the (source, result) pixel buffers in
+/// `[0, 1]` row-major. P6 shipped the gate engine + the
+/// orchestrator; the apply round (P4) uses this once real
+/// ONNX inference produces a result image. With the P4
+/// passthrough dispatcher the result equals the source, so
+/// the gate always returns `Ok` — but the integration
+/// path is in place.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RunAiQualityReportRequest {
+    pub source_image_version_id: String,
+    pub result_image_version_id: String,
+    pub operation_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub source_pixels: Vec<f64>,
+    pub result_pixels: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RunAiQualityReportResponse {
+    pub report: serde_json::Value,
+    pub verdict: String,
+}
+
+/// CR-06 P6 — `run_ai_quality_report`
+pub fn run_ai_quality_report(
+    request: RunAiQualityReportRequest,
+) -> Result<RunAiQualityReportResponse, String> {
+    use astroforge_core::quality_gates::report::run;
+    use astroforge_core::quality_gates::GateThresholds;
+
+    let n = (request.width as usize) * (request.height as usize) * (request.channels as usize);
+    if request.source_pixels.len() != n {
+        return Err(format!(
+            "source pixel count mismatch: got {}, expected {}",
+            request.source_pixels.len(),
+            n
+        ));
+    }
+    if request.result_pixels.len() != n {
+        return Err(format!(
+            "result pixel count mismatch: got {}, expected {}",
+            request.result_pixels.len(),
+            n
+        ));
+    }
+    let src = pixels_to_f32image(
+        &request.source_pixels,
+        request.width as usize,
+        request.height as usize,
+        request.channels as usize,
+    );
+    let res = pixels_to_f32image(
+        &request.result_pixels,
+        request.width as usize,
+        request.height as usize,
+        request.channels as usize,
+    );
+    let report = run(
+        &src,
+        &res,
+        &GateThresholds::default(),
+        // P5.1: the standalone re-run command has no mask channel of
+        // its own; the apply round passes the real mask directly.
+        None,
+        request.source_image_version_id,
+        request.result_image_version_id,
+        request.operation_id,
+    );
+    let verdict = report.verdict.as_str().to_string();
+    Ok(RunAiQualityReportResponse {
+        verdict: verdict.clone(),
+        report: serde_json::to_value(&report).map_err(|e| e.to_string())?,
+    })
+}
+
+fn pixels_to_f32image(pixels: &[f64], width: usize, height: usize, channels: usize) -> F32Image {
+    let mut img = F32Image::new(width, height, channels);
+    let plane = width * height;
+    for (i, v) in pixels.iter().enumerate() {
+        let clamped = v.clamp(0.0, 1.0) as f32;
+        let c = i / plane;
+        let rem = i % plane;
+        let y = rem / width;
+        let x = rem % width;
+        img[(c, y, x)] = clamped;
+    }
+    img
+}
+
+// ─── CR-07 — read an applied Image Version's primary artifact ────────
+//
+// The apply round (P5.1) persists the produced pixels as a 16-bit TIFF
+// under `<root>/.astroforge/applied/<project_id>/`. The Zone B canvas
+// needs the bytes to render the image. This function is the path-
+// confined bridge from the api layer to those bytes; the confinement
+// pattern mirrors `commands_preview::read_preview_artifact` on the
+// Tauri side.
+//
+// The companion `read_image_artifact_thumbnail` command ships a
+// downsampled 8-bit PNG for large versions so the canvas doesn't pay
+// the 16-bit TIFF decode cost on every selection.
+
+/// Response envelope: the bytes plus the on-disk size so the
+/// UI can sanity-check the decode.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageArtifactResponse {
+    pub base64_data: String,
+    pub mime_type: String,
+    pub byte_size: usize,
+    pub width: usize,
+    pub height: usize,
+    pub channels: usize,
+}
+
+/// CR-07 — `read_image_artifact`: read an Image Version's primary
+/// artifact as base64. Path-confined to
+/// `<root>/.astroforge/applied/<project_id>/`.
+///
+/// State note: the Tauri command read the `PipelinePlanState`
+/// domain store; here that is `services.pipeline.domain_store`
+/// (the same `Option<Arc<DomainStore>>`, so the "domain store is
+/// unavailable" error path is preserved).
+pub fn read_image_artifact(
+    services: &Services,
+    version_id: &str,
+) -> Result<ImageArtifactResponse, String> {
+    let domain_store = services
+        .pipeline
+        .domain_store
+        .clone()
+        .ok_or_else(|| "domain store is unavailable".to_string())?;
+    let version = domain_store
+        .get_image_version(version_id)
+        .map_err(|e| format!("get_image_version: {e}"))?
+        .ok_or_else(|| format!("image version '{version_id}' not found"))?;
+    let artifact = domain_store
+        .get_artifact(&version.primary_artifact_id)
+        .map_err(|e| format!("get_artifact: {e}"))?;
+    let applied_root = applied_pixels_dir(&version.project_id)
+        .ok_or_else(|| "applied directory is unavailable".to_string())?;
+    let path = std::path::Path::new(&artifact.path);
+    // Defense-in-depth: the artifact path must canonicalize inside the
+    // applied/<project_id>/ directory. Absolute paths, ../ traversal,
+    // and symlinks pointing outside are all refused.
+    let canonical =
+        std::fs::canonicalize(path).map_err(|e| format!("canonicalize artifact path: {e}"))?;
+    let canonical_root = std::fs::canonicalize(&applied_root)
+        .map_err(|e| format!("canonicalize applied dir: {e}"))?;
+    if !canonical.starts_with(&canonical_root) {
+        return Err(format!(
+            "artifact path is outside the applied directory: {}",
+            canonical.display()
+        ));
+    }
+    let bytes = std::fs::read(&canonical).map_err(|e| format!("read artifact file: {e}"))?;
+    let (width, height, channels) =
+        read_tiff_dimensions(&bytes).ok_or_else(|| "artifact is not a 16-bit TIFF".to_string())?;
+    Ok(ImageArtifactResponse {
+        base64_data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        mime_type: "image/tiff".to_string(),
+        byte_size: bytes.len(),
+        width,
+        height,
+        channels,
+    })
+}
+
+/// Minimal 16-bit TIFF dimension reader. The canvas only needs to
+/// allocate an offscreen buffer of the right size; full decode is
+/// done in the renderer. Returns (width, height, channels) for
+/// grayscale (channels=1) and RGB (channels=3) 16-bit TIFFs.
+fn read_tiff_dimensions(bytes: &[u8]) -> Option<(usize, usize, usize)> {
+    // Big-endian TIFF header: "II" (little-endian) or "MM" (big-endian).
+    if bytes.len() < 8 || (&bytes[0..2] != b"II" && &bytes[0..2] != b"MM") {
+        return None;
+    }
+    let little = &bytes[0..2] == b"II";
+    let ifd_offset = if little {
+        u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize
+    } else {
+        u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize
+    };
+    if ifd_offset + 2 > bytes.len() {
+        return None;
+    }
+    let n_entries = if little {
+        u16::from_le_bytes([bytes[ifd_offset], bytes[ifd_offset + 1]]) as usize
+    } else {
+        u16::from_be_bytes([bytes[ifd_offset], bytes[ifd_offset + 1]]) as usize
+    };
+    let mut width = None;
+    let mut height = None;
+    let mut samples = None;
+    let mut bits_per_sample = None;
+    for i in 0..n_entries {
+        let entry = ifd_offset + 2 + i * 12;
+        if entry + 12 > bytes.len() {
+            return None;
+        }
+        let tag = if little {
+            u16::from_le_bytes([bytes[entry], bytes[entry + 1]])
+        } else {
+            u16::from_be_bytes([bytes[entry], bytes[entry + 1]])
+        };
+        let value = if little {
+            u32::from_le_bytes([
+                bytes[entry + 8],
+                bytes[entry + 9],
+                bytes[entry + 10],
+                bytes[entry + 11],
+            ])
+        } else {
+            u32::from_be_bytes([
+                bytes[entry + 8],
+                bytes[entry + 9],
+                bytes[entry + 10],
+                bytes[entry + 11],
+            ])
+        };
+        match tag {
+            256 => width = Some(value as usize),
+            257 => height = Some(value as usize),
+            // TIFF 6.0 spec: 258 = BitsPerSample, 277 = SamplesPerPixel.
+            258 => bits_per_sample = Some(value as usize),
+            277 => samples = Some(value as usize),
+            _ => {}
+        }
+    }
+    // Only accept 16-bit grayscale / RGB.
+    if bits_per_sample != Some(16) {
+        return None;
+    }
+    Some((
+        width?,
+        height?,
+        match samples {
+            Some(3) => 3,
+            Some(1) | None => 1,
+            _ => return None,
+        },
+    ))
+}
+
+// ─── CR-05 R1 — AI model catalog + RT-7 (#426) install flow ──────────
+//
+// Port of `src-tauri/src/commands_ai_models.rs`. Surfaces
+// `astroforge_ai::hub::model_catalog()` so the application-level
+// "AI Models" navigation target renders the canonical catalog
+// (denoise, super-resolution, de-jpeg, star segmentation, cloud
+// score, color calibration, trail inpainting), and installs pinned
+// catalog models on demand: `ai_model_download` fetches the
+// artifact, verifies it against the pinned SHA-256 fail-closed
+// (`astroforge_ai::downloader`), and writes it to
+// `<home>/AstroForge/models/<id>.onnx` atomically.
+//
+// `installed` reflects on-disk presence; integrity is enforced at
+// download time and again when a session opens the model
+// (`inference::OnnxEngine::open_verified`), so a tampered file can
+// never execute.
+
+/// AstroForge model record exposed to the UI. Mirrors the Rust
+/// `astroforge_ai::hub::ModelInfo` struct so the screen can show
+/// stage, version, size, license, and input shape. Field naming is
+/// camelCase-friendly snake_case (matches the TS
+/// `astroforge-api.ts` boundary convention).
+#[derive(Debug, Clone, Serialize)]
+pub struct AiModelInfoDto {
+    pub name: String,
+    pub version: String,
+    pub stage: String,
+    pub license: String,
+    pub size_bytes: u64,
+    pub input_channels: u32,
+    pub input_tile_size: u32,
+    pub output_channels: u32,
+    pub scale_factor: u32,
+    /// Runtime-download URL for installable models; `None` for
+    /// unannounced placeholders.
+    pub download_url: Option<String>,
+    /// True when a model artifact exists on disk at the standard
+    /// `<models_dir>/<name>.onnx` path.
+    pub installed: bool,
+}
+
+/// The user's models directory (`<home>/AstroForge/models`), matching
+/// the path the enhancement pipeline resolves for
+/// `ModelRegistry::new`. Returns `None` when no home directory is
+/// set (embedded/kiosk environments) — catalog listing still works,
+/// installs do not.
+fn models_dir() -> Option<PathBuf> {
+    dirs_home().map(|mut p| {
+        p.push("AstroForge");
+        p.push("models");
+        p
+    })
+}
+
+impl AiModelInfoDto {
+    fn from_info_with_disk(m: astroforge_ai::hub::ModelInfo) -> Self {
+        let installed = models_dir()
+            .map(|dir| dir.join(format!("{}.onnx", m.name)).is_file())
+            .unwrap_or(false);
+        Self {
+            name: m.name,
+            version: m.version,
+            stage: m.stage,
+            license: m.license,
+            size_bytes: m.size_bytes,
+            input_channels: m.input_channels,
+            input_tile_size: m.input_tile_size,
+            output_channels: m.output_channels,
+            scale_factor: m.scale_factor,
+            download_url: m.download_url,
+            installed,
+        }
+    }
+}
+
+impl From<astroforge_ai::hub::ModelInfo> for AiModelInfoDto {
+    fn from(m: astroforge_ai::hub::ModelInfo) -> Self {
+        Self::from_info_with_disk(m)
+    }
+}
+
+/// `ai_model_list` — list the full AI model catalog. Read-only and
+/// infallible — the catalog is a static `Vec<ModelInfo>` in the AI
+/// crate. This function is the single source for the AI Models
+/// application screen.
+pub fn ai_model_list() -> Vec<AiModelInfoDto> {
+    astroforge_ai::hub::model_catalog()
+        .into_iter()
+        .map(AiModelInfoDto::from_info_with_disk)
+        .collect()
+}
+
+/// `ai_model_download` — install a catalog model by id: fetch from
+/// the pinned URL, verify the exact bytes against the pinned SHA-256
+/// (fail-closed — a mismatched artifact is discarded, never loaded),
+/// and write it atomically into the models directory. Returns the
+/// installed path.
+pub fn ai_model_download(name: &str) -> Result<String, String> {
+    let spec = astroforge_ai::downloader::download_spec(name)
+        .ok_or_else(|| format!("no downloadable artifact for model '{name}'"))?;
+    let dir = models_dir()
+        .ok_or_else(|| "home directory unavailable; cannot resolve models dir".to_string())?;
+    let path = astroforge_ai::downloader::install_model(
+        &dir,
+        spec,
+        &astroforge_ai::downloader::HttpByteSource,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}

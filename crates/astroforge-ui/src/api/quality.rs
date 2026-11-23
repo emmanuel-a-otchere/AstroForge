@@ -108,7 +108,10 @@ pub struct PlateSolveOverlayDto {
 /// from IO/parse errors: a header without WCS keys returns
 /// `overlay: None`, never a fabricated badge.
 #[allow(unused_variables)]
-pub fn plate_solve_overlay(services: &Services, path: &str) -> Result<PlateSolveOverlayDto, String> {
+pub fn plate_solve_overlay(
+    services: &Services,
+    path: &str,
+) -> Result<PlateSolveOverlayDto, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
     // Some rows are header-only probes (the caller may pass a file
     // still being written); a parse failure is a real error.

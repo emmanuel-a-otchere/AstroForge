@@ -226,10 +226,7 @@ pub fn list_preview_runs_for_stage_execution(
 }
 
 /// CR-05 P4 slice 4 — fetch a single preview by id.
-pub fn get_preview_run(
-    services: &Services,
-    preview_id: String,
-) -> Result<PreviewRunDto, String> {
+pub fn get_preview_run(services: &Services, preview_id: String) -> Result<PreviewRunDto, String> {
     let domain_store = services
         .pipeline
         .domain_store
@@ -306,10 +303,11 @@ fn sha256_hex_of_str(s: &str) -> String {
 /// RFC 4648 standard-alphabet base64 (with padding) — identical
 /// output to `base64::engine::general_purpose::STANDARD.encode`,
 /// which is not available as a UI-crate dependency.
-const BASE64_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn base64_encode_standard(data: &[u8]) -> String {
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = *chunk.get(1).unwrap_or(&0) as u32;

@@ -11,6 +11,13 @@ path = "src/main.rs"
 
 [dependencies]
 astroforge-core = { workspace = true }
+# egui migration P3a — api::ai ports the CR-06/CR-07 AI-enhancement
+# commands (src-tauri/src/commands_ai_enhancement.rs) and the model
+# catalog commands (src-tauri/src/commands_ai_models.rs).
+astroforge-ai = { workspace = true }
+# egui migration P3a — api::ai::read_image_artifact returns artifact
+# bytes base64-encoded, same wire shape as the Tauri command.
+base64 = "0.22"
 astroforge-render = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true }

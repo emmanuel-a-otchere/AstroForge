@@ -21,10 +21,13 @@ pub mod app;
 pub mod dialogs;
 pub mod fonts;
 pub mod image_canvas;
+pub mod node_canvas;
+pub mod screens;
 pub mod semantics;
 pub mod services;
 pub mod theme;
 pub mod tokens;
+pub mod version_dag;
 
 use std::sync::Arc;
 

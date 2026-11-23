@@ -110,7 +110,8 @@ pub fn project_rename(
     new_name: &str,
 ) -> Result<ProjectSummary, String> {
     let mgr = services.project_manager.lock().map_err(lock_err)?;
-    mgr.rename_project(slug, new_name).map_err(project_err_to_string)?;
+    mgr.rename_project(slug, new_name)
+        .map_err(project_err_to_string)?;
     let opened = mgr.open_project(slug).map_err(project_err_to_string)?;
     let project = opened
         .store
@@ -135,7 +136,8 @@ pub fn project_archive(services: &Services, slug: &str) -> Result<(), String> {
 /// `project_delete`
 pub fn project_delete(services: &Services, slug: &str, confirm: bool) -> Result<(), String> {
     let mgr = services.project_manager.lock().map_err(lock_err)?;
-    mgr.delete_project(slug, confirm).map_err(project_err_to_string)?;
+    mgr.delete_project(slug, confirm)
+        .map_err(project_err_to_string)?;
     Ok(())
 }
 
@@ -225,7 +227,9 @@ pub fn pipeline_run_list(
 /// `pipeline_run_get`
 pub fn pipeline_run_get(services: &Services, run_id: &str) -> Result<PipelineRunSummary, String> {
     let store = services.domain_store.lock().map_err(lock_err)?;
-    let r = store.get_pipeline_run(run_id).map_err(store_err_to_string)?;
+    let r = store
+        .get_pipeline_run(run_id)
+        .map_err(store_err_to_string)?;
     Ok(PipelineRunSummary::from(&r))
 }
 
@@ -240,7 +244,9 @@ pub fn pipeline_run_list_stages(
 }
 
 /// `pipeline_run_find_interrupted`
-pub fn pipeline_run_find_interrupted(services: &Services) -> Result<Vec<PipelineRunSummary>, String> {
+pub fn pipeline_run_find_interrupted(
+    services: &Services,
+) -> Result<Vec<PipelineRunSummary>, String> {
     let store = services.domain_store.lock().map_err(lock_err)?;
     let runs = store.find_interrupted_runs().map_err(store_err_to_string)?;
     Ok(runs.iter().map(PipelineRunSummary::from).collect())
@@ -285,7 +291,9 @@ pub fn project_overview(services: &Services, project_id: &str) -> Result<Project
 
     // Belt-and-suspenders: any source asset in any session counts as
     // imported (legacy data may predate the event rows).
-    let sessions = store.list_sessions(project_id).map_err(store_err_to_string)?;
+    let sessions = store
+        .list_sessions(project_id)
+        .map_err(store_err_to_string)?;
     let mut any_source_asset = false;
     for session in &sessions {
         let assets = store
@@ -316,4 +324,37 @@ pub fn project_overview(services: &Services, project_id: &str) -> Result<Project
         versioned: version_created,
         exported: export_created,
     })
+}
+
+/// Open a project by its GLOBAL-store id. The on-disk slug is the
+/// folder name under `projects_root`, which the global store doesn't
+/// carry — so this resolves slug -> manifest by opening each project
+/// layout (cheap: per-project SQLite opens) and matching ids. A UI
+/// convenience layered on `project_open`; core is untouched.
+pub fn open_project_by_id(services: &Services, project_id: &str) -> Result<ProjectSummary, String> {
+    let mgr = services.project_manager.lock().map_err(lock_err)?;
+    let entries = std::fs::read_dir(&services.projects_root)
+        .map_err(|e| format!("projects root {}: {e}", services.projects_root.display()))?;
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(slug) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if let Ok(opened) = mgr.open_project(slug) {
+            if opened.manifest.project_id == project_id {
+                let project = opened
+                    .store
+                    .get_project(&opened.manifest.project_id)
+                    .map_err(store_err_to_string)?;
+                return Ok(ProjectSummary::from(&project));
+            }
+        }
+    }
+    Err(format!(
+        "project {project_id} not found under projects root"
+    ))
 }

@@ -6,7 +6,10 @@
 //! sizes — and every screen opens with a context subtitle so the user
 //! always knows where they are.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+/// Shared slot for a background job's single result.
+pub(crate) type JobSlot<T> = Arc<Mutex<Option<Result<T, String>>>>;
 
 use egui::{CentralPanel, ColorImage, Frame, Key, Margin, Panel, RichText, TextEdit, Ui};
 
@@ -19,15 +22,25 @@ use crate::tokens as t;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
+    // Global surfaces
     Home,
     Projects,
     Recipes,
+    Gallery,
     Settings,
     Help,
+    // Project workspaces (reachable when a project is open)
+    Overview,
+    ImportW,
+    Process,
+    Enhance,
+    Compare,
+    Export,
 }
 
 impl Screen {
-    const NAV: [(Screen, &'static str, &'static str); 5] = [
+    /// Global nav (always visible).
+    const NAV: [(Screen, &'static str, &'static str); 6] = [
         (Screen::Home, "Home", "Overview and recent activity"),
         (
             Screen::Projects,
@@ -36,6 +49,11 @@ impl Screen {
         ),
         (Screen::Recipes, "Recipes", "Reproducible pipeline profiles"),
         (
+            Screen::Gallery,
+            "Gallery",
+            "Finished images across projects",
+        ),
+        (
             Screen::Settings,
             "Settings",
             "Data location and app information",
@@ -43,17 +61,49 @@ impl Screen {
         (Screen::Help, "Help", "Guides and keyboard shortcuts"),
     ];
 
-    fn label(self) -> &'static str {
+    /// Project workspaces (visible while a project is open), in
+    /// workflow order.
+    const WORKSPACES: [(Screen, &'static str, &'static str); 6] = [
+        (
+            Screen::Overview,
+            "Overview",
+            "Session, run, and version summary",
+        ),
+        (
+            Screen::ImportW,
+            "Import",
+            "Bring FITS frames in as a session",
+        ),
+        (
+            Screen::Process,
+            "Process",
+            "Run the pipeline over the session",
+        ),
+        (
+            Screen::Enhance,
+            "Enhance",
+            "Arrange stages on the node canvas",
+        ),
+        (Screen::Compare, "Compare", "Judge versions side by side"),
+        (Screen::Export, "Export", "Produce final files"),
+    ];
+
+    pub(crate) fn is_workspace(self) -> bool {
+        Self::WORKSPACES.iter().any(|(s, _, _)| *s == self)
+    }
+
+    pub(crate) fn label(self) -> &'static str {
         Self::NAV
             .iter()
+            .chain(Self::WORKSPACES.iter())
             .find(|(screen, _, _)| *screen == self)
             .map(|(_, label, _)| *label)
-            .expect("screen is in NAV")
+            .expect("screen is in NAV or WORKSPACES")
     }
 
     /// Workflow context: why this surface exists (shown under the
     /// title on every screen).
-    fn subtitle(self) -> &'static str {
+    pub(crate) fn subtitle(self) -> &'static str {
         match self {
             Screen::Home => "Raw smart-telescope data in, publication-ready deep-sky images out.",
             Screen::Projects => {
@@ -64,48 +114,121 @@ impl Screen {
                 "Recipes capture a full processing pipeline so any session \
                  can be reprocessed or shared with identical settings."
             }
+            Screen::Gallery => {
+                "The finished collection \u{2014} every image produced across projects."
+            }
             Screen::Settings => {
                 "Your data lives in one folder shared by both front-ends \
                  during the migration window."
             }
             Screen::Help => {
                 "Navigation: Cmd/Ctrl + 1..5 switches screens, Esc returns \
-                 to Home."
+                 to Home. Workspaces open from a project."
             }
+            Screen::Overview => "Where this project stands end to end.",
+            Screen::ImportW => "Scan a folder, classify frames, confirm the session.",
+            Screen::Process => "Pick a plan, run it, watch every stage.",
+            Screen::Enhance => "The pipeline as a node column you can rearrange.",
+            Screen::Compare => "Two versions, one verdict.",
+            Screen::Export => "Write the finished image out in every format.",
         }
     }
 
     /// Cmd/Ctrl shortcut ordinal (1-based) for quick navigation.
-    fn shortcut(self) -> Key {
+    pub(crate) fn shortcut(self) -> Key {
         match self {
             Screen::Home => Key::Num1,
             Screen::Projects => Key::Num2,
             Screen::Recipes => Key::Num3,
+            Screen::Gallery => Key::Num6,
             Screen::Settings => Key::Num4,
             Screen::Help => Key::Num5,
+            Screen::Overview => Key::Num1,
+            Screen::ImportW => Key::Num2,
+            Screen::Process => Key::Num3,
+            Screen::Enhance => Key::Num4,
+            Screen::Compare => Key::Num5,
+            Screen::Export => Key::Num6,
         }
     }
 }
 
+/// The open-project context gating the workspaces.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectContext {
+    pub project_id: String,
+    pub slug: String,
+    pub name: String,
+}
+
 pub struct AstroForgeApp {
-    services: Arc<Services>,
-    screen: Screen,
+    pub(crate) services: Arc<Services>,
+    pub(crate) screen: Screen,
     /// Cached project list + its error state (reloaded on demand).
-    projects: Option<Result<Vec<ProjectSummary>, String>>,
-    projects_loaded: bool,
-    new_project_name: String,
-    error: Option<String>,
+    pub(crate) projects: Option<Result<Vec<ProjectSummary>, String>>,
+    pub(crate) projects_loaded: bool,
+    pub(crate) new_project_name: String,
+    pub(crate) error: Option<String>,
     /// P1 sample view: synthetic frame through the render pipeline.
     /// NOT user data — proves the display path without artifacts.
-    sample_canvas: ImageCanvas,
-    sample_linear: Option<ColorImage>,
-    sample_stretched: Option<ColorImage>,
-    sample_autostretch: bool,
+    pub(crate) sample_canvas: ImageCanvas,
+    pub(crate) sample_linear: Option<ColorImage>,
+    pub(crate) sample_stretched: Option<ColorImage>,
+    pub(crate) sample_autostretch: bool,
     /// f32 sources for the wgpu upload path (P1b).
-    sample_linear_f32: Option<astroforge_core::image::F32Image>,
-    sample_stretched_f32: Option<astroforge_core::image::F32Image>,
+    pub(crate) sample_linear_f32: Option<astroforge_core::image::F32Image>,
+    pub(crate) sample_stretched_f32: Option<astroforge_core::image::F32Image>,
     /// P2 chrome: pending destructive-action confirmation.
-    pending_confirm: Option<(Confirm, ConfirmAction)>,
+    pub(crate) pending_confirm: Option<(Confirm, ConfirmAction)>,
+    /// Open project gating the workspaces (None = global screens).
+    pub(crate) project_context: Option<ProjectContext>,
+    // ── Import workspace state ──
+    pub(crate) import_source_dir: Option<String>,
+    pub(crate) import_frames: Option<Vec<crate::api::export::IngestFrameDto>>,
+    pub(crate) import_session_id: Option<String>,
+    pub(crate) import_registered: Option<crate::api::import::RegisteredAssetsDto>,
+    pub(crate) import_analysis: Option<crate::api::import::ImportAnalysisResult>,
+    pub(crate) import_step: crate::screens::import_w::Step,
+    // ── Process workspace state ──
+    pub(crate) process_plans:
+        Option<Vec<astroforge_core::pipeline_plans_store::PipelinePlanSummary>>,
+    pub(crate) process_selected_plan: Option<String>,
+    pub(crate) process_executions: Option<Vec<crate::api::pipeline_plan::StageExecutionSummary>>,
+    pub(crate) process_recommendations: Option<Vec<crate::api::pipeline_plan::RecommendationDto>>,
+    pub(crate) process_outcome: Option<String>,
+    pub(crate) process_job: Option<JobSlot<String>>,
+    /// Handle for background-run repaints.
+    pub(crate) egui_ctx: Option<egui::Context>,
+    // ── Enhance workspace state ──
+    pub(crate) enhance_plan: Option<astroforge_core::domain::PipelinePlan>,
+    pub(crate) enhance_catalog: Option<astroforge_core::node_catalog::NodeCatalog>,
+    pub(crate) enhance_selected: Option<String>,
+    // ── Compare workspace state ──
+    pub(crate) compare_versions: Option<Vec<crate::api::versions::ImageVersionDto>>,
+    pub(crate) compare_version_a: Option<String>,
+    pub(crate) compare_version_b: Option<String>,
+    pub(crate) compare_image_a: Option<ColorImage>,
+    pub(crate) compare_image_b: Option<ColorImage>,
+    pub(crate) compare_diff_image: Option<ColorImage>,
+    pub(crate) compare_metrics: Option<crate::api::comparison::VersionMetricsComparisonDto>,
+    pub(crate) compare_canvas_a: Option<ImageCanvas>,
+    pub(crate) compare_canvas_b: Option<ImageCanvas>,
+    pub(crate) compare_canvas_diff: Option<ImageCanvas>,
+    pub(crate) compare_rev: u64,
+    // ── Recipes / gallery state ──
+    pub(crate) recipes_cache: Option<Vec<astroforge_core::recipe_store::RecipeSummary>>,
+    pub(crate) recipes_toast: Option<String>,
+    // ── AI models (Settings) ──
+    pub(crate) models_cache: Option<Vec<crate::api::ai::AiModelInfoDto>>,
+    pub(crate) models_toast: Option<String>,
+    pub(crate) models_job: Option<JobSlot<String>>,
+    // ── Export workspace state ──
+    pub(crate) export_pixels: Option<astroforge_core::image::F32Image>,
+    pub(crate) export_source_label: Option<String>,
+    pub(crate) export_formats: crate::screens::export_w::FormatFlags,
+    pub(crate) export_out_dir: Option<std::path::PathBuf>,
+    pub(crate) export_job: Option<JobSlot<Vec<String>>>,
+    pub(crate) export_outputs: Option<Vec<String>>,
 }
 
 /// Irreversible actions gated by the confirm modal.
@@ -113,6 +236,8 @@ pub struct AstroForgeApp {
 pub enum ConfirmAction {
     DeleteProject(String),
     ArchiveProject(String),
+    RemoveStage { plan_id: String, stage_id: String },
+    DeleteRecipe { profile_id: String },
 }
 
 impl AstroForgeApp {
@@ -161,6 +286,45 @@ impl AstroForgeApp {
             sample_linear_f32: Some(sample_linear_f32),
             sample_stretched_f32: Some(sample_stretched_f32),
             pending_confirm: None,
+            project_context: None,
+            import_source_dir: None,
+            import_frames: None,
+            import_session_id: None,
+            import_registered: None,
+            import_analysis: None,
+            import_step: crate::screens::import_w::Step::Pick,
+            process_plans: None,
+            process_selected_plan: None,
+            process_executions: None,
+            process_recommendations: None,
+            process_outcome: None,
+            process_job: None,
+            egui_ctx: Some(cc.egui_ctx.clone()),
+            enhance_plan: None,
+            enhance_catalog: None,
+            enhance_selected: None,
+            compare_versions: None,
+            compare_version_a: None,
+            compare_version_b: None,
+            compare_image_a: None,
+            compare_image_b: None,
+            compare_diff_image: None,
+            compare_metrics: None,
+            compare_canvas_a: None,
+            compare_canvas_b: None,
+            compare_canvas_diff: None,
+            compare_rev: 0,
+            recipes_cache: None,
+            recipes_toast: None,
+            models_cache: None,
+            models_toast: None,
+            models_job: None,
+            export_pixels: None,
+            export_source_label: None,
+            export_formats: crate::screens::export_w::FormatFlags::default(),
+            export_out_dir: None,
+            export_job: None,
+            export_outputs: None,
         }
     }
 
@@ -169,14 +333,23 @@ impl AstroForgeApp {
         self.projects_loaded = true;
     }
 
-    /// Global workflow shortcuts: Cmd/Ctrl + 1..5 switch screens,
-    /// Esc returns Home.
+    /// Global workflow shortcuts: Cmd/Ctrl + 1..5 switch global
+    /// screens; Cmd/Ctrl+Shift + 1..6 switch workspaces (when a
+    /// project is open); Esc returns Home (closing nothing).
     fn handle_screen_shortcuts(&mut self, ui: &mut Ui) {
-        let cmd = ui.input(|i| i.modifiers.command);
+        let (cmd, shift) = ui.input(|i| (i.modifiers.command, i.modifiers.shift));
         for (screen, _, _) in Screen::NAV {
             let hit = ui.input(|i| i.key_pressed(screen.shortcut()));
-            if hit && cmd {
+            if hit && cmd && !shift {
                 self.navigate(screen);
+            }
+        }
+        if self.project_context.is_some() {
+            for (screen, _, _) in Screen::WORKSPACES {
+                let hit = ui.input(|i| i.key_pressed(screen.shortcut()));
+                if hit && cmd && shift {
+                    self.navigate(screen);
+                }
             }
         }
         if ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -184,11 +357,26 @@ impl AstroForgeApp {
         }
     }
 
-    fn navigate(&mut self, screen: Screen) {
+    pub(crate) fn navigate(&mut self, screen: Screen) {
+        if screen.is_workspace() && self.project_context.is_none() {
+            return; // workspaces live inside an open project
+        }
         if self.screen != screen {
             self.screen = screen;
             self.error = None;
         }
+    }
+
+    /// Open a project and land on its Overview workspace.
+    pub fn open_project_context(&mut self, ctx: ProjectContext) {
+        self.project_context = Some(ctx);
+        self.navigate(Screen::Overview);
+    }
+
+    /// Close the open project, returning to Projects.
+    pub fn close_project_context(&mut self) {
+        self.project_context = None;
+        self.navigate(Screen::Projects);
     }
 
     fn draw_nav(&mut self, ui: &mut Ui) {
@@ -200,13 +388,41 @@ impl AstroForgeApp {
                 .color(t::accent::PRIMARY),
         );
         ui.add_space(t::spacing::LG);
+        if let Some(project) = &self.project_context {
+            s::label_caps(ui, "Project");
+            ui.label(
+                RichText::new(&project.name)
+                    .size(t::type_scale::BODY.size)
+                    .color(t::text::PRIMARY),
+            );
+            ui.add_space(t::spacing::XS);
+            for (screen, label, tooltip) in Screen::WORKSPACES {
+                let selected = self.screen == screen;
+                if s::nav_item(ui, selected, label, tooltip).clicked() {
+                    self.navigate(screen);
+                }
+                ui.add_space(t::spacing::XS);
+            }
+            ui.add_space(t::spacing::SM);
+            if ui
+                .small_button("Close project")
+                .on_hover_text("Return to the project list")
+                .clicked()
+            {
+                self.close_project_context();
+            }
+            ui.add_space(t::spacing::LG);
+            s::label_caps(ui, "General");
+        }
         for (screen, label, tooltip) in Screen::NAV {
             let shortcut_ordinal = match screen {
                 Screen::Home => "1",
                 Screen::Projects => "2",
                 Screen::Recipes => "3",
+                Screen::Gallery => "6",
                 Screen::Settings => "4",
                 Screen::Help => "5",
+                _ => "?",
             };
             let tooltip = format!("{tooltip}  (Cmd/Ctrl+{shortcut_ordinal})");
             if s::nav_item(ui, self.screen == screen, label, &tooltip).clicked() {
@@ -391,6 +607,13 @@ impl AstroForgeApp {
                             );
                             ui.horizontal(|ui| {
                                 if ui
+                                    .small_button("Open")
+                                    .on_hover_text("Open the project workspaces")
+                                    .clicked()
+                                {
+                                    app_open_row(self, p);
+                                }
+                                if ui
                                     .small_button("Archive")
                                     .on_hover_text("Move the project folder into the archive")
                                     .clicked()
@@ -481,7 +704,96 @@ impl AstroForgeApp {
                  during the migration window.",
             );
         });
+        ui.add_space(t::spacing::MD);
+        draw_ai_models(self, ui);
     }
+}
+
+fn draw_ai_models(app: &mut AstroForgeApp, ui: &mut Ui) {
+    use crate::api::ai;
+
+    // Drain finished download jobs.
+    if let Some(job) = app.models_job.clone() {
+        let finished = job.lock().expect("model job").take();
+        if let Some(result) = finished {
+            match result {
+                Ok(path) => app.models_toast = Some(format!("installed: {path}")),
+                Err(e) => app.error = Some(e),
+            }
+            app.models_job = None;
+            app.models_cache = None; // refresh installed flags
+        }
+    }
+    if app.models_cache.is_none() {
+        app.models_cache = Some(ai::ai_model_list());
+    }
+
+    s::section(ui, "AI models", |ui| {
+        for m in app.models_cache.clone().unwrap_or_default() {
+            ui.horizontal(|ui| {
+                s::status_chip(
+                    ui,
+                    if m.installed {
+                        t::Status::Success
+                    } else {
+                        t::Status::Neutral
+                    },
+                    if m.installed {
+                        "installed"
+                    } else {
+                        "available"
+                    },
+                );
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(format!("{} v{}", m.name, m.version))
+                            .small()
+                            .color(t::text::PRIMARY),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "{} \u{00b7} {} \u{00b7} {:.0} MB",
+                            m.stage,
+                            m.license,
+                            m.size_bytes as f64 / 1_048_576.0
+                        ))
+                        .small()
+                        .color(t::border::STRONG),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if !m.installed && m.download_url.is_some() {
+                        ui.add_enabled_ui(app.models_job.is_none(), |ui| {
+                            if ui
+                                .small_button("Download")
+                                .on_hover_text("Fetch and install the model artifact")
+                                .clicked()
+                            {
+                                let name = m.name.clone();
+                                let slot: JobSlot<String> = Arc::new(Mutex::new(None));
+                                let slot_thread = slot.clone();
+                                let ctx = app
+                                    .egui_ctx
+                                    .clone()
+                                    .expect("egui context captured at startup");
+                                std::thread::spawn(move || {
+                                    let result = ai::ai_model_download(&name);
+                                    *slot_thread.lock().expect("model job") = Some(result);
+                                    ctx.request_repaint();
+                                });
+                                app.models_job = Some(slot);
+                            }
+                        });
+                    }
+                });
+            });
+            ui.add_space(t::spacing::XS);
+        }
+        if let Some(toast) = &app.models_toast {
+            ui.add_space(t::spacing::XS);
+            s::status_chip(ui, t::Status::Success, toast);
+        }
+    });
 }
 
 /// Workflow vocabulary: domain lifecycle -> UI status semantics.
@@ -507,10 +819,11 @@ impl eframe::App for AstroForgeApp {
         self.handle_screen_shortcuts(ui);
 
         // Window title tracks the active screen (workflow context).
-        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "AstroForge \u{2014} {}",
-            self.screen.label()
-        )));
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::Title(format!(
+                "AstroForge \u{2014} {}",
+                self.screen.label()
+            )));
 
         Panel::left("nav")
             .exact_size(220.0)
@@ -531,9 +844,16 @@ impl eframe::App for AstroForgeApp {
             .show(ui, |ui| match self.screen {
                 Screen::Home => self.draw_home(ui),
                 Screen::Projects => self.draw_projects(ui),
-                Screen::Recipes => self.draw_placeholder(ui, "P4 (recipe library)"),
+                Screen::Recipes => crate::screens::recipes::draw(self, ui),
+                Screen::Gallery => crate::screens::gallery::draw(self, ui),
                 Screen::Settings => self.draw_settings(ui),
                 Screen::Help => self.draw_placeholder(ui, "P4 (help)"),
+                Screen::Overview => crate::screens::overview::draw(self, ui),
+                Screen::ImportW => crate::screens::import_w::draw(self, ui),
+                Screen::Process => crate::screens::process::draw(self, ui),
+                Screen::Enhance => crate::screens::enhance::draw(self, ui),
+                Screen::Compare => crate::screens::compare::draw(self, ui),
+                Screen::Export => crate::screens::export_w::draw(self, ui),
             });
 
         egui::Panel::bottom("statusbar")
@@ -549,12 +869,9 @@ impl eframe::App for AstroForgeApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!(
-                            "astroforge-ui {}",
-                            env!("CARGO_PKG_VERSION")
-                        ))
-                        .small()
-                        .color(t::border::STRONG),
+                        RichText::new(format!("astroforge-ui {}", env!("CARGO_PKG_VERSION")))
+                            .small()
+                            .color(t::border::STRONG),
                     );
                     ui.label(
                         RichText::new("Cmd/Ctrl+1..5 screens \u{00b7} Esc home")
@@ -598,6 +915,34 @@ impl AstroForgeApp {
                 }
                 self.reload_projects();
             }
+            ConfirmAction::RemoveStage { plan_id, stage_id } => {
+                if let Err(e) =
+                    crate::api::node_graph::remove_stage(&self.services, plan_id, stage_id)
+                {
+                    self.error = Some(e);
+                }
+                self.enhance_plan = None; // resync on next frame
+            }
+            ConfirmAction::DeleteRecipe { profile_id } => {
+                if let Err(e) = crate::api::recipes::recipe_delete(&self.services, &profile_id) {
+                    self.error = Some(e);
+                }
+                self.recipes_cache = None;
+            }
         }
+    }
+}
+
+/// Open a project row into its workspace context.
+fn app_open_row(app: &mut AstroForgeApp, summary: &ProjectSummary) {
+    match project::open_project_by_id(&app.services, &summary.project_id) {
+        Ok(_) => {
+            app.open_project_context(ProjectContext {
+                project_id: summary.project_id.clone(),
+                slug: summary.project_id.clone(),
+                name: summary.name.clone(),
+            });
+        }
+        Err(e) => app.error = Some(e),
     }
 }

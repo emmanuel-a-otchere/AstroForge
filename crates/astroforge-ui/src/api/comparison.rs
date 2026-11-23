@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use astroforge_core::comparison::{ComparisonSet, ImageDecision, ImageDecisionState};
-use astroforge_core::comparison_metrics::{ClippingMasks, FwhmHistogram, NoiseMap};
 use astroforge_core::comparison_metrics::VersionComparisonReport;
+use astroforge_core::comparison_metrics::{ClippingMasks, FwhmHistogram, NoiseMap};
 use astroforge_core::decision_store;
 use astroforge_core::domain_store::DomainStore;
 use astroforge_core::image::F32Image;
@@ -31,10 +31,7 @@ fn store_err_to_string(e: astroforge_core::domain_store::DomainStoreError) -> St
 /// Run `f` against the shared project store. Mirrors the locking
 /// pattern of the Tauri `with_store` helper (which took the managed
 /// `ProjectState`).
-fn with_store<R>(
-    services: &Services,
-    f: impl FnOnce(&DomainStore) -> R,
-) -> Result<R, String> {
+fn with_store<R>(services: &Services, f: impl FnOnce(&DomainStore) -> R) -> Result<R, String> {
     let guard = services.domain_store.lock().map_err(lock_err)?;
     Ok(f(&guard))
 }
@@ -43,10 +40,7 @@ fn with_store<R>(
 
 /// `save_image_decision` — persist an `ImageDecision` (B1 type) to the
 /// store. The decision's full history is rewritten atomically.
-pub fn save_image_decision(
-    services: &Services,
-    decision: ImageDecision,
-) -> Result<(), String> {
+pub fn save_image_decision(services: &Services, decision: ImageDecision) -> Result<(), String> {
     with_store(services, |s| {
         decision_store::save_decision(s, &decision).map_err(|e| e.to_string())
     })?
@@ -54,10 +48,7 @@ pub fn save_image_decision(
 
 /// `load_image_decision` — load the current `ImageDecision` for a
 /// version. Returns `Err("not found: ...")` if no decision row exists.
-pub fn load_image_decision(
-    services: &Services,
-    version_id: &str,
-) -> Result<ImageDecision, String> {
+pub fn load_image_decision(services: &Services, version_id: &str) -> Result<ImageDecision, String> {
     let version_id = version_id.to_string();
     with_store(services, |s| {
         decision_store::load_decision(s, &version_id).map_err(|e| e.to_string())
@@ -99,7 +90,7 @@ pub struct ApplyDecisionRequest {
 
 /// `apply_image_decision` — apply a state transition and persist
 /// atomically. Returns the updated `ImageDecision` (with the new state
-/// + appended history). When no decision row exists yet, a fresh
+/// and appended history). When no decision row exists yet, a fresh
 /// `Working` decision is created first (B3 store contract).
 pub fn apply_image_decision(
     services: &Services,
@@ -120,10 +111,7 @@ pub fn apply_image_decision(
 // ─── Comparison set commands ───────────────────────────────────────────────
 
 /// `save_comparison_set` — persist a `ComparisonSet`.
-pub fn save_comparison_set(
-    services: &Services,
-    set: ComparisonSet,
-) -> Result<(), String> {
+pub fn save_comparison_set(services: &Services, set: ComparisonSet) -> Result<(), String> {
     with_store(services, |s| {
         decision_store::save_comparison_set(s, &set).map_err(|e| e.to_string())
     })?
@@ -131,10 +119,7 @@ pub fn save_comparison_set(
 
 /// `load_comparison_set` — load a `ComparisonSet` by ID. Returns
 /// `Err("not found: ...")` if the set doesn't exist.
-pub fn load_comparison_set(
-    services: &Services,
-    set_id: &str,
-) -> Result<ComparisonSet, String> {
+pub fn load_comparison_set(services: &Services, set_id: &str) -> Result<ComparisonSet, String> {
     let set_id = set_id.to_string();
     with_store(services, |s| {
         decision_store::load_comparison_set(s, &set_id).map_err(|e| e.to_string())
@@ -158,10 +143,7 @@ pub fn list_comparison_sets_for_project(
 /// `delete_comparison_set` — delete a `ComparisonSet` by ID. Returns
 /// `true` if a row was deleted, `false` if the set didn't exist. The
 /// underlying Image Versions are not affected (per CR-07 ADR-07.4).
-pub fn delete_comparison_set(
-    services: &Services,
-    set_id: &str,
-) -> Result<bool, String> {
+pub fn delete_comparison_set(services: &Services, set_id: &str) -> Result<bool, String> {
     let set_id = set_id.to_string();
     with_store(services, |s| {
         decision_store::delete_comparison_set(s, &set_id).map_err(|e| e.to_string())
@@ -346,10 +328,7 @@ pub struct NoiseMapDto {
 
 /// `get_version_noise_map` — fresh-connection variant of the Tauri
 /// `spawn_blocking` command (see `get_version_fwhm_distribution`).
-pub fn get_version_noise_map(
-    services: &Services,
-    version_id: &str,
-) -> Result<NoiseMapDto, String> {
+pub fn get_version_noise_map(services: &Services, version_id: &str) -> Result<NoiseMapDto, String> {
     let store = DomainStore::new(&services.projects_root.join("projects.db"))
         .map_err(store_err_to_string)?;
     let img = load_pixels(&store, version_id)?;
@@ -398,4 +377,16 @@ pub fn get_version_clipping_masks(
         width,
         height,
     })
+}
+
+/// UI helper (P3e): load a version's applied pixels as a linear
+/// `F32Image` for the render pipeline. Same loading path the metric
+/// commands use (`DomainStore::applied_pixels_dir`), exposed for the
+/// canvas.
+pub fn version_pixels(services: &Services, version_id: &str) -> Result<F32Image, String> {
+    let store = services
+        .domain_store
+        .lock()
+        .map_err(|e| format!("lock poisoned: {e}"))?;
+    load_pixels(&store, version_id)
 }

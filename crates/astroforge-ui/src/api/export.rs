@@ -68,7 +68,14 @@ pub fn session_record_stage(
 ) -> Result<i64, String> {
     let store = services.sessions.lock().map_err(lock_err)?;
     let run_id = store
-        .record_stage_run(session_id, stage_id, status, params_json, metrics_json, error)
+        .record_stage_run(
+            session_id,
+            stage_id,
+            status,
+            params_json,
+            metrics_json,
+            error,
+        )
         .map_err(|e| e.to_string())?;
     // Auto-complete if the caller already knows the outcome — saves an
     // extra round-trip for the common "commit then persist" path.
@@ -329,8 +336,7 @@ pub fn export_multi_format(args: MultiExportArgs) -> Result<Vec<String>, String>
         export_path: None,
     });
     let base = std::path::PathBuf::from(&args.base_path);
-    let written = multi_export(&img, &report, &base, &args.formats)
-        .map_err(|e| e.to_string())?;
+    let written = multi_export(&img, &report, &base, &args.formats).map_err(|e| e.to_string())?;
     Ok(written
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())

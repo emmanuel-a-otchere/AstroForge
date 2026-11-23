@@ -48,8 +48,7 @@ pub struct PipelineServices {
     pub pause_handles: Mutex<std::collections::HashMap<String, PauseHandle>>,
     pub handler_registry: Arc<astroforge_core::pipeline_plan::dispatch::HandlerRegistry>,
     pub domain_store: Option<Arc<DomainStore>>,
-    pub recommendation_engine:
-        Option<Arc<astroforge_core::recommendation::RecommendationEngine>>,
+    pub recommendation_engine: Option<Arc<astroforge_core::recommendation::RecommendationEngine>>,
     pub previews_dir: PathBuf,
 }
 
@@ -110,9 +109,8 @@ impl Services {
 
         // One more connection to projects.db, like Tauri's setup.
         let domain_store_for_pipeline = Arc::new(
-            DomainStore::new(&project_db).map_err(|e| {
-                format!("failed to open domain store for pipeline handlers: {e}")
-            })?,
+            DomainStore::new(&project_db)
+                .map_err(|e| format!("failed to open domain store for pipeline handlers: {e}"))?,
         );
 
         let pipeline = Arc::new(PipelineServices {

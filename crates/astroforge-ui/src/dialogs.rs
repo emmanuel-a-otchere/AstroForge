@@ -131,7 +131,11 @@ pub fn pick_open_file(title: &str, extensions: &[&str]) -> Option<std::path::Pat
 }
 
 /// Pick a save target (e.g. recipe JSON export).
-pub fn pick_save_file(title: &str, file_name: &str, extensions: &[&str]) -> Option<std::path::PathBuf> {
+pub fn pick_save_file(
+    title: &str,
+    file_name: &str,
+    extensions: &[&str],
+) -> Option<std::path::PathBuf> {
     rfd::FileDialog::new()
         .set_title(title)
         .set_file_name(file_name)

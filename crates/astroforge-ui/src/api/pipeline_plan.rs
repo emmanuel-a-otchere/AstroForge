@@ -12,12 +12,13 @@
 //! store + recommendation engine, previews dir).
 
 use astroforge_core::adaptive::AdaptiveParameterSet;
+use astroforge_core::domain::PipelinePlan as DomainPipelinePlan;
 use astroforge_core::domain::{ObjectType, PipelinePlan};
 use astroforge_core::pipeline_plan::{
     builtin::deep_sky_osc_balanced,
     plan::{
-        derive_understanding_from_session, generate_plan as generate_plan_inner,
-        GenerationContext, SessionUnderstanding,
+        derive_understanding_from_session, generate_plan as generate_plan_inner, GenerationContext,
+        SessionUnderstanding,
     },
     runner::{PipelineRunner, RetryKind, RunOutcome},
     AcquisitionMode, CalibrationAvailability,
@@ -268,7 +269,10 @@ pub fn pipeline_plan_get(services: &Services, plan_id: String) -> Result<Pipelin
 /// Note: the runner is synchronous, exactly like the Tauri command —
 /// the egui caller is expected to invoke this from a background
 /// thread and consume the outcome when it lands.
-pub fn start_pipeline_run(services: &Services, plan_id: String) -> Result<RunOutcomeResponse, String> {
+pub fn start_pipeline_run(
+    services: &Services,
+    plan_id: String,
+) -> Result<RunOutcomeResponse, String> {
     let runner = {
         let store = services.pipeline.store.clone();
         PipelineRunner::with_engine(
@@ -325,7 +329,10 @@ pub fn pause_pipeline_run(services: &Services, plan_id: String) -> Result<bool, 
 
 /// CR-05 P2.5 — resume a paused plan. Walks stages from the first one
 /// without a completed `StageExecution` row; returns the run outcome.
-pub fn resume_pipeline_run(services: &Services, plan_id: String) -> Result<RunOutcomeResponse, String> {
+pub fn resume_pipeline_run(
+    services: &Services,
+    plan_id: String,
+) -> Result<RunOutcomeResponse, String> {
     let runner = {
         let store = services.pipeline.store.clone();
         PipelineRunner::with_engine(
@@ -989,4 +996,13 @@ pub fn skip_stage(
 /// Mirrors `store_err_to_string` for store errors.
 fn runner_err_to_string(e: astroforge_core::pipeline_plan::runner::RunnerError) -> String {
     e.to_string()
+}
+
+/// UI helper (P3d): load the domain `PipelinePlan` (with stages) for
+/// the node canvas. Thin wrapper over `PipelinePlanStore::load_plan`.
+pub fn plan_for_canvas(services: &Services, plan_id: String) -> Result<DomainPipelinePlan, String> {
+    let store = &*services.pipeline.store;
+    store
+        .load_plan(&plan_id)
+        .map_err(|e| format!("pipeline plan store: {e}"))
 }

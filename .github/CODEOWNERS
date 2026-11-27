@@ -1,0 +1,38 @@
+# Model B UI isolation — see docs/BRANCHING.md
+# Two front-end strategies share this repo and must stay in their own trees:
+#   web  = src/ + src-tauri/            (Tauri 2 + Svelte 5, ships from main)
+#   egui = crates/astroforge-ui + render (native egui+wgpu, parity on egui/main)
+# They meet only at astroforge-core / astroforge-ai and the data directory.
+# In a multi-team setup, point each section at the owning team instead.
+
+# Web UI (shipping front-end, main)
+/src/ @emmanuel-a-otchere
+/src-tauri/ @emmanuel-a-otchere
+/index.html @emmanuel-a-otchere
+/package.json @emmanuel-a-otchere
+/package-lock.json @emmanuel-a-otchere
+/svelte.config.js @emmanuel-a-otchere
+/vite.config.ts @emmanuel-a-otchere
+/vitest.config.ts @emmanuel-a-otchere
+/vitest.setup.ts @emmanuel-a-otchere
+/tsconfig.json @emmanuel-a-otchere
+/.prettierrc @emmanuel-a-otchere
+/.prettierignore @emmanuel-a-otchere
+
+# Native egui UI (parity branch egui/main)
+/crates/astroforge-ui/ @emmanuel-a-otchere
+/crates/astroforge-render/ @emmanuel-a-otchere
+
+# Shared core — any change here must stay compatible with BOTH UIs during
+# the migration window (parity gate: scripts/parity_audit.py).
+/crates/astroforge-core/ @emmanuel-a-otchere
+/crates/astroforge-ai/ @emmanuel-a-otchere
+/crates/astroforge-app/ @emmanuel-a-otchere
+/Cargo.toml @emmanuel-a-otchere
+/Cargo.lock @emmanuel-a-otchere
+
+# Branching / isolation policy itself
+/docs/BRANCHING.md @emmanuel-a-otchere
+/scripts/check_ui_isolation.py @emmanuel-a-otchere
+/.github/workflows/ci.yml @emmanuel-a-otchere
+/.github/CODEOWNERS @emmanuel-a-otchere

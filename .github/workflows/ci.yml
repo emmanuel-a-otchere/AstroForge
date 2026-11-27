@@ -1,10 +1,13 @@
 name: CI
 
+# Model B (docs/BRANCHING.md): main ships the web UI; egui/main is the
+# native egui parity branch. Both are protected and gated by the same CI,
+# including the ui-isolation job below.
 on:
   push:
-    branches: [main]
+    branches: [main, egui/main]
   pull_request:
-    branches: [main]
+    branches: [main, egui/main]
 
 jobs:
   frontend:
@@ -216,3 +219,20 @@ jobs:
 
       - name: Run 30-frame memory test
         run: cargo test -p astroforge-app --test cli_memory -- --nocapture
+
+  # Model B (docs/BRANCHING.md): the two UI strategies must never import
+  # each other, land in the same PR, or flow egui->main outside cutover.
+  # scripts/check_ui_isolation.py enforces all three.
+  ui-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cross-import + dependency gate (static)
+        run: python3 scripts/check_ui_isolation.py
+
+      - name: PR merge-direction + dual-tree gate
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/check_ui_isolation.py --pr "${{ github.event.number }}" --repo "${{ github.repository }}"

@@ -7,6 +7,12 @@ strangler-pattern rewrite: both front-ends share one data directory and one
 core, and the Tauri app remains the shipping front-end until the native app
 passes human QA (see "Retirement" below).
 
+**Branching:** this follows Model B — `main` ships the web UI, the protected
+`egui/main` branch is the egui parity main, changes flow one-directionally
+(`main` → `egui/main`, never the reverse except the labeled `cutover` PR).
+Enforced by the `ui-isolation` CI job, CODEOWNERS, and branch protection —
+see [BRANCHING.md](BRANCHING.md).
+
 ## Current status
 
 | Phase | Scope | State |

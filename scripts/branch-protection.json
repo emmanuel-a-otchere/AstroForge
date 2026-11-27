@@ -1,0 +1,26 @@
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "frontend",
+      "rust",
+      "rust-matrix (ubuntu-latest)",
+      "rust-matrix (windows-latest)",
+      "rust-matrix (macos-latest)",
+      "smoke (ubuntu-latest)",
+      "smoke (windows-latest)",
+      "smoke (macos-latest)",
+      "memory",
+      "ai-gpu-coreml",
+      "ui-isolation"
+    ]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "required_signatures": false,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "lock_branch": false,
+  "required_conversation_resolution": false
+}

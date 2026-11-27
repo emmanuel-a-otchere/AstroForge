@@ -60,10 +60,23 @@ git worktree add ../AstroForge-egui egui/main
      each crate's `astroforge-*` deps stay within its allow-list;
    - PR: an `egui/*` → `main` PR requires the `cutover` label; a PR
      touching both UI trees requires the `allow-cross-tree` label.
-2. **Branch protection** on both `main` and `egui/main`: required status
-   check `CI` (strict), no force-push, no deletion. (If GitHub reports the
-   workflow-level `CI` context as missing after a rename, list the
-   individual `CI / <job>` contexts instead.)
+2. **Branch protection** on both `main` and `egui/main` — apply once with the
+   payload in `scripts/branch-protection.json` (or via
+   Settings → Branches → Add branch protection rule):
+   ```sh
+   gh api -X PUT repos/emmanuel-a-otchere/AstroForge/branches/main/protection \
+     --input scripts/branch-protection.json
+   gh api -X PUT repos/emmanuel-a-otchere/AstroForge/branches/egui%2Fmain/protection \
+     --input scripts/branch-protection.json
+   ```
+   This sets: required status checks (**strict**) for every CI job
+   (`frontend`, `rust`, `rust-matrix (…)`, `smoke (…)`, `memory`,
+   `ai-gpu-coreml`, `ui-isolation` — check-run names are the bare job
+   names), **no force pushes**, **no deletions**. `enforce_admins` stays
+   off so the repo owner can bypass in emergencies. When a second
+   contributor joins, also enable "require a pull request before merging"
+   with code-owner reviews (CODEOWNERS already maps the trees).
+   If a CI job is renamed, update `contexts` in `scripts/branch-protection.json`.
 3. **CODEOWNERS** (`.github/CODEOWNERS`): web tree, egui crates, and
    shared core each have an owner section, so cross-tree edits always
    surface a reviewer. Enable `require_code_owner_reviews` on the

@@ -20,6 +20,7 @@
     type ApplicationNavTarget,
   } from "../state/application";
   import SaveIndicator from "./SaveIndicator.svelte";
+  import TitleBar from "./TitleBar.svelte";
   import { studioViewport } from "../state/application";
 
   let {
@@ -60,6 +61,7 @@
 </script>
 
 <div class="application-shell" class:nav-collapsed={!navOpen}>
+  <TitleBar />
   <header class="app-header">
     <button
       type="button"
@@ -126,11 +128,13 @@
 <style>
   .application-shell {
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto 1fr;
     height: 100vh;
     background: var(--surface);
     color: var(--on-surface);
     font-family: var(--font-body);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
   }
 
   .app-header {

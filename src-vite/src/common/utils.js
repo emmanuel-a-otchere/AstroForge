@@ -1,3 +1,5 @@
+import { format, parseISO } from "date-fns";
+
 export const isMac =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
 export const isWin =
@@ -13,13 +15,48 @@ export function slugFromName(name) {
 
 export function formatDate(iso) {
   if (!iso) return "—";
-  const d = new Date(iso);
+  const d = parseISO(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return format(d, "yyyy-MM-dd");
+}
+
+export function formatDateLong(iso) {
+  if (!iso) return "—";
+  const d = parseISO(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return format(d, "MMM d, yyyy");
+}
+
+// WCS RA strings arrive as "HHhMMmSS.s" / "HH:MM:SS" / plain degrees.
+export function parseRaDeg(ra) {
+  if (typeof ra !== "string" || !ra.trim()) return null;
+  if (!/[h:]/.test(ra)) {
+    const v = Number(ra);
+    return Number.isFinite(v) ? v : null;
+  }
+  const parts = ra.split(/[h:]/).map((p) => Number(p));
+  if (parts.some((p) => !Number.isFinite(p))) return null;
+  const [h, m = 0, s = 0] = parts;
+  return ((h + m / 60 + s / 3600) * 360) / 24;
+}
+
+export function parseDecDeg(dec) {
+  if (typeof dec !== "string" || !dec.trim()) return null;
+  const s = dec.trim();
+  const neg = s.startsWith("-");
+  if (!/[d°:m]/i.test(s)) {
+    const v = Number(s);
+    return Number.isFinite(v) ? v : null;
+  }
+  const parts = s
+    .replace(/^[+-]/, "")
+    .split(/[d°m:']/i)
+    .filter((p) => p !== "")
+    .map(Number);
+  if (parts.length === 0 || parts.some((p) => !Number.isFinite(p))) return null;
+  const [d, m = 0, s2 = 0] = parts;
+  const v = d + m / 60 + s2 / 3600;
+  return neg ? -v : v;
 }
 
 export function countByStatus(items) {

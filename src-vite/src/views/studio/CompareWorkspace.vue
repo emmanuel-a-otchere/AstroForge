@@ -36,6 +36,18 @@
         </button>
       </div>
 
+      <div class="previews">
+        <figure v-for="side in previewSides" :key="side.id" class="preview">
+          <img
+            v-if="side.url"
+            v-lazy="side.url"
+            :alt="`${side.label} preview`"
+            class="preview-img"
+          />
+          <figcaption class="font-body">{{ side.label }}</figcaption>
+        </figure>
+      </div>
+
       <p v-if="metricsError" class="error-line font-body" role="alert">{{ metricsError }}</p>
 
       <table v-if="metrics" class="metrics font-body" aria-label="Version metrics comparison">
@@ -85,7 +97,11 @@ import { computed, ref, watch } from "vue";
 import WorkspaceScreen from "@/components/WorkspaceScreen.vue";
 import { useStore } from "@/composables/useStore";
 import { versionStore } from "@/state/versions";
-import { compareVersionMetrics, applyImageDecision } from "@/lib/astroforge-api";
+import {
+  compareVersionMetrics,
+  applyImageDecision,
+  readImageArtifact,
+} from "@/lib/astroforge-api";
 
 const versions = useStore(versionStore);
 
@@ -98,6 +114,33 @@ const decisionError = ref(null);
 
 const versionA = computed(() => versions.value.versions.find((v) => v.version_id === aId.value) ?? null);
 const versionB = computed(() => versions.value.versions.find((v) => v.version_id === bId.value) ?? null);
+
+const previewSides = computed(() => [
+  { id: "a", label: `A · ${versionA.value?.label ?? "—"}`, url: previewUrls.value[aId.value] ?? null },
+  { id: "b", label: `B · ${versionB.value?.label ?? "—"}`, url: previewUrls.value[bId.value] ?? null },
+]);
+
+const previewUrls = ref({});
+
+async function loadPreview(versionId) {
+  if (!versionId || previewUrls.value[versionId]) return;
+  try {
+    const artifact = await readImageArtifact(versionId);
+    if (artifact?.base64_data) {
+      previewUrls.value = {
+        ...previewUrls.value,
+        [versionId]: `data:${artifact.mime_type || "image/png"};base64,${artifact.base64_data}`,
+      };
+    }
+  } catch {
+    // preview is best-effort
+  }
+}
+
+watch([aId, bId], ([a, b]) => {
+  void loadPreview(a);
+  void loadPreview(b);
+}, { immediate: true });
 
 const metricRows = computed(() => {
   if (!metrics.value) return [];
@@ -186,6 +229,34 @@ async function decide(state, version = versionA.value) {
   align-items: flex-end;
   gap: var(--sp-md);
   flex-wrap: wrap;
+}
+
+.previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-md);
+}
+
+.preview {
+  margin: 0;
+  background: var(--surface-container-low);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.preview-img {
+  width: 100%;
+  height: 240px;
+  object-fit: contain;
+  background: #000;
+  display: block;
+}
+
+.preview figcaption {
+  padding: var(--sp-xs) var(--sp-sm);
+  font-size: 0.8rem;
+  color: var(--on-surface-variant);
 }
 
 .picker {

@@ -80,15 +80,26 @@
         <p class="hint font-body">
           Plan {{ plan.plan_id }} · status {{ runStatus }}
         </p>
-        <ul class="stage-list">
-          <li v-for="exec in stageExecs" :key="exec.stage_execution_id" class="stage-row">
-            <span class="material-symbols-outlined" :class="exec.status" aria-hidden="true">
-              {{ exec.status === "completed" ? "check_circle" : exec.status === "failed" ? "error" : exec.status === "running" ? "sync" : "schedule" }}
+        <VueDraggable
+          v-model="stageOrder"
+          class="stage-list"
+          handle=".drag-handle"
+          :animation="120"
+          @end="onStageReorder"
+        >
+          <li v-for="stage in stageOrder" :key="stage.stage_id" class="stage-row">
+            <span class="material-symbols-outlined drag-handle" aria-hidden="true">drag_indicator</span>
+            <span
+              class="material-symbols-outlined"
+              :class="statusFor(stage.stage_id)"
+              aria-hidden="true"
+            >
+              {{ statusFor(stage.stage_id) === "completed" ? "check_circle" : statusFor(stage.stage_id) === "failed" ? "error" : statusFor(stage.stage_id) === "running" ? "sync" : "schedule" }}
             </span>
-            <span class="font-body">{{ exec.stage_id }}</span>
-            <span class="hint font-body">{{ exec.status }}</span>
+            <span class="font-body">{{ stage.label || stage.stage_type }}</span>
+            <span class="hint font-body">{{ statusFor(stage.stage_id) }}</span>
           </li>
-        </ul>
+        </VueDraggable>
         <details class="palette">
           <summary class="font-body">Insert stage</summary>
           <div class="palette-grid">
@@ -112,6 +123,7 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
+import { VueDraggable } from "vue-draggable-plus";
 import WorkspaceScreen from "@/components/WorkspaceScreen.vue";
 import { useStore } from "@/composables/useStore";
 import { useProjectContextStore } from "@/stores/projectContext";
@@ -131,6 +143,7 @@ import {
   cancelPipelinePlan,
   pipelinePlanListStageExecutions,
   insertStage,
+  reorderStage,
 } from "@/lib/astroforge-api";
 
 const context = useProjectContextStore();
@@ -150,10 +163,35 @@ const project = computed(() => context.project);
 const sessionId = computed(() => project.value?.active_session_id ?? null);
 const canGenerateAutoPlan = computed(() => Boolean(project.value && sessionId.value));
 const catalog = ref([]);
+const stageOrder = ref([]);
+
 const stageExecs = computed(() => {
   if (!plan.value) return [];
   return execsStore.value[plan.value.plan_id] ?? [];
 });
+
+function statusFor(stageId) {
+  const exec = stageExecs.value.find((e) => e.stage_id === stageId);
+  return exec?.status ?? "pending";
+}
+
+function syncStageOrder() {
+  stageOrder.value = [...(plan.value?.stages ?? [])].sort((a, b) => a.sequence - b.sequence);
+}
+
+async function onStageReorder(evt) {
+  if (!plan.value || evt.oldIndex === undefined || evt.newIndex === undefined) return;
+  if (evt.oldIndex === evt.newIndex) return;
+  const moved = stageOrder.value[evt.newIndex];
+  if (!moved) return;
+  try {
+    const updated = await reorderStage(plan.value.plan_id, moved.stage_id, evt.newIndex);
+    activePlan.set(updated);
+  } catch (e) {
+    planError.value = e instanceof Error ? e.message : String(e);
+    syncStageOrder();
+  }
+}
 
 async function loadHistory() {
   if (!project.value) return;
@@ -268,6 +306,7 @@ async function insertStageAt(entry) {
 }
 
 watch(plan, (p) => {
+  syncStageOrder();
   if (p) void refreshExecs();
 });
 
@@ -320,6 +359,12 @@ onMounted(() => {
   gap: var(--sp-sm);
   padding: var(--sp-xs) var(--sp-sm);
   border-radius: var(--radius-sm);
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--outline);
+  font-size: 18px;
 }
 
 .stage-row .completed {

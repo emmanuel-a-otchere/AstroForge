@@ -21,3 +21,9 @@ export function formatDate(iso) {
     day: "numeric",
   });
 }
+
+export function countByStatus(items) {
+  const counts = { Active: 0, Archived: 0, Exported: 0 };
+  for (const p of items) counts[p.status] = (counts[p.status] ?? 0) + 1;
+  return counts;
+}

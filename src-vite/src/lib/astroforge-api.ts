@@ -1,0 +1,2696 @@
+// src/lib/astroforge-api.ts
+//
+// CR-02.6 — frontend wrapper for the durable Project / Pipeline-Run
+// service layer. **This module is additive only.** Existing widgets
+// continue to read from `sessionStore`, `gallery.ts`, etc. Nothing in
+// this file wires any Svelte component to the Tauri commands — it just
+// provides typed wrappers so future UI migration PRs have a single
+// place to import from.
+//
+// The PR's single rule:
+//   *"add the IPC surface; do not replace existing readers."*
+//
+// Future migration shape:
+//   - Today: components import { createInitialSession } from "./pipeline-store"
+//   - Tomorrow: components also import { createProject } from "./astroforge-api"
+//     and the store reads project state through this layer.
+//
+// Each method here is a thin typed wrapper around `invoke()`. Errors
+// surface to the caller as a thrown Error with the Rust message — the
+// UI migrator is responsible for surfacing to the user.
+
+import { invokeCommand as invoke } from "../common/tauri";
+
+// ─── Project types (mirror Rust serde structs in commands_project.rs) ──
+
+export type ProjectStatus = "Active" | "Archived" | "Exported";
+
+export interface ProjectSummary {
+  project_id: string;
+  name: string;
+  status: ProjectStatus;
+  created_at: string;
+  updated_at: string;
+  active_session_id: string | null;
+  application_version: string;
+}
+
+export type PipelineRunStatus =
+  | "Queued"
+  | "Running"
+  | "Completed"
+  | "Failed"
+  | "Cancelled";
+
+export interface PipelineRunSummary {
+  run_id: string;
+  project_id: string;
+  status: PipelineRunStatus;
+  recipe_id: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface StageRunSummary {
+  stage_run_id: string;
+  run_id: string;
+  stage_id: string;
+  status: string;
+  attempt: number;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface RecoverSummary {
+  project_id: string;
+  status: ProjectStatus;
+  repaired_dirs: string[];
+}
+
+// ─── Project lifecycle commands ────────────────────────────────────────
+
+export const projectList = (): Promise<ProjectSummary[]> =>
+  invoke("project_list");
+
+export const projectGet = (projectId: string): Promise<ProjectSummary> =>
+  invoke("project_get", { projectId });
+
+export interface CreateProjectArgs {
+  name: string;
+  targetId?: string;
+  applicationVersion: string;
+}
+
+export const projectCreate = (args: CreateProjectArgs): Promise<ProjectSummary> =>
+  invoke("project_create", {
+    name: args.name,
+    targetId: args.targetId ?? null,
+    applicationVersion: args.applicationVersion,
+  });
+
+export const projectOpen = (slug: string): Promise<ProjectSummary> =>
+  invoke("project_open", { slug });
+
+export const projectRename = (slug: string, newName: string): Promise<ProjectSummary> =>
+  invoke("project_rename", { slug, newName });
+
+export const projectArchive = (slug: string): Promise<void> =>
+  invoke("project_archive", { slug });
+
+export const projectDelete = (slug: string): Promise<void> =>
+  // CR-02 §26 hard-delete gate — must be explicit on the wire.
+  invoke("project_delete", { slug, confirm: true });
+
+export const projectRecover = (slug: string): Promise<RecoverSummary> =>
+  invoke("project_recover", { slug });
+
+// ─── Pipeline-run commands (read-only in this scaffold) ────────────────
+
+export const pipelineRunList = (projectId: string): Promise<PipelineRunSummary[]> =>
+  invoke("pipeline_run_list", { projectId });
+
+export const pipelineRunGet = (runId: string): Promise<PipelineRunSummary> =>
+  invoke("pipeline_run_get", { runId });
+
+export const pipelineRunListStages = (runId: string): Promise<StageRunSummary[]> =>
+  invoke("pipeline_run_list_stages", { runId });
+
+export const pipelineRunFindInterrupted = (): Promise<PipelineRunSummary[]> =>
+  invoke("pipeline_run_find_interrupted");
+
+// ─── CR-05 R2 — Project overview IPC ───────────────────────────────────────
+//
+// Truthful checklist state for the §8 Overview. The five booleans
+// (imported / analyzed / processed / versioned / exported) are
+// derived from the durable event log and project tables; the
+// frontend no longer hardcodes them as `pending`.
+
+export interface ProjectOverview {
+  project_id: string;
+  imported: boolean;
+  analyzed: boolean;
+  processed: boolean;
+  versioned: boolean;
+  exported: boolean;
+}
+
+export const projectOverview = (projectId: string): Promise<ProjectOverview> =>
+  invoke("project_overview", { projectId });
+
+// ─── CR-05 R3 — Image version listing IPC ──────────────────────────────────
+//
+// Real version timeline for the Compare workspace. Derived from
+// the durable event log (`VersionCreated` events) plus any
+// payload fields. The previous `versionStore.load` path used a
+// hard-coded placeholder timeline; this slice replaces that with
+// a Tauri command that returns the real state.
+
+export interface ImageVersion {
+  version_id: string;
+  project_id: string;
+  label: string;
+  sequence: number;
+  primary_artifact_id: string;
+  source_version_id: string | null;
+  created_at: string;
+  hidden: boolean;
+  // CR-07 B13a: profile that produced this image version.
+  // null for legacy rows + AI-applied versions until B13b
+  // wires the apply round to populate it. The ProvenancePanel
+  // renders "Profile not recorded" in that case.
+  recipe_id: string | null;
+  // CR-08 §21 follow-on / Slice E: the Recipe version
+  // that produced this ImageVersion. Combined with
+  // `recipe_id` + `recipe_hash`, this forms the
+  // complete Recipe identity the §6 reproducibility
+  // aggregator needs to flip the `recipe` dimension
+  // from `Unknown` to `Met`. null for legacy rows +
+  // AI-applied versions written before Slice E
+  // shipped.
+  recipe_version: number | null;
+  // CR-08 §21 follow-on / Slice E: the Recipe content
+  // hash at the moment this ImageVersion was produced.
+  // The aggregator compares this against the current
+  // Recipe hash to detect post-apply edits: `Met` if
+  // the persisted Recipe still matches, `Deviation`
+  // if the Recipe was edited after this ImageVersion
+  // was produced.
+  recipe_hash: string | null;
+}
+
+export interface ImageVersionListResponse {
+  project_id: string;
+  versions: ImageVersion[];
+}
+
+export const imageVersionList = (
+  projectId: string,
+): Promise<ImageVersionListResponse> =>
+  invoke("image_version_list", { projectId });
+
+// ─── CR-06 P1 — AI Enhancement Studio IPC shells ──────────────────────────
+//
+// P1 only persists the data model + provenance fields. The
+// substantive behavior (analysis, recommendations, enhancement
+// operations, masks, stacks, previews) lands in P2–P6; these
+// wrappers expose the IPC surface so the TS types and the
+// project-lifecycle reset hook can land alongside the schema
+// migration without further changes.
+//
+// The wire shapes are JSON values (`unknown` in TS) so the
+// frontend doesn't take a hard dependency on the Rust serde
+// shapes until P2 defines the analysis / recommendation
+// payload contracts. Consumers in P3+ will narrow these to
+// concrete types once the contracts land.
+
+export interface AnalyzeImageRequest {
+  imageVersionId: string;
+  width: number;
+  height: number;
+  channels: number;
+  /// Row-major pixel data in [0, 1] float values. The Rust
+  /// side reconstructs an `F32Image` from the dimensions +
+  /// data and runs the analyzer on it. P4 wires the
+  /// real read-artifact-and-analyze flow; P2 takes the
+  /// pixels over IPC so the analyzer is testable
+  /// end-to-end without a Tauri runtime.
+  pixels: number[];
+}
+
+export interface AiOperationJson {
+  operation_id: string;
+  stage_run_id: string;
+  model_id: string;
+  model_version: string;
+  model_hash?: string | null;
+  runtime?: string | null;
+  backend?: string | null;
+  precision?: string | null;
+  parameters_json?: string | null;
+  seed?: number | null;
+  deterministic: boolean;
+  safety_classification:
+    | "deterministic"
+    | "perceptual"
+    | "generative";
+  experimental: boolean;
+  input_artifact_id?: string | null;
+  output_artifact_id?: string | null;
+  engine_version?: string | null;
+  tile_configuration?: string | null;
+  resource_metrics?: string | null;
+}
+
+export interface AiOperationRecord extends AiOperationJson {
+  /// CR-06 P1 — round-trip the safety-classification
+  /// string in the same form as the IPC wire shape so
+  /// consumers can branch on it directly.
+}
+
+export const analyzeImage = (
+  request: AnalyzeImageRequest,
+): Promise<unknown> => invoke("analyze_image", { request });
+
+export interface GenerateRecommendationsRequest {
+  project_id: string;
+  image_version_id: string;
+}
+
+export interface GenerateRecommendationsResponse {
+  report_json: string;
+  recommendations: { items: unknown[] };
+}
+
+export const generateAiRecommendations = (
+  request: GenerateRecommendationsRequest,
+): Promise<GenerateRecommendationsResponse> =>
+  invoke("generate_ai_recommendations", { request }) as Promise<GenerateRecommendationsResponse>;
+
+// CR-06 P4 — enhancement stack + apply round + image
+// version tracking. The Tauri commands land alongside
+// `analyze_image` and `generate_ai_recommendations` in
+// `commands_ai_enhancement`.
+
+export interface StackOperationJson {
+  operation_id: string;
+  recommendation_id: string | null;
+  parameters_json: string;
+  enabled: boolean;
+  needs_preview?: boolean;
+}
+
+export interface EnhancementStackJson {
+  stack_id: string;
+  project_id: string;
+  source_image_version_id: string;
+  operations: StackOperationJson[];
+  branched_from_version_id: string | null;
+  created_at: string;
+}
+
+export interface CreateEnhancementStackRequest {
+  project_id: string;
+  source_image_version_id: string;
+  operations: StackOperationJson[];
+}
+
+export const enhancementStackCreate = (
+  request: CreateEnhancementStackRequest,
+): Promise<{ stack: EnhancementStackJson }> =>
+  invoke("enhancement_stack_create", { request }) as Promise<{
+    stack: EnhancementStackJson;
+  }>;
+
+export const enhancementStackGet = (
+  stackId: string,
+): Promise<EnhancementStackJson | null> =>
+  invoke("enhancement_stack_get", { stackId }) as Promise<
+    EnhancementStackJson | null
+  >;
+
+export type StackMutation =
+  | { Reorder: { operation_id: string; new_index: number } }
+  | { SetEnabled: { operation_id: string; enabled: boolean } }
+  | { Remove: { operation_id: string } }
+  | { MarkNeedsPreview: { operation_id: string } }
+  | { Append: StackOperationJson };
+
+export const enhancementStackApplyMutation = (
+  stackId: string,
+  mutation: StackMutation,
+): Promise<EnhancementStackJson> =>
+  invoke("enhancement_stack_apply_mutation", {
+    stackId,
+    mutation,
+  }) as Promise<EnhancementStackJson>;
+
+export interface BranchEnhancementStackRequest {
+  source_stack_id: string;
+  cutoff: number;
+  new_image_version_id: string;
+}
+
+export const enhancementStackBranch = (
+  request: BranchEnhancementStackRequest,
+): Promise<EnhancementStackJson> =>
+  invoke("enhancement_stack_branch", { request }) as Promise<
+    EnhancementStackJson
+  >;
+
+export type SafetyClassification =
+  | "deterministic"
+  | "perceptual"
+  | "generative";
+
+export type OperationCategory =
+  | "cleanup"
+  | "denoise"
+  | "restoration"
+  | "star"
+  | "detail"
+  | "upscale"
+  | "inpaint"
+  | "background";
+
+export interface OperationRegistryEntryJson {
+  operation_id: string;
+  display_name: string;
+  category: OperationCategory;
+  safety_classification: SafetyClassification;
+  description: string;
+  default_parameters_json: string;
+  requires_region: boolean;
+}
+
+export const enhancementOperationsList = (): Promise<
+  OperationRegistryEntryJson[]
+> =>
+  invoke("enhancement_operations_list") as Promise<
+    OperationRegistryEntryJson[]
+  >;
+
+export const operationsRegistryList = (): Promise<
+  OperationRegistryEntryJson[]
+> =>
+  invoke("operations_registry_list") as Promise<
+    OperationRegistryEntryJson[]
+  >;
+
+// CR-07 §22: Quality Profile catalog. Frontend
+// wrapper for the `quality_profile_list` IPC.
+export interface QualityProfileInfoJson {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export const qualityProfileList = (): Promise<
+  QualityProfileInfoJson[]
+> =>
+  invoke("quality_profile_list") as Promise<QualityProfileInfoJson[]>;
+
+// Quality profile values used by frontend state.
+// Mirrors `astroforge_core::recipe::QualityProfile`.
+export const QUALITY_PROFILES = [
+  "natural",
+  "detail",
+  "clean",
+  "publication",
+] as const;
+
+export type QualityProfile = (typeof QUALITY_PROFILES)[number];
+
+export const DEFAULT_QUALITY_PROFILE: QualityProfile = "natural";
+
+/** Type guard: is the given string a known
+ *  QualityProfile value? */
+export function isQualityProfile(value: unknown): value is QualityProfile {
+  return (
+    typeof value === "string" &&
+    (QUALITY_PROFILES as readonly string[]).includes(value)
+  );
+}
+
+export interface ApplyAiOperationRequest {
+  project_id: string;
+  source_image_version_id: string;
+  operation_id: string;
+  parameters_json: string;
+  preview_id?: string | null;
+  // CR-07 B13b: optional Recipe profile id (the
+  // `profile_id` returned from `recipe_list`). When set,
+  // the apply round persists it on the new ImageVersion
+  // row so the ProvenancePanel (B14) can surface the
+  // Recipe. Null/undefined for callers without a profile
+  // anchor (today: all of them, since EnhancementStudio
+  // doesn't surface a profile picker yet).
+  recipe_id?: string | null;
+  // CR-08 §21 follow-on / Slice E: the Recipe version
+  // that produced this ImageVersion. Combined with
+  // `recipe_id` + `recipe_hash`, this forms the
+  // complete Recipe identity the §6 reproducibility
+  // aggregator needs to flip the `recipe` dimension
+  // from `Unknown` to `Met`.
+  recipe_version?: number | null;
+  // CR-08 §21 follow-on / Slice E: the Recipe content
+  // hash at the moment the apply round fires. The
+  // aggregator compares this against the current
+  // Recipe hash to detect post-apply edits.
+  recipe_hash?: string | null;
+}
+
+export interface ApplyAiOperationResponse {
+  image_version: ImageVersionJson;
+  outcome: { operation_id: string; result_image_version_id: string };
+  operation_row: { operation_id: string };
+}
+
+export const enhancementApplyOperation = (
+  request: ApplyAiOperationRequest,
+): Promise<ApplyAiOperationResponse> =>
+  invoke("enhancement_apply_operation", { request }) as Promise<
+    ApplyAiOperationResponse
+  >;
+
+export interface ImageVersionJson {
+  version_id: string;
+  project_id: string;
+  label: string;
+  sequence: number;
+  primary_artifact_id: string;
+  source_version_id: string | null;
+  created_at: string;
+  hidden: boolean;
+  // CR-07 B13a: profile that produced this image version.
+  // See the matching note on the `ImageVersion` interface.
+  recipe_id: string | null;
+  // CR-08 §21 follow-on / Slice E: see the matching
+  // note on the `ImageVersion` interface. The apply
+  // round populates these once a profile picker
+  // ships; null for legacy ImageVersions.
+  recipe_version: number | null;
+  recipe_hash: string | null;
+}
+
+export const imageVersionListForProject = (
+  projectId: string,
+): Promise<{ items: ImageVersionJson[] }> =>
+  invoke("image_version_list_for_project", {
+    projectId,
+  }) as Promise<{ items: ImageVersionJson[] }>;
+
+export const imageVersionGet = (
+  versionId: string,
+): Promise<ImageVersionJson | null> =>
+  invoke("image_version_get", { versionId }) as Promise<
+    ImageVersionJson | null
+  >;
+
+// CR-07 B13c: look up the live `Recipe` that produced a
+// given Image Version. Returns the `Recipe` from the
+// `recipe_get` IPC type (snake_case from the Rust
+// `astroforge_core::recipe::Recipe` struct), or null when:
+// - the version does not exist, OR
+// - the version's `recipe_id` is null (legacy / AI-applied
+//   versions: the ProvenancePanel surfaces "Profile not
+//   recorded" in that case).
+export const recipeGetForImageVersion = (
+  versionId: string,
+): Promise<RecipeFromRust | null> =>
+  invoke("recipe_get_for_image_version", { versionId }) as Promise<
+    RecipeFromRust | null
+  >;
+
+// CR-08 §15: Recipe Detail lookup by (profile_id, version).
+// Mirrors the existing Tauri command `recipe_get`. Returns
+// the `Recipe` (snake_case from the Rust struct), or null
+// when the (profile_id, version) pair is not found. The
+// `RecipeDetail.svelte` component uses this wrapper to load
+// the full Recipe body after the user picks a card from
+// `RecipeLibrary.svelte`.
+//
+// Returns null (rather than throwing) on missing entries
+// so the UI can render a graceful empty state without
+// surrounding each call in a try/catch.
+export const recipeGet = (
+  profileId: string,
+  version: number,
+): Promise<RecipeFromRust | null> =>
+  invoke("recipe_get", { profileId, version }) as Promise<
+    RecipeFromRust | null
+  >;
+
+// CR-07 §32.6: compute the pipeline plan hash for a Recipe.
+// Pure server-side computation. Returns the lowercase
+// hex SHA-256 of the canonicalized Recipe. Throws
+// CommandError if the Recipe is not found.
+export const recipePipelinePlanHash = (
+  profileId: string,
+  version: number,
+): Promise<string> =>
+  invoke("recipe_pipeline_plan_hash", { profileId, version }) as Promise<string>;
+
+// CR-07 §32.6: AI comparison surface between two Recipes.
+// Mirrors the Rust `RecipeAiDiffSummary` struct. Surfaces
+// model / version / hash / classification / parameters /
+// provenance differences in a single typed payload that
+// the comparison UI can render directly.
+export interface RecipeAiDiffSummaryFromRust {
+  hash_a: string;
+  hash_b: string;
+  hash_differs: boolean;
+  ai_used_a: boolean;
+  ai_used_b: boolean;
+  ai_classification_differs: boolean;
+  version_a: number;
+  version_b: number;
+  schema_version_a: string;
+  schema_version_b: string;
+  quality_profile_a: string;
+  quality_profile_b: string;
+  required_models_differ: boolean;
+  /** Names of perceptual models used by Recipe A (may be empty). */
+  provenance: string[];
+}
+
+export const recipeAiDiffSummary = (
+  profileIdA: string,
+  versionA: number,
+  profileIdB: string,
+  versionB: number,
+): Promise<RecipeAiDiffSummaryFromRust> =>
+  invoke("recipe_ai_diff_summary", {
+    profileIdA,
+    versionA,
+    profileIdB,
+    versionB,
+  }) as Promise<RecipeAiDiffSummaryFromRust>;
+
+// CR-08 §13: mechanical parameter diff between two
+// Recipes. Mirrors the Rust `RecipeParameterDiff` struct:
+// three buckets (`added` / `removed` / `modified`) of
+// per-stage entries; each entry carries the enabled-flag
+// side-channel + a list of per-param entries classified
+// Added / Removed / Changed / Unchanged against the
+// union of keys across the two Recipes.
+export type ParamChangeFromRust = "Removed" | "Added" | "Changed" | "Unchanged";
+
+export interface ParamDiffEntryFromRust {
+  key: string;
+  a: unknown | null;
+  b: unknown | null;
+  change: ParamChangeFromRust;
+}
+
+export interface StageDiffEntryFromRust {
+  stage_id: string;
+  enabled_a: boolean | null;
+  enabled_b: boolean | null;
+  enabled_differs: boolean;
+  params: ParamDiffEntryFromRust[];
+}
+
+export interface RecipeParameterDiffFromRust {
+  added: StageDiffEntryFromRust[];
+  removed: StageDiffEntryFromRust[];
+  modified: StageDiffEntryFromRust[];
+  identical: boolean;
+}
+
+export const recipeParameterDiff = (
+  profileIdA: string,
+  versionA: number,
+  profileIdB: string,
+  versionB: number,
+): Promise<RecipeParameterDiffFromRust> =>
+  invoke("recipe_parameter_diff", {
+    profileIdA,
+    versionA,
+    profileIdB,
+    versionB,
+  }) as Promise<RecipeParameterDiffFromRust>;
+
+// CR-08 §22 round 1: combined comparison of two
+// Recipes in a single IPC round-trip. Folds
+// `recipe_ai_diff_summary` + `recipe_parameter_diff`
+// into a single response shape (with a folded
+// `identical` flag + a `lineage_summary` header line)
+// so the CompareWorkspace + RecipeDiffPanel consumers
+// can fetch both halves in one IPC call. Mirrors the
+// Rust `RecipeComparison` struct.
+export interface RecipeComparisonFromRust {
+  ai: RecipeAiDiffSummaryFromRust;
+  parameter_diff: RecipeParameterDiffFromRust;
+  identical: boolean;
+  lineage_summary: string;
+}
+
+export const recipeCompareVersions = (
+  profileIdA: string,
+  versionA: number,
+  profileIdB: string,
+  versionB: number,
+): Promise<RecipeComparisonFromRust> =>
+  invoke("recipe_compare_versions", {
+    profileIdA,
+    versionA,
+    profileIdB,
+    versionB,
+  }) as Promise<RecipeComparisonFromRust>;
+
+// CR-08 §22 round 1: Recipe provenance surface.
+// Returns a `RecipeProvenance` describing the Recipe
+// itself (identity, lineage_steps, perceptual_models,
+// required_models, etc). Mirrors the Rust
+// `RecipeProvenance` struct. Distinct from the image-
+// version provenance in `ProvenancePanel.svelte` which
+// walks the image's `recipe_id` chain; this surface is
+// Recipe-only.
+export interface RecipeProvenanceFromRust {
+  profile_id: string;
+  version: number;
+  parent_version: number | null;
+  schema_version: string;
+  name: string;
+  target_type: string;
+  quality_profile: "natural" | "detail" | "clean" | "publication";
+  pipeline_plan_hash: string;
+  ai_used: boolean;
+  perceptual_models: string[];
+  required_models: string[];
+  is_system: boolean;
+  lineage_steps: string[];
+}
+
+export const recipeGetProvenance = (
+  profileId: string,
+  version: number,
+): Promise<RecipeProvenanceFromRust> =>
+  invoke("recipe_get_provenance", {
+    profileId,
+    version,
+  }) as Promise<RecipeProvenanceFromRust>;
+
+// CR-08 §22 round 2 / Slice A: read-only preview of
+// a Recipe. Returns the full preview surface
+// (all stages + metadata + provenance +
+// applicability + warnings) so the UI can render
+// "Recipe X requires models [m-1, m-2] which are
+// not installed" without forcing a fix-or-abort
+// loop. Mirrors the Rust `RecipePreviewResponse`
+// struct.
+export interface RecipePreviewMetadataFromRust {
+  name: string;
+  description: string;
+  target_type: string;
+  quality_profile: "natural" | "detail" | "clean" | "publication";
+  ai_enhancement_level: "Off" | "Conservative" | "Recommended" | "Advanced";
+  is_system: boolean;
+}
+
+export interface ResolvedStagePreviewFromRust {
+  stage_id: string;
+  enabled: boolean;
+  params: Record<string, unknown>;
+  resolved_ai_enhancement_level: string;
+}
+
+export type ApplicabilityFromRust =
+  | "Compatible"
+  | { MissingModels: string[] }
+  | { IncompatibleVersion: string };
+
+export interface RecipePreviewResponseFromRust {
+  profile_id: string;
+  version: number;
+  branch: string;
+  metadata: RecipePreviewMetadataFromRust;
+  provenance: RecipeProvenanceFromRust;
+  applicability: ApplicabilityFromRust;
+  resolved_stages: ResolvedStagePreviewFromRust[];
+  warnings: string[];
+}
+
+export const recipePreview = (
+  profileId: string,
+  version: number,
+  availableModels?: string[],
+): Promise<RecipePreviewResponseFromRust> =>
+  invoke("recipe_preview", {
+    profileId,
+    version,
+    availableModels: availableModels ?? null,
+  }) as Promise<RecipePreviewResponseFromRust>;
+
+/**
+ * CR-08 §20: Recipe security validation report.
+ * Mirrors the Rust
+ * `astroforge_core::validation::SecurityValidationReport`
+ * type. The apply round + the §20 UI panel
+ * consume this exact shape.
+ */
+export interface SecurityViolationFromRust {
+  /** Class of violation. Stable string tag:
+   * `"range"` / `"dependency"` /
+   * `"filesystem"` / `"executable"` /
+   * `"resource"`. */
+  kind: string;
+  stage_id: string | null;
+  param_key: string | null;
+  /** Human-readable description surfaced verbatim
+   * by the §20 UI panel. */
+  message: string;
+}
+
+export interface SecurityValidationReportFromRust {
+  /** Sum of every enabled stage's
+   * `resource_units`. */
+  total_resource_units: number;
+  /** All violations surfaced in this pass.
+   * Empty when the Recipe is safe. */
+  violations: SecurityViolationFromRust[];
+}
+
+/**
+ * CR-08 §20: validate a Recipe against the §20
+ * stage-spec table. Returns the full report so
+ * the §20 UI panel can render every violation in
+ * one pass.
+ */
+export const recipeSecurityValidate = (
+  profileId: string,
+  version: number,
+): Promise<SecurityValidationReportFromRust> =>
+  invoke("recipe_security_validate", { profileId, version }) as Promise<
+    SecurityValidationReportFromRust
+  >;
+
+/**
+ * CR-08 §22 round 2 / Slice C: full §12 6-variant
+ * applicability matrix. Mirrors the Rust
+ * `astroforge_core::recipe::ApplicabilityReport`
+ * + the inner enums + the `ApplicabilityMatrix`
+ * session-side input. The 6-variant verdict
+ * (`Compatible` / `Adaptable` /
+ * `PartiallyCompatible` / `Incompatible` /
+ * `MissingModels(missing: string[])` /
+ * `SchemaMismatch(version: string)`) is the
+ * pre-flight verdict the UI uses to decide
+ * whether to show the user an adaptation prompt
+ * before they apply a Recipe. Distinct from
+ * `recipePreview`'s 3-variant `applicability`
+ * field: that one is the apply-time gate (schema
+ * + missing-models only); this one walks every
+ * §12 dimension with per-dimension outcomes so
+ * the UI can render a per-dimension checklist
+ * without re-running the evaluator.
+ */
+export type ApplicabilityVerdictFromRust =
+  | "Compatible"
+  | "Adaptable"
+  | "PartiallyCompatible"
+  | "Incompatible"
+  | { MissingModels: string[] }
+  | { SchemaMismatch: string };
+
+export type DimensionOutcomeFromRust =
+  | "Match"
+  | { Adaptable: string }
+  | { PartialSkip: string }
+  | { Mismatch: string }
+  | "NotEvaluated";
+
+export interface ApplicabilityDimensionFromRust {
+  /** Stable dimension id the UI can switch on
+   * (`"target_type"` / `"image_dimensions"` /
+   * `"available_models"` / `"schema_version"` /
+   * `"dataset_quality"`). New dimensions are
+   * additive: old UIs render the new id as
+   * "Unknown dimension" and the verdict still
+   * works. */
+  dimension: string;
+  outcome: DimensionOutcomeFromRust;
+}
+
+/** Session-side criteria the matrix evaluates the
+ * Recipe against. Every field is optional so
+ * callers can supply only the dimensions they
+ * know. Unknown / unset dimensions surface as
+ * `NotEvaluated` in the report. */
+export interface ApplicabilityMatrixFromRust {
+  target_type?: string | null;
+  image_width?: number | null;
+  image_height?: number | null;
+  available_models?: string[] | null;
+  dataset_quality?: number | null;
+}
+
+export interface ApplicabilityReportFromRust {
+  /** Top-level 6-variant verdict. */
+  verdict: ApplicabilityVerdictFromRust;
+  /** Per-dimension outcome list. */
+  dimensions: ApplicabilityDimensionFromRust[];
+  /** Human-readable advisories. */
+  warnings: string[];
+}
+
+export const recipeCheckApplicability = (
+  profileId: string,
+  version: number,
+  matrix: ApplicabilityMatrixFromRust,
+): Promise<ApplicabilityReportFromRust> =>
+  invoke("recipe_check_applicability", {
+    profileId,
+    version,
+    matrix,
+  }) as Promise<ApplicabilityReportFromRust>;
+
+/**
+ * CR-08 §22 round 2 / Slice D: full §6
+ * reproducibility record. Mirrors the Rust
+ * `astroforge_core::reproducibility::ReproducibilityRecord`
+ * + the inner enums. The 3-way verdict
+ * (`Exact` / `Material` / `Indeterminate`) is the
+ * post-flight reproducibility grade the UI uses
+ * to tell the user whether the Recipe can
+ * reproduce the exact pixels, only the material
+ * result, or whether the aggregator cannot
+ * decide. Distinct from `recipeCheckApplicability`
+ * (which evaluates the §12 pre-flight
+ * compatibility matrix) and from
+ * `recipeGetProvenance` (which evaluates the
+ * Recipe-only provenance chain).
+ */
+export type ReproducibilityVerdictFromRust =
+  | "Exact"
+  | "Material"
+  | "Indeterminate";
+
+export type ReproducibilityConditionFromRust =
+  | "Met"
+  | { Deviation: string }
+  | { Unknown: string };
+
+export interface ReproducibilityDimensionFromRust {
+  /** Stable dimension id the UI can switch on
+   * (`"source_assets"` /
+   * `"application_version"` / `"engine_version"` /
+   * `"recipe"` / `"models"` / `"parameters"` /
+   * `"backend"` / `"precision"` / `"seed"` /
+   * `"execution_config"` / `"hardware"`). New
+   * dimensions are additive: old UIs render the
+   * new id as "Unknown dimension" and the verdict
+   * still works. */
+  dimension: string;
+  outcome: ReproducibilityConditionFromRust;
+}
+
+export interface HardwareSummaryFromRust {
+  cpu_model: string;
+  gpu_models: string[];
+  available_memory_bytes: number;
+  recommended_backend: string;
+}
+
+export interface ReproducibilityRecordFromRust {
+  image_version_id: string;
+  run_id: string | null;
+  recipe_id: string | null;
+  recipe_version: number | null;
+  recipe_hash: string | null;
+  application_version: string | null;
+  engine_version: string | null;
+  hardware: HardwareSummaryFromRust | null;
+  /** Per-dimension verdict list. */
+  dimensions: ReproducibilityDimensionFromRust[];
+  /** Human-readable deviations. */
+  warnings: string[];
+  /** Top-level 3-way verdict. The audit doc
+   * tracks this as the §6 reproducibility
+   * grade. */
+  verdict: ReproducibilityVerdictFromRust;
+}
+
+export const recipeGetReproducibilityReport = (
+  versionId: string,
+): Promise<ReproducibilityRecordFromRust> =>
+  invoke("recipe_get_reproducibility_report", {
+    versionId,
+  }) as Promise<ReproducibilityRecordFromRust>;
+
+// CR-08 §23 / Slice F: list Recipe lifecycle events.
+// The list endpoint reads the append-only
+// `recipe_events` table with optional filters
+// (profileId, kind, since, limit). Returns rows
+// newest-first. The payload field of each row
+// is the canonical `serde_json::Value` produced
+// by the event's payload constructor on the
+// Rust side.
+export interface RecipeEventFilter {
+  profile_id?: string | null;
+  kind?: string | null;
+  since?: string | null;
+  limit?: number | null;
+}
+
+export interface RecipeEvent {
+  event_id: number;
+  occurred_at: string;
+  kind: string;
+  profile_id: string | null;
+  version: number | null;
+  payload: unknown;
+}
+
+export const recipeListEvents = (
+  filter: RecipeEventFilter = {},
+): Promise<RecipeEvent[]> =>
+  invoke("recipe_list_events", {
+    filter,
+  }) as Promise<RecipeEvent[]>;
+
+// CR-07 §29.2a: server-side diff cache IPC surface.
+// `DiffCache` is a Rust-only in-memory cache. The
+// following 5 commands expose the cache to the JS layer.
+// All commands take + return JSON-encodable values; the
+// RGBA8 buffers are sent over the IPC wire as number
+// arrays (Tauri serializes Vec<u8> as a number array).
+
+/**
+ * Get-or-compute a diff image.
+ * Cache lookup keyed by (version_a_id, version_b_id, mode, gain).
+ * On miss, computes via `compute_diff` + stores. Returns
+ * the RGBA8 buffer.
+ */
+export const diffCacheGetOrCompute = (
+  versionAId: string,
+  versionBId: string,
+  mode: "absolute" | "signed" | "amplified" | "structural",
+  gain: number,
+  width: number,
+  imageA: number[],
+  imageB: number[],
+): Promise<number[]> =>
+  invoke("diff_cache_get_or_compute", {
+    versionAId,
+    versionBId,
+    mode,
+    gain,
+    width,
+    imageA,
+    imageB,
+  }) as Promise<number[]>;
+
+/**
+ * Invalidate every cache entry referencing the given
+ * version id. Used when a version's primary artifact
+ * (TIFF) changes. Returns the number of entries
+ * dropped.
+ */
+export const diffCacheInvalidateVersion = (
+  versionId: string,
+): Promise<number> =>
+  invoke("diff_cache_invalidate_version", { versionId }) as Promise<number>;
+
+/**
+ * Drop every cache entry. Stats counters are preserved.
+ */
+export const diffCacheClear = (): Promise<void> =>
+  invoke("diff_cache_clear") as Promise<void>;
+
+/** Snapshot of the cache stats (hits + misses). */
+export interface DiffCacheStatsFromRust {
+  hits: number;
+  misses: number;
+}
+
+export const diffCacheStats = (): Promise<DiffCacheStatsFromRust> =>
+  invoke("diff_cache_stats") as Promise<DiffCacheStatsFromRust>;
+
+/** Current cache size (number of entries). */
+export const diffCacheLen = (): Promise<number> =>
+  invoke("diff_cache_len") as Promise<number>;
+
+// CR-07 B13c: local mirror of the Rust `Recipe` shape on
+// the IPC wire. The Svelte `Recipe` type in profile-store.ts
+// mirrors the same fields with camelCase. The IPC command
+// returns the wire shape (snake_case) so the store does the
+// translation. We declare this here (rather than importing
+// from profile-store) to keep the IPC layer self-contained
+// and avoid a profile-store.ts <-> astroforge-api.ts cycle.
+// CR-08 §10 Beginner tier axis. Mirrors the Rust
+// `AiEnhancementLevel` enum (lowercase tag). The
+// Beginner editor tier surfaces this as a 4-radio
+// picker; the field is persisted on the Recipe so
+// the user's Beginner pick survives a future Expert
+// pass.
+export type AiEnhancementLevelFromRust =
+  | "off"
+  | "conservative"
+  | "recommended"
+  | "advanced";
+
+/**
+ * CR-08 §10.2 Guided tier: high-level processing
+ * objective the Recipe is designed to honour.
+ * Mirrors the Rust
+ * `astroforge_core::recipe::ProcessingObjective`
+ * enum (serde snake_case rename).
+ */
+export type ProcessingObjectiveFromRust =
+  | "preserve_star_colors"
+  | "maximize_detail"
+  | "maximize_smoothness"
+  | "maximize_dynamic_range"
+  | "maximize_reproducibility";
+
+/**
+ * CR-08 §10.2 Guided tier: measurable quality
+ * criteria the Recipe targets. Each field is
+ * optional; absent fields don't constrain the
+ * Recipe.
+ */
+export interface QualityTargetsFromRust {
+  target_snr_db: number | null;
+  target_sharpness: number | null;
+  target_background_smoothness: number | null;
+}
+
+export interface RecipeFromRust {
+  schema_version: string;
+  name: string;
+  description: string;
+  target_type: string;
+  stages: Array<{
+    stage_id: string;
+    enabled: boolean;
+    params: Record<string, unknown>;
+    // CR-08 §10.2 Guided tier: per-stage AI
+    // Enhancement Level override. When present,
+    // takes precedence over the recipe-level
+    // ai_enhancement_level for this stage.
+    // Optional so legacy Recipes deserialize
+    // unchanged.
+    ai_enhancement_override?: AiEnhancementLevelFromRust | null;
+  }>;
+  required_models: string[];
+  integrity: {
+    perceptual_models_used: boolean;
+    deterministic_models_used: boolean;
+    seed_recorded: boolean;
+    models: Array<{
+      model_name: string;
+      model_type: "deterministic" | "perceptual";
+    }>;
+  };
+  version: number;
+  parent_version: number | null;
+  branch: string;
+  created_at: string;
+  flags: string[];
+  // CR-08 §10: Beginner-tier pick. Optional for
+  // forward-compat with legacy Recipes that predate
+  // the field; absent means Recommended (the Rust
+  // serde default).
+  ai_enhancement_level?: AiEnhancementLevelFromRust;
+  // CR-08 §10.2 Guided tier: high-level processing
+  // objectives the Recipe is designed to honour.
+  // Empty by default; the apply round reads this
+  // list to influence stage selection + ordering.
+  processing_objectives?: ProcessingObjectiveFromRust[];
+  // CR-08 §10.2 Guided tier: measurable quality
+  // criteria the Recipe targets. Each field is
+  // optional; absent fields don't constrain the
+  // Recipe.
+  quality_targets?: QualityTargetsFromRust;
+  // CR-08 §10.2 Guided tier: optional stage IDs
+  // the user has elected to include. The apply
+  // round uses this list to enable the listed
+  // stages if they were otherwise disabled by
+  // the §10.1 Beginner defaults.
+  optional_operations?: string[];
+  // CR-07 §22: Quality Profile axis. Defaults to
+  // `Natural` for legacy Recipes that did not carry
+  // this field. The §15 Recipe Detail surface reads
+  // this field via `recipeGet(profileId, version)`
+  // to render the "Style" meta-row.
+  quality_profile?: string;
+}
+
+/**
+ * CR-07 — read an applied Image Version's primary artifact as
+ * base64-encoded 16-bit TIFF bytes plus dimensions. The Zone B
+ * canvas decodes the bytes in a Web Worker so the main thread
+ * stays responsive. Path-confined to the project's applied
+ * directory; the backend refuses artifacts outside that dir.
+ */
+export interface ImageArtifactResponse {
+  base64_data: string;
+  mime_type: string;
+  byte_size: number;
+  width: number;
+  height: number;
+  channels: number;
+}
+
+export const readImageArtifact = (
+  versionId: string,
+): Promise<ImageArtifactResponse> =>
+  invoke("read_image_artifact", { versionId }) as Promise<
+    ImageArtifactResponse
+  >;
+
+// ─── CR-07 B4 — decisions, comparison sets, metric comparison ────
+//
+// These wrappers consume the B3 persistence commands (rewired to
+// the managed project store in B4) plus the new
+// `compare_version_metrics` command. Serde field names are
+// snake_case; enum variants serialize as snake_case strings.
+
+/** B1 decision state machine, serialized snake_case. */
+export type ImageDecisionState =
+  | "working"
+  | "candidate"
+  | "preferred"
+  | "final"
+  | "rejected"
+  | "reference";
+
+export interface DecisionHistoryEntry {
+  from: ImageDecisionState | null;
+  to: ImageDecisionState;
+  at: string;
+  reason: string | null;
+}
+
+/** The decision record for a single Image Version (B1 §25). */
+export interface ImageDecision {
+  version_id: string;
+  state: ImageDecisionState;
+  history: DecisionHistoryEntry[];
+  decided_at: string;
+}
+
+/** A reusable collection of candidate Image Versions (§16). */
+export interface ComparisonSet {
+  id: string;
+  project_id: string;
+  name: string;
+  version_ids: string[];
+  created_at: string;
+  slot_labels: string[];
+}
+
+export type DeltaDirection =
+  | "improved"
+  | "degraded"
+  | "unchanged"
+  | "inconclusive";
+
+/** One row of the §10 delta table (B2 `MetricDeltaRow`). */
+export interface MetricDeltaRow {
+  kind: string;
+  baseline_value: number | null;
+  compared_value: number | null;
+  direction: DeltaDirection;
+  percent_change: number;
+  materiality_threshold: number;
+  label: string;
+  unit: string;
+  context: string;
+}
+
+/** B4 response: the delta table + §11 summary for a version pair. */
+export interface VersionMetricsComparison {
+  version_id_a: string;
+  version_id_b: string;
+  rows: MetricDeltaRow[];
+  summary: string;
+}
+
+export const saveImageDecision = (decision: ImageDecision): Promise<void> =>
+  invoke("save_image_decision", { decision }) as Promise<void>;
+
+/**
+ * Load the decision for a version, or `null` when no decision row
+ * exists yet (the backend's "not found" error is mapped to `null`
+ * so panels can render the implicit `Working` default without
+ * treating a fresh version as an error).
+ */
+export const loadImageDecision = (
+  versionId: string,
+): Promise<ImageDecision | null> =>
+  (invoke("load_image_decision", { versionId }) as Promise<ImageDecision>).catch(
+    (e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("not found")) return null;
+      throw e;
+    },
+  );
+
+export const listImageDecisionsForProject = (
+  projectId: string,
+): Promise<ImageDecision[]> =>
+  invoke("list_image_decisions_for_project", { projectId }) as Promise<
+    ImageDecision[]
+  >;
+
+/**
+ * Apply a state-machine transition and persist atomically. When no
+ * decision row exists yet the backend creates a fresh `Working`
+ * decision first, so the first user action on a version is simply
+ * the first transition.
+ *
+ * `qualityProfile` (CR-07 C-A3.5) is the profile the user had
+ * selected on the picker at the moment of this transition. The
+ * backend persists it on the `image_decisions.quality_profile`
+ * column so future slices can join "what was decided" with "what
+ * profile the user picked". Optional for legacy callers; the picker
+ * in `CompareWorkspace` always supplies it.
+ */
+export const applyImageDecision = (
+  versionId: string,
+  newState: ImageDecisionState,
+  reason?: string,
+  qualityProfile?: QualityProfile,
+): Promise<ImageDecision> =>
+  invoke("apply_image_decision", {
+    request: {
+      version_id: versionId,
+      new_state: newState,
+      reason: reason ?? null,
+      quality_profile: qualityProfile ?? null,
+    },
+  }) as Promise<ImageDecision>;
+
+export const saveComparisonSet = (set: ComparisonSet): Promise<void> =>
+  invoke("save_comparison_set", { set }) as Promise<void>;
+
+export const loadComparisonSet = (setId: string): Promise<ComparisonSet> =>
+  invoke("load_comparison_set", { setId }) as Promise<ComparisonSet>;
+
+export const listComparisonSetsForProject = (
+  projectId: string,
+): Promise<ComparisonSet[]> =>
+  invoke("list_comparison_sets_for_project", { projectId }) as Promise<
+    ComparisonSet[]
+  >;
+
+export const deleteComparisonSet = (setId: string): Promise<boolean> =>
+  invoke("delete_comparison_set", { setId }) as Promise<boolean>;
+
+/**
+ * Compute the §10 metric delta table + §11 summary for a version
+ * pair over their real (applied-artifact) pixels. Errors when
+ * either version has no primary artifact on disk yet — the UI
+ * renders that as an honest "no pixels" notice.
+ */
+export const compareVersionMetrics = (
+  versionIdA: string,
+  versionIdB: string,
+): Promise<VersionMetricsComparison> =>
+  invoke("compare_version_metrics", { versionIdA, versionIdB }) as Promise<
+    VersionMetricsComparison
+  >;
+
+// ─── CR-07 §23.1: per-version full metric snapshot ────────────
+//
+// The expert channel-stats panel needs the full per-version
+// snapshot (5 detector-backed metrics + 5 per-channel stats =
+// 20 keys for an RGB image, 25 for RGBA, etc.) rather than the
+// delta table. The Rust side computes it once per version and
+// returns a sorted flat array; the consumer renders the
+// per-channel rows and ignores the detector keys.
+
+/** One snapshot entry: a key like `channel.r.mean` and its value. */
+export interface VersionMetricEntry {
+  key: string;
+  value: number;
+}
+
+/** §23.1 response: the full metric snapshot for one version. */
+export interface VersionMetricSnapshot {
+  version_id: string;
+  metrics: VersionMetricEntry[];
+  width: number;
+  height: number;
+  channels: number;
+}
+
+/**
+ * §23.1: load a version's applied pixels and return the
+ * sorted per-version metric snapshot (detector-backed +
+ * per-channel). Used by `ExpertChannelStats.svelte` to render
+ * the channel-stats table.
+ */
+export const getVersionMetricSnapshot = (
+  versionId: string,
+): Promise<VersionMetricSnapshot> =>
+  invoke("get_version_metric_snapshot", { versionId }) as Promise<
+    VersionMetricSnapshot
+  >;
+
+// CR-07 §23.2: FWHM distribution (expert panel).
+
+/**
+ * Per-version FWHM distribution: sorted per-star FWHM
+ * values, a seven-number summary (count, mean, median,
+ * p25, p75, min, max) in pixels, and a pre-binned
+ * histogram (Sturges' rule, capped to [1, 50] bins).
+ *
+ * `count == 0` means no stars were detected at the
+ * default 3σ threshold; `binEdges` and `counts` are
+ * empty, and the seven-number summary is `NaN`. The
+ * Svelte component renders a "No stars detected"
+ * message instead of a chart in that case.
+ */
+export interface FwhmHistogram {
+  count: number;
+  values: number[];
+  mean: number;
+  median: number;
+  p25: number;
+  p75: number;
+  min: number;
+  max: number;
+  binEdges: number[];
+  counts: number[];
+}
+
+export interface FwhmDistribution {
+  versionId: string;
+  histogram: FwhmHistogram;
+  width: number;
+  height: number;
+}
+
+export const getVersionFwhmDistribution = (
+  versionId: string,
+): Promise<FwhmDistribution> =>
+  invoke("get_version_fwhm_distribution", { versionId }) as Promise<
+    FwhmDistribution
+  >;
+
+// CR-07 §23.3: Noise map (2D sigma field, expert panel).
+
+/**
+ * Per-version per-pixel noise map. The image is
+ * downsampled to a preview budget (≤256 px on the long
+ * axis), then for each pixel the local sigma is
+ * estimated over a 7×7 window using the same
+ * median-absolute-deviation-on-residuals algorithm as
+ * the scalar `luminance_noise` metric. The summary
+ * stats (min, mean, max) are computed over the inner
+ * field only (the outer ring is zeroed).
+ */
+export interface NoiseMapData {
+  width: number;
+  height: number;
+  /** Row-major flat f64 sigma field. `sigma[y * width + x]`. */
+  sigma: number[];
+  min: number;
+  mean: number;
+  max: number;
+}
+
+export interface NoiseMapSnapshot {
+  versionId: string;
+  map: NoiseMapData;
+  width: number;
+  height: number;
+}
+
+export const getVersionNoiseMap = (
+  versionId: string,
+): Promise<NoiseMapSnapshot> =>
+  invoke("get_version_noise_map", { versionId }) as Promise<NoiseMapSnapshot>;
+
+// CR-07 §23.4: Clipping masks (highlight + shadow, expert panel).
+
+/**
+ * Per-version per-pixel highlight + shadow clipping
+ * masks. The image is downsampled to the preview budget
+ * (≤256 px on the long axis); for each preview pixel we
+ * record whether it is highlight-clipped (v >= 0.99)
+ * and/or shadow-clipped (v <= 0.01). The thresholds match
+ * the established codebase conventions
+ * (`image_analysis::metrics::highlight_clipping` uses
+ * `>= 0.99`; `quality_gates::clipping` uses both
+ * `<= 0.01` and `>= 0.99`).
+ *
+ * `highlightMask` and `shadowMask` are flat row-major
+ * u8 arrays of `width * height` pixels, indexed as
+ * `mask[y * width + x]`. Each byte is `1` if the pixel is
+ * clipped, `0` otherwise. The two masks never overlap
+ * (a pixel cannot be both highlight- and shadow-clipped).
+ */
+export interface ClippingMasksData {
+  width: number;
+  height: number;
+  /** 1 = highlight-clipped (`v >= 0.99`), 0 = not. */
+  highlightMask: number[];
+  /** 1 = shadow-clipped (`v <= 0.01`), 0 = not. */
+  shadowMask: number[];
+  highlightCount: number;
+  shadowCount: number;
+  highlightFraction: number;
+  shadowFraction: number;
+}
+
+export interface ClippingMasksSnapshot {
+  versionId: string;
+  masks: ClippingMasksData;
+  width: number;
+  height: number;
+}
+
+export const getVersionClippingMasks = (
+  versionId: string,
+): Promise<ClippingMasksSnapshot> =>
+  invoke("get_version_clipping_masks", {
+    versionId,
+  }) as Promise<ClippingMasksSnapshot>;
+
+// CR-06 P5 — region-aware mask system. The mask
+// engine in `astroforge-core::masks` produces JSON
+// payloads via `astroforge_core::masks::encoding`;
+// the Tauri commands persist the rows.
+
+export interface AiMaskJson {
+  mask_id: string;
+  project_id: string;
+  image_version_id: string;
+  provenance: string;
+  parents_json: string | null;
+  mask_json: string;
+  created_at: string;
+}
+
+export interface CreateAiMaskRequest {
+  project_id: string;
+  image_version_id: string;
+  provenance: string;
+  parents_json?: string | null;
+  mask_json: string;
+}
+
+export const createAiMask = (
+  request: CreateAiMaskRequest,
+): Promise<{ mask: AiMaskJson }> =>
+  invoke("create_ai_mask", { request }) as Promise<{ mask: AiMaskJson }>;
+
+export interface UpdateAiMaskRequest {
+  mask_id: string;
+  mask_json: string;
+}
+
+export const updateAiMask = (
+  request: UpdateAiMaskRequest,
+): Promise<{ mask: AiMaskJson }> =>
+  invoke("update_ai_mask", { request }) as Promise<{ mask: AiMaskJson }>;
+
+export const aiMaskGet = (maskId: string): Promise<AiMaskJson | null> =>
+  invoke("ai_mask_get", { maskId }) as Promise<AiMaskJson | null>;
+
+export const aiMaskListForVersion = (
+  imageVersionId: string,
+): Promise<{ items: AiMaskJson[] }> =>
+  invoke("ai_mask_list_for_version", {
+    imageVersionId,
+  }) as Promise<{ items: AiMaskJson[] }>;
+
+export type AutoMaskTarget = "stars" | "background" | "bright_core";
+
+export interface BuildAutoMaskRequest {
+  image_version_id: string;
+  width: number;
+  height: number;
+  channels: number;
+  pixels: number[];
+  target: AutoMaskTarget;
+}
+
+export interface BuildAutoMaskResponse {
+  mask_json: string;
+  provenance: string;
+  width: number;
+  height: number;
+}
+
+export const buildAutoMask = (
+  request: BuildAutoMaskRequest,
+): Promise<BuildAutoMaskResponse> =>
+  invoke("build_auto_mask", { request }) as Promise<BuildAutoMaskResponse>;
+
+export type CompositeMaskOp = "union" | "intersect" | "difference";
+
+export interface ComposeMaskRequest {
+  project_id: string;
+  image_version_id: string;
+  parent_a_id: string;
+  parent_b_id: string;
+  op: CompositeMaskOp;
+}
+
+export const composeMask = (
+  request: ComposeMaskRequest,
+): Promise<{ mask: AiMaskJson }> =>
+  invoke("compose_mask", { request }) as Promise<{ mask: AiMaskJson }>;
+
+// CR-06 P6 — quality gate report. The orchestrator
+// runs the ten §37 checks against the (source,
+// result) pixel pair and returns the verdict +
+// per-gate findings. P6 wires the engine end-to-end
+// with the apply round; the verdict drives the
+// QualityGatePanel surface.
+
+export type QualityVerdict = "ok" | "info" | "warning" | "failure";
+export type Severity = "ok" | "info" | "warning" | "failure";
+export type GateId =
+  | "clipping"
+  | "noise_amplification"
+  | "star_artifacts"
+  | "halos"
+  | "ringing"
+  | "false_structures"
+  | "color_shifts"
+  | "edge_artifacts"
+  | "segmentation_leakage"
+  | "excessive_smoothing";
+
+export interface GateFindingJson {
+  gate: GateId;
+  severity: Severity;
+  message: string;
+  score: number;
+  recommendation?: string | null;
+}
+
+export interface QualityGateReportJson {
+  verdict: QualityVerdict;
+  findings: GateFindingJson[];
+  /** CR-07 §11: natural-language summary of the gate findings. */
+  summary: string;
+  source_image_version_id: string;
+  result_image_version_id: string;
+  operation_id: string;
+}
+
+export interface RunAiQualityReportRequest {
+  source_image_version_id: string;
+  result_image_version_id: string;
+  operation_id: string;
+  width: number;
+  height: number;
+  channels: number;
+  source_pixels: number[];
+  result_pixels: number[];
+}
+
+export const runAiQualityReport = (
+  request: RunAiQualityReportRequest,
+): Promise<{ verdict: QualityVerdict; report: QualityGateReportJson }> =>
+  invoke("run_ai_quality_report", {
+    request,
+  }) as Promise<{ verdict: QualityVerdict; report: QualityGateReportJson }>;
+
+export const aiOperationGet = (
+  operationId: string,
+): Promise<AiOperationJson | null> =>
+  invoke("ai_operation_get", { operationId }) as Promise<AiOperationJson | null>;
+
+export const aiOperationListForStage = (
+  stageRunId: string,
+): Promise<{ items: AiOperationJson[] }> =>
+  invoke("ai_operation_list_for_stage", { stageRunId });
+
+export const imageAnalysisLatest = (
+  imageVersionId: string,
+): Promise<unknown> =>
+  invoke("image_analysis_latest", { imageVersionId });
+
+export const imageRegionList = (
+  imageVersionId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("image_region_list", { imageVersionId });
+
+export const aiRecommendationListForVersion = (
+  imageVersionId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("ai_recommendation_list_for_version", { imageVersionId });
+
+export const aiMaskList = (
+  imageVersionId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("ai_mask_list", { imageVersionId });
+
+export const enhancementStackListForSource = (
+  imageVersionId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("enhancement_stack_list_for_source", { imageVersionId });
+
+export const enhancementPreviewListForOperation = (
+  operationId: string,
+): Promise<{ items: unknown[] }> =>
+  invoke("enhancement_preview_list_for_operation", { operationId });
+
+// ─── CR-05 P1 — PipelinePlan commands (additive) ─────────────────────────
+//
+// PipelinePlan is the user-facing, human-readable processing workflow
+// (CR-05 §3, §26). The wizard `mvp_pipeline` path still owns execution
+// through P2; P1 lets the UI generate a Plan and render its stages. No
+// component is wired to these yet — this is the IPC surface only.
+
+export type PipelinePlanMode = "auto" | "guided" | "expert";
+
+export type PipelinePlanStatus =
+  | "draft"
+  | "ready"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface PipelineStageDto {
+  stage_id: string;
+  plan_id: string;
+  stage_type: string;
+  sequence: number;
+  label: string;
+  required: boolean;
+  enabled: boolean;
+  parameters_json: string | null;
+  produces_image_version: boolean;
+  undo_supported: boolean;
+}
+
+export interface PipelinePlanDto {
+  plan_id: string;
+  project_id: string;
+  session_id: string;
+  recipe_id: string | null;
+  mode: PipelinePlanMode;
+  target_type: string;
+  status: PipelinePlanStatus;
+  created_at: string;
+  schema_version: number;
+  stages: PipelineStageDto[];
+}
+
+export interface PipelinePlanSummary {
+  plan_id: string;
+  project_id: string;
+  session_id: string;
+  recipe_id: string | null;
+  mode: PipelinePlanMode;
+  target_type: string;
+  status: PipelinePlanStatus;
+  created_at: string;
+  schema_version: number;
+}
+
+export interface SessionUnderstandingPayload {
+  target_type: "deep_sky" | "planet" | "lunar" | "solar" | "unknown";
+  acquisition: "osc" | "mono" | "narrowband" | "planetary" | "lunar" | "solar";
+  light_frame_count: number;
+  calibration: "none" | "partial" | "full";
+  bayer_pattern: string | null;
+  narrowband_filters: string[];
+}
+
+export interface CreatePipelinePlanRequest {
+  project_id: string;
+  session_id: string;
+  recipe_id?: string | null;
+  mode?: PipelinePlanMode;
+  session_understanding?: SessionUnderstandingPayload | null;
+}
+
+export const createPipelinePlan = (
+  request: CreatePipelinePlanRequest,
+): Promise<PipelinePlanDto> =>
+  invoke("create_pipeline_plan", { request });
+
+export const pipelinePlanListForProject = (
+  projectId: string,
+): Promise<PipelinePlanSummary[]> =>
+  invoke("pipeline_plan_list_for_project", { projectId });
+
+export const pipelinePlanGet = (planId: string): Promise<PipelinePlanDto> =>
+  invoke("pipeline_plan_get", { planId });
+
+// ─── CR-05 P2 slice 1 — execution commands (additive) ─────────────────────
+//
+// Slice 1 ships start + cancel only. Pause / resume land in P2.5. The
+// runner is synchronous: `startPipelinePlan` returns once the run has
+// finished (or been cancelled). The frontend reflects per-stage state
+// via `pipelinePlanListStageExecutions`.
+
+export type RunOutcome = "completed" | "cancelled" | "failed" | "paused";
+
+export type StageExecutionStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped";
+
+export interface StageExecutionSummary {
+  stage_execution_id: string;
+  plan_id: string;
+  stage_id: string;
+  attempt: number;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error_json: string | null;
+}
+
+export const startPipelinePlan = (planId: string): Promise<RunOutcome> =>
+  invoke("start_pipeline_run", { planId });
+
+export const cancelPipelinePlan = (planId: string): Promise<boolean> =>
+  invoke("cancel_pipeline_run", { planId });
+
+export const pipelinePlanListStageExecutions = (
+  planId: string,
+): Promise<StageExecutionSummary[]> =>
+  invoke("pipeline_plan_list_stage_executions", { planId });
+
+// ─── CR-05 P2.5 — pause + resume + recovery commands (additive) ───────────
+//
+// `pausePipelinePlan` flips the runner's pause flag (no-op if no run
+// is in flight). `resumePipelinePlan` re-loads the plan, refuses if
+// not in Paused, and continues from the first stage with no
+// completed StageExecution row. `pipelinePlanListResumableForProject`
+// feeds RecoveryBanner.svelte on project open.
+
+export const pausePipelinePlan = (planId: string): Promise<boolean> =>
+  invoke("pause_pipeline_run", { planId });
+
+export const resumePipelinePlan = (planId: string): Promise<RunOutcome> =>
+  invoke("resume_pipeline_run", { planId });
+
+export const pipelinePlanListResumableForProject = (
+  projectId: string,
+): Promise<PipelinePlanSummary[]> =>
+  invoke("pipeline_plan_list_resumable_for_project", { projectId });
+
+// ─── CR-05 P3 slice 2 — recommendation engine API (additive) ────────────
+//
+// Mirrors the slice 2 / 2.5 Rust commands. `IntelligencePanel.svelte`
+// reads `pipelinePlanListRecommendations(planId)` on mount and on
+// every `refreshStageExecutions` tick. The mutation endpoints return
+// a `RecommendationUpdateResult` that the panel uses to update the
+// row in place.
+
+export type RecommendationUserDecision = "pending" | "applied" | "dismissed";
+
+export interface RecommendationDto {
+  id: string;
+  stage_execution_id: string;
+  rule_id: string;
+  stage_type: string;
+  decision_json: ProcessingDecisionJson;
+  confidence: number;
+  evidence_summary: string;
+  created_at: string;
+  // CR-05 P3 slice 2.5 — user-decision lifecycle. Null is treated
+  // as "pending" by the UI for backward compatibility.
+  user_decision: RecommendationUserDecision | null;
+  user_decision_at: string | null;
+  applied_stage_id: string | null;
+  /** CR-05 P4 slice 6 — id of the `preview_run` that satisfied
+   * the §11 gate when this recommendation was applied. Null
+   * for not-yet-applied or legacy rows. */
+  applied_with_preview_id: string | null;
+}
+
+export interface ProcessingDecisionJson {
+  stage_type: string;
+  parameters: Record<string, unknown>;
+  rationale: string;
+}
+
+export interface RecommendationUpdateResult {
+  recommendation: RecommendationDto;
+  applied_stage_id: string | null;
+  /** CR-05 P4 slice 6 — preview id provenance for the apply. */
+  applied_with_preview_id?: string | null;
+}
+
+export const pipelinePlanListRecommendations = (
+  planId: string,
+): Promise<RecommendationDto[]> =>
+  invoke("get_recommendations_for_plan", { planId });
+
+export const pipelinePlanListRecommendationsForStageExecution = (
+  stageExecutionId: string,
+): Promise<RecommendationDto[]> =>
+  invoke("get_recommendations_for_stage_execution", {
+    stageExecutionId,
+  });
+
+// CR-05 P3 slice 2.5 — user-decision mutation commands. All three
+// return the updated `RecommendationUpdateResult` so the panel can
+// update the row in place.
+
+export const applyRecommendation = (
+  recommendationId: string,
+): Promise<RecommendationUpdateResult> =>
+  invoke("apply_recommendation", { recommendationId });
+
+export const dismissRecommendation = (
+  recommendationId: string,
+): Promise<RecommendationUpdateResult> =>
+  invoke("dismiss_recommendation", { recommendationId });
+
+export const resetRecommendation = (
+  recommendationId: string,
+): Promise<RecommendationUpdateResult> =>
+  invoke("reset_recommendation", { recommendationId });
+
+// ─── CR-05 P4 slice 4 — preview-before-commit API (additive) ─────────────
+//
+// Mirrors the slice 4 Rust commands. Slice 4 ships lifecycle
+// wiring only — the actual stage-handler integration (running a
+// handler at scale and writing a real preview image) lands in
+// slice 5. For now `createPreviewRun` immediately returns a
+// PreviewRun with status `completed` + a synthesized placeholder
+// artifact so the UI can exercise the read-back path.
+
+export interface PreviewRunDto {
+  preview_id: string;
+  stage_execution_id: string;
+  source_version_id: string;
+  preview_artifact_id: string | null;
+  parameters_json: string;
+  parameters_hash: string;
+  status: "pending" | "running" | "completed" | "failed";
+  scale: number;
+  label: string;
+  error_json: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface CreatePreviewRunRequest {
+  stage_execution_id: string;
+  source_version_id: string;
+  parameters_json: string;
+  scale?: number | null;
+  label?: string | null;
+}
+
+export const createPreviewRun = (
+  request: CreatePreviewRunRequest,
+): Promise<PreviewRunDto> =>
+  invoke("create_preview_run", { request });
+
+export const listPreviewRunsForStageExecution = (
+  stageExecutionId: string,
+): Promise<PreviewRunDto[]> =>
+  invoke("list_preview_runs_for_stage_execution", { stageExecutionId });
+
+export const getPreviewRun = (
+  previewId: string,
+): Promise<PreviewRunDto> => invoke("get_preview_run", { previewId });
+
+/**
+ * CR-05 P4 slice 5 — read a preview's PNG artifact back as base64.
+ * Only files inside the app's previews directory are served; the
+ * asset protocol stays disabled.
+ */
+export const readPreviewArtifact = (previewId: string): Promise<string> =>
+  invoke("read_preview_artifact", { previewId });
+
+export const deletePreviewRun = (
+  previewId: string,
+): Promise<void> => invoke("delete_preview_run", { previewId });
+// ─── CR-05 P4 slice 7 — §21 Resource-Aware Execution ─────────────────────
+// Mirrors `crates/astroforge-core/src/resource.rs` (serde snake_case).
+
+export type ExecutionBackend =
+  | "cpu"
+  | "cuda"
+  | "direct_ml"
+  | "core_ml"
+  | "open_vino";
+
+export type Precision = "f16" | "f32";
+
+export interface GpuInfo {
+  name: string;
+  backend: ExecutionBackend;
+  vram_bytes: number | null;
+}
+
+export interface RecommendedExecution {
+  backend: ExecutionBackend;
+  tile_size: number;
+  thread_count: number;
+  precision: Precision;
+  memory_budget_bytes: number;
+}
+
+export interface ResourceSnapshot {
+  cpu_model: string;
+  logical_cores: number;
+  physical_cores: number | null;
+  total_memory_bytes: number;
+  available_memory_bytes: number;
+  gpus: GpuInfo[];
+  recommended: RecommendedExecution;
+}
+
+/**
+ * Detect the device and return the snapshot + derived execution
+ * recommendation. Recomputed on demand so it reflects current memory
+ * pressure; infallible by design (probes degrade gracefully).
+ */
+export const getResourceSnapshot = (): Promise<ResourceSnapshot> =>
+  invoke("get_resource_snapshot");
+
+// ─── CR-05 P5 slice 1 — backend enumeration + §22 execution budget ───────
+// Mirrors `crates/astroforge-core/src/resource.rs` (serde snake_case).
+
+export interface BackendCapability {
+  backend: ExecutionBackend;
+  available: boolean;
+  device: string | null;
+  /** Why the backend is unavailable — render verbatim in Expert mode. */
+  unavailable_reason: string | null;
+}
+
+export interface ExecutionBudget {
+  memory_budget_bytes: number;
+  requires_tiling: boolean;
+  tile_size: number;
+  thread_count: number;
+  /** §22 pre-flight warning copy when memory is tight; null when fine. */
+  warning: string | null;
+}
+
+/** Advertised capability of every §21 backend on this device. */
+export const listBackendCapabilities = (): Promise<BackendCapability[]> =>
+  invoke("list_backend_capabilities");
+
+/** Pre-flight budget for a stage input of `datasetSizeBytes` uncompressed. */
+export const deriveExecutionBudget = (
+  datasetSizeBytes: number,
+): Promise<ExecutionBudget> =>
+  invoke("derive_execution_budget", { datasetSizeBytes });
+
+/** CR-05 P5 slice 2 (§22) — pre-flight budget from a stage's
+ *  parameters_json. Returns the same shape as `deriveExecutionBudget`
+ *  but reads the dataset_size_bytes from the JSON rather than as a
+ *  separate argument, mirroring how the runner resolves it. */
+export const stageExecutionBudget = (
+  parametersJson: string | null,
+): Promise<ExecutionBudget> =>
+  invoke("stage_execution_budget", { parametersJson });
+
+// ─── CR-05 P5 slice 4 (§24 + §27) — aggregate metrics ────────────────
+
+/** CR-05 §14 metric list, subset exposed to the Expert DAG view. */
+export interface ImageMetricsDto {
+  snr: number;
+  fwhm: number;
+  star_count: number;
+  background_gradient: number;
+  mean: number;
+  stddev: number;
+}
+
+/** CR-05 §12 noise banding — see `adaptive::NoiseKind` on the core. */
+export type NoiseKindDto = "low" | "moderate" | "high" | "extreme";
+
+export interface NoiseProfileDto {
+  kind: NoiseKindDto;
+  recommended_strength: number;
+  label: string;
+  reason: string;
+}
+
+export interface SharpeningProfileDto {
+  strength: number;
+  reason: string;
+}
+
+/** §12 adaptive parameter set. Every field is optional so the UI can
+ *  gracefully degrade when only partial data is available (e.g. a
+ *  stage that hasn't emitted metrics yet). */
+export interface AdaptiveParameterSetDto {
+  noise?: NoiseProfileDto;
+  sharpening?: SharpeningProfileDto;
+}
+
+/** §22 execution budget from the runner's persisted `resource_usage_json`. */
+export interface ExecutionBudgetDto {
+  memory_budget_bytes: number;
+  requires_tiling: boolean;
+  tile_size: number;
+  thread_count: number;
+  warning: string | null;
+}
+
+/** CR-05 §27 `get_processing_metrics` payload. Aggregates stage
+ *  executions + the latest metrics + the adaptive engine's current
+ *  parameter set, so the Expert DAG view can render in a single IPC. */
+export interface ProcessingMetricsDto {
+  plan_id: string;
+  stage_count: number;
+  completed_count: number;
+  completion_ratio: number;
+  latest_stage_id: string | null;
+  latest_stage_type: string | null;
+  latest_metrics: ImageMetricsDto | null;
+  latest_resource_budget: ExecutionBudgetDto | null;
+  adaptive_parameters: AdaptiveParameterSetDto | null;
+  /** CR-05 P6.2 (§23) — AI label for the most-recent execution.
+   *  null when `ai_label_json` is missing (pre-P6.2 rows). */
+  latest_ai_label: AiBoundaryLabelDto | null;
+  /** CR-05 P6.1 (§28) — populated when the most-recent execution
+   *  is failed; the UI renders `ErrorRecoveryPanel` from this. */
+  latest_stage_error: StageErrorDto | null;
+}
+
+/** §27 — single-roundtrip aggregate metrics for the Expert DAG view. */
+export const getProcessingMetrics = (
+  planId: string,
+): Promise<ProcessingMetricsDto> =>
+  invoke("get_processing_metrics", { planId });
+
+// ─── CR-05 P6 slice 2 (§23 AI Boundary) ─────────────────────────────
+
+/** §23 — AI boundary label per stage. Mirrors
+ *  astroforge_core::ai_boundary::AiBoundaryLabel. */
+export interface AiBoundaryLabelDto {
+  /** Whether the stage crosses the AI boundary. */
+  uses_ai: boolean;
+  /** Model identifier; null for classical stages. */
+  model_id: string | null;
+  /** Whether the stage is bit-reproducible. */
+  deterministic: boolean;
+  /** RNG seed; null when uses_ai is false or the stage has no seed. */
+  seed: number | null;
+}
+
+// ─── CR-05 P6 slice 1 (§28 Error and Recovery UX) ───────────────────
+
+/** §28 — SuggestedActionKind enum. Variants match the Rust
+ *  `SuggestedActionKind` and the snake_case renames in serde. */
+export type SuggestedActionKind =
+  | "retry_optimized"
+  | "retry"
+  | "adjust_processing"
+  | "skip_stage"
+  | "cancel"
+  | "contact_support";
+
+/** §28 — Single suggested next action, surfaced as a button. */
+export interface SuggestedActionDto {
+  label: string;
+  kind: SuggestedActionKind;
+}
+
+/** §28 — Structured stage error payload. Round-trips through
+ *  StageExecution.error_json. Mirrors astroforge_core::stage_error::StageError. */
+export interface StageErrorDto {
+  what_happened: string;
+  what_was_preserved: string;
+  suggested_actions: SuggestedActionDto[];
+}
+
+
+// ─── CR-05 P6 slice 3 (§25 Processing Timeline) ────────────────────
+
+/** §25 — single event on the processing timeline. Mirrors
+ *  astroforge_core::processing_timeline::TimelineEvent. */
+export interface TimelineEventDto {
+  stage_id: string;
+  /** Human-readable label, e.g. "Stack", "AI denoise". */
+  stage_label: string;
+  /** Stage type token, e.g. "stack", "denoise". */
+  stage_type: string;
+  sequence: number;
+  /** Unix milliseconds parsed from `started_at`. null for legacy
+   *  rows where the timestamp couldn't be parsed. */
+  timestamp_unix_ms: number | null;
+  /** `completed_at - started_at` in ms, when both parse cleanly. */
+  duration_ms: number | null;
+  /** `ImageVersion.version_id` this stage produced. */
+  output_version_id: string | null;
+  status: string;
+}
+
+/** §25 — processing timeline for a plan. */
+export interface ProcessingTimelineDto {
+  plan_id: string;
+  events: TimelineEventDto[];
+}
+
+/** §25 — single-roundtrip timeline fetch for the timeline panel. */
+export const getProcessingTimeline = (
+  planId: string,
+): Promise<ProcessingTimelineDto> =>
+  invoke("get_processing_timeline", { planId });
+
+// ─── CR-05 P6 slice 1b (§9 Retry + Skip) ───────────────────────────
+
+/** §9 — UI-side retry variant. Mirrors the Rust `RetryKind`.
+ *  Today `optimized` and `as_is` produce the same runner behaviour;
+ *  the distinction is preserved at the IPC boundary for traceability
+ *  and so a future PR can wire real differentiation. */
+export type RetryKind = "optimized" | "as_is";
+
+/** §9 — UI payload for `retry_stage` / `skip_stage`. Mirrors
+ *  src-tauri::StageExecutionDto. */
+export interface StageExecutionDto {
+  stage_execution_id: string;
+  plan_id: string;
+  stage_id: string;
+  attempt: number;
+  status: string;
+  output_artifact_id: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  error_json: string | null;
+}
+
+/** §9 — `retry_stage(plan_id, stage_id, kind)`.
+ *  Re-dispatches a single stage that previously failed.
+ *  Returns the new exec row (attempt = prev + 1). */
+export const retryStage = (
+  planId: string,
+  stageId: string,
+  kind: RetryKind,
+): Promise<StageExecutionDto> =>
+  invoke("retry_stage", { planId, stageId, kind });
+
+/** §9 — `skip_stage(plan_id, stage_id)`.
+ *  Marks a stage's latest exec row as `skipped` and flips the
+ *  plan back to `Ready` so the user can Resume. Refuses on
+ *  required stages. */
+export const skipStage = (
+  planId: string,
+  stageId: string,
+): Promise<StageExecutionDto> =>
+  invoke("skip_stage", { planId, stageId });
+
+// ─── CR-05 R1 — AI model catalog IPC ────────────────────────────────────────
+//
+// Read-only wrapper around the `ai_model_list` Tauri command. Surfaces the
+// canonical AI model list (denoise, super-resolution, de-jpeg, star
+// segmentation, cloud score, color calibration, trail inpainting) to the
+// application-level AI Models screen. `installed` reflects on-disk
+// presence and `aiModelDownload` installs pinned models (W2-era).
+
+export interface AiModelInfo {
+  name: string;
+  version: string;
+  stage: string;
+  license: string;
+  size_bytes: number;
+  input_channels: number;
+  input_tile_size: number;
+  output_channels: number;
+  scale_factor: number;
+  download_url: string | null;
+  installed: boolean;
+}
+
+export const aiModelList = (): Promise<AiModelInfo[]> =>
+  invoke("ai_model_list");
+
+/**
+ * RT-7 (#426) — install a pinned catalog model. The Rust side
+ * verifies the fetched bytes against the pinned SHA-256 before
+ * installing (fail-closed); the promise rejects with the reason on
+ * network / checksum / io failures.
+ */
+export const aiModelDownload = (name: string): Promise<string> =>
+  invoke("ai_model_download", { name });
+
+
+
+
+// ─── #461 S2 — import materialization chain ─────────────────────────
+
+// #465 W1.1 (RE-RE-land: the W1 commit described this switch but the
+// astroforge-api.ts change was lost in the stash-conflict resolution —
+// found live by the maintainer's walkthrough) — sessions MUST be
+// created in the DomainStore (import_begin), the same database the
+// pipeline reads SourceAssets from. The pre-existing session_create
+// writes to the separate SessionStore, whose rows cannot satisfy the
+// source_assets foreign key.
+export const sessionCreate = (projectId: string, sourceDir: string): Promise<string> =>
+  invoke("import_begin", { projectId, sourceDir });
+
+export interface ImportFrameInput {
+  path: string;
+  frameType: string;
+  exptime: number | null;
+  filter: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+export interface RegisteredAssets {
+  sessionId: string;
+  registered: number;
+  duplicates: number;
+}
+
+/**
+ * Persist every scanned frame as a durable SourceAsset (content-hashed,
+ * deduped) and mark the session active on the project — the step the
+ * import wizard previously skipped, which left both core workflows
+ * without data.
+ */
+export const importRegisterAssets = (
+  sessionId: string,
+  projectId: string,
+  frames: ImportFrameInput[],
+): Promise<RegisteredAssets> =>
+  invoke("import_register_assets", { sessionId, projectId, frames });
+
+
+export interface SessionHistoryEntry {
+  sessionId: string;
+  name: string;
+  sourceLocation: string | null;
+  processingStatus: string;
+  createdAt: string;
+  updatedAt: string;
+  isActive: boolean;
+}
+
+/** #465 W4 — the project's session history, newest first. */
+export const sessionListForProject = (
+  projectId: string,
+): Promise<SessionHistoryEntry[]> =>
+  invoke("session_list_for_project", { projectId });
+
+/** Continue a previous session: set it active on the project. */
+export const sessionContinue = (
+  projectId: string,
+  sessionId: string,
+): Promise<void> => invoke("session_continue", { projectId, sessionId });
+
+// ─── RT-13 (#431) — session quality dashboard ────────────────────────
+
+export interface FrameQuality {
+  index: number;
+  name: string;
+  fwhmMean: number;
+  starCount: number;
+  estimatedSnr: number;
+  localSnr: number;
+}
+
+export interface MetricTrend {
+  metric: string;
+  first: number;
+  last: number;
+  slopePerFrame: number;
+  improving: boolean;
+}
+
+export interface OutlierFlag {
+  frameIndex: number;
+  frameName: string;
+  metric: string;
+  value: number;
+  typical: number;
+  robustSigma: number;
+}
+
+export interface SessionQualityReport {
+  frames: FrameQuality[];
+  trends: MetricTrend[];
+  outliers: OutlierFlag[];
+  unreadable: { path: string; reason: string }[];
+}
+
+/**
+ * Per-frame quality trends + robust outlier flags over a session's
+ * light frames (capture order). Unreadable frames are reported, not
+ * hidden.
+ */
+export const sessionQualityReport = (
+  framePaths: string[],
+): Promise<SessionQualityReport> =>
+  invoke("session_quality_report", { request: { framePaths } });
+
+// ─── RT-12 (#430) — plate-solve annotation overlay ────────────────────
+
+export interface WcsAnnotationOverlay {
+  target_name: string;
+  ra_center: string;
+  dec_center: string;
+  field_width_arcmin: number;
+  field_height_arcmin: number;
+  rotation_deg: number;
+  source: "Header" | "Solved";
+}
+
+/**
+ * WCS-derived overlay for a FITS artifact (target / center / FOV).
+ * `overlay` is null when the header carries no WCS keys — the
+ * canvas then shows no badge rather than a fabricated one. Live
+ * solving (ASTAP) is not bundled in v0.x (ADR-0001 staged adoption).
+ */
+export const plateSolveOverlay = (
+  path: string,
+): Promise<{ overlay: WcsAnnotationOverlay | null }> =>
+  invoke("plate_solve_overlay", { path });
+
+// ─── CR-04 P8 — Import Understanding IPC ────────────────────────────────
+//
+// Wires P3..P7 (frame classification, target detection, session grouping,
+// capture analysis, narrowband detection) into the import wizard. The UI
+// (P9) reads these wrappers to render the Understanding panel + the
+// ambiguity dialog (per CR-04 §13).
+
+export type ImportState =
+  | "created"
+  | "scanned"
+  | "understanding"
+  | "ambiguous"
+  | "confirmed"
+  | "materialised";
+
+export type CaptureKind = "deep_sky" | "planetary_lunar" | "ambiguous";
+
+export type NarrowbandComposition =
+  | "none"
+  | "mono"
+  | "hoo"
+  | "sho"
+  | "lrgb"
+  | "hoo_or_sho";
+
+export interface CaptureObservationJson {
+  signal: string;
+  value: string;
+  weight: number;
+  confidence: number;
+  favours: CaptureKind;
+}
+
+export interface CaptureClassificationJson {
+  kind: CaptureKind;
+  confidence: number;
+  observations: CaptureObservationJson[];
+  ambiguous: boolean;
+}
+
+export interface NarrowbandObservationJson {
+  signal: string;
+  value: string;
+  weight: number;
+  confidence: number;
+  resolves_to: string | null;
+}
+
+export interface ChannelGroupJson {
+  channel: string;
+  asset_ids: string[];
+}
+
+export interface NarrowbandAnalysisJson {
+  channels: ChannelGroupJson[];
+  composition_suggestion: NarrowbandComposition;
+  confidence: number;
+  observations: NarrowbandObservationJson[];
+}
+
+export interface SessionAnalysisJson {
+  classifications: Array<{
+    kind: string;
+    confidence: number;
+    observations: Array<{
+      signal: string;
+      value: string;
+      weight: number;
+      confidence: number;
+    }>;
+  }>;
+  capture: CaptureClassificationJson;
+  narrowband: NarrowbandAnalysisJson;
+  aggregate_confidence: number;
+}
+
+export interface SessionClassificationJson {
+  session_id: string;
+  import_state: ImportState;
+  capture_kind: CaptureKind | null;
+  narrowband_composition: NarrowbandComposition | null;
+  classification_confidence: number | null;
+  classification_metadata: string | null;
+}
+
+export interface ImportAnalysisResultJson {
+  session_id: string;
+  analysis: SessionAnalysisJson;
+  classification: SessionClassificationJson;
+}
+
+export interface AssetMetadataInputJson {
+  path: string;
+  metadata: Record<string, unknown>;
+}
+
+export const importAnalyseSession = (
+  projectId: string,
+  sessionId: string,
+  assets: AssetMetadataInputJson[],
+  targetName: string | null,
+): Promise<ImportAnalysisResultJson> =>
+  invoke("import_analyse_session", {
+    projectId,
+    sessionId,
+    assets,
+    targetName,
+  });
+
+export const importGetUnderstanding = (
+  sessionId: string,
+): Promise<SessionClassificationJson | null> =>
+  invoke("import_get_understanding", { sessionId });
+
+export const importConfirm = (
+  sessionId: string,
+): Promise<SessionClassificationJson> =>
+  invoke("import_confirm", { sessionId });
+
+export const importOverrideClassification = (
+  sessionId: string,
+  captureKind: CaptureKind | null,
+  narrowbandComposition: NarrowbandComposition | null,
+): Promise<SessionClassificationJson> =>
+  invoke("import_override_classification", {
+    sessionId,
+    captureKind,
+    narrowbandComposition,
+  });
+
+export const importSetMaterialised = (
+  sessionId: string,
+): Promise<SessionClassificationJson> =>
+  invoke("import_set_materialised", { sessionId });
+
+// CR-04 P10 — AI provenance. Returns the source of
+// authority for the target classification
+// (deterministic / ai_stub_requested / user_override)
+// + a reasoning string the UI surfaces on the
+// Understanding panel.
+
+export type ClassificationProvenance =
+  | "deterministic"
+  | "ai_stub_requested"
+  | "user_override";
+
+export interface TargetProvenanceReportJson {
+  session_id: string;
+  provenance: ClassificationProvenance;
+  reasoning: string;
+}
+
+export const importGetTargetProvenance = (
+  sessionId: string,
+): Promise<TargetProvenanceReportJson> =>
+  invoke("import_get_target_provenance", { sessionId });
+
+export function provenanceLabel(
+  provenance: ClassificationProvenance,
+): string {
+  switch (provenance) {
+    case "deterministic":
+      return "Deterministic";
+    case "ai_stub_requested":
+      return "AI confirming…";
+    case "user_override":
+      return "User correction applied";
+  }
+}
+
+
+// ─── CR-10 P1.6.2.4 / Slice P1.6.2.4 : Node-Based Editor mutation IPCs ──
+//
+// Houses the TS-side wrappers for the node-graph Tauri commands
+// added in P1.6.2.4. The Rust side is in `commands_node_graph.rs`
+// (sibling of the read-only `read_node_catalog` it absorbed from
+// `main.rs` in this slice). Future slices will add the remaining
+// mutation primitives (P1.6.3.1: `update_graph` / `remove_stage` /
+//`reorder_stage` / `set_stage_enabled`) + the free-form layout
+// state query (P1.6.3.3).
+//
+// Pattern note: the wrappers mirror the existing
+// `pipelinePlanGet` / `createPipelinePlan` shape : a thin call
+// to `invoke()` with a request object.
+
+/**
+ * Request payload for `insert_stage`. Mirrors the Rust-side
+ * `InsertStageRequest` struct in `src-tauri/src/commands_node_graph.rs`.
+ */
+export interface InsertStageRequest {
+  plan_id: string;
+  stage_type: string;
+}
+
+/**
+ * Append a new stage to the end of the plan's `stages` Vec.
+ *
+ * The Rust primitive (`astroforge_core::node_graph::mutation::insert_stage`)
+ * looks up default params + label + image-version / undo flags from
+ * the canonical `NodeCatalog`; the TS side does NOT pass those in.
+ *
+ * Returns the updated `PipelinePlanDto` so the TS-side
+ * `pipeline-store` mirror can refresh its `stages` array.
+ *
+ * Errors:
+ * - `"unknown stage_type '...'"` => the user (or a stale-frontend
+ *   cache) supplied a stage_type not in the canonical NodeCatalog.
+ *   Refresh the catalog and re-prompt.
+ * - `"plan not found: ..."` => the supplied `plan_id` does not
+ *   exist in the store.
+ */
+export const insertStage = (
+  request: InsertStageRequest,
+): Promise<PipelinePlanDto> =>
+  invoke("insert_stage", { request });
+
+/**
+ * One node's write-back state in `update_graph` (CR-10 P1.6.3.1).
+ * Mirrors the Rust-side `UpdateGraphNodeDto`.
+ */
+export interface UpdateGraphNode {
+  stage_id: string;
+  sequence: number;
+  enabled: boolean;
+}
+
+/**
+ * Write the full graph state (nodes + order + enabled flags) in one
+ * pass — the mutation write-path the NodeSidebar context menu goes
+ * through. The node set must match the plan's stages exactly.
+ *
+ * Errors:
+ * - `"graph state does not match the plan stages: ..."` => the
+ *   submitted set is stale (unknown / missing / duplicate ids).
+ *   Re-sync from the active plan and re-issue.
+ * - `"plan not found: ..."` => the plan is gone.
+ */
+export const updateGraph = (
+  planId: string,
+  nodes: UpdateGraphNode[],
+): Promise<PipelinePlanDto> =>
+  invoke("update_graph", { request: { plan_id: planId, nodes } });
+
+/**
+ * Remove an optional stage. Refused for `required` stages —
+ * `"stage '...' is required and cannot be removed (disable it
+ * instead)"`. Returns the updated plan.
+ */
+export const removeStage = (
+  planId: string,
+  stageId: string,
+): Promise<PipelinePlanDto> =>
+  invoke("remove_stage", { planId, stageId });
+
+/**
+ * Move a stage to `newSequence` (0-based, clamped to the valid
+ * range). Returns the updated plan with sequences re-compacted.
+ */
+export const reorderStage = (
+  planId: string,
+  stageId: string,
+  newSequence: number,
+): Promise<PipelinePlanDto> =>
+  invoke("reorder_stage", { planId, stageId, newSequence });
+
+/**
+ * Enable or disable a stage. `enabled` and `required` are
+ * orthogonal (workflow-A ships required stages disabled). Returns
+ * the updated plan.
+ */
+export const setStageEnabled = (
+  planId: string,
+  stageId: string,
+  enabled: boolean,
+): Promise<PipelinePlanDto> =>
+  invoke("set_stage_enabled", { planId, stageId, enabled });
+
+/**
+ * Serialize the plan to `.astroforge-recipe` JSON (CR-10 P1.6.4.1,
+ * spec §7.7.7). Paths, GPS/timestamps and machine-specific keys are
+ * stripped per §11.2 — the artifact is portable.
+ */
+export const graphToRecipe = (
+  planId: string,
+  appVersion: string,
+): Promise<string> => invoke("graph_to_recipe", { planId, appVersion });
+
+/**
+ * Materialize a plan from recipe JSON (CR-10 P1.6.4.2). The result
+ * is NOT persisted: per §7.7.7 the UI prompts before replacing the
+ * active graph or creating a session.
+ *
+ * Errors:
+ * - `"unknown stage 'x' at pipeline entry N"` => the file references
+ *   a stage the catalog does not know; the index points at the row.
+ * - `"malformed recipe: ..."` => structurally invalid JSON.
+ */
+export const recipeToGraph = (
+  recipeJson: string,
+  projectId: string,
+  sessionId: string,
+): Promise<PipelinePlanDto> =>
+  invoke("recipe_to_graph", { recipeJson, projectId, sessionId });
+
+/**
+ * All graph (plan) summaries for a project, newest first (CR-10
+ * P1.6.4.3). The first entry is the project's DEFAULT graph for the
+ * reset semantics.
+ */
+export const listProjectGraphs = (
+  projectId: string,
+): Promise<PipelinePlanSummary[]> =>
+  invoke("list_project_graphs", { projectId });
+
+/**
+ * The plan pinned for the session, or `null` when the session
+ * follows the project default (CR-10 P1.6.4.3).
+ */
+export const getSessionGraphOverride = (
+  projectId: string,
+  sessionId: string,
+): Promise<PipelinePlanDto | null> =>
+  invoke("get_session_graph_override", { projectId, sessionId });
+
+/**
+ * Pin a plan as the session's graph. The plan must belong to the
+ * project.
+ */
+export const setSessionGraphOverride = (
+  projectId: string,
+  sessionId: string,
+  planId: string,
+): Promise<PipelinePlanDto> =>
+  invoke("set_session_graph_override", { projectId, sessionId, planId });
+
+/**
+ * Materialize the project's default graph for the session and clear
+ * any override row. Idempotent on an unchanged default. Errors:
+ * `"no default graph for project '...'"` when the project has no
+ * plans yet.
+ */
+export const resetSessionToProjectDefault = (
+  projectId: string,
+  sessionId: string,
+): Promise<PipelinePlanDto> =>
+  invoke("reset_session_to_project_default", { projectId, sessionId });

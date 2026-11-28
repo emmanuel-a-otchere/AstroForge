@@ -2,13 +2,25 @@
   <WorkspaceScreen
     title="Process"
     icon="auto_fix_high"
-    description="Run the processing pipeline for the active session. Generate an auto-plan, review stages, and start the run."
+    description="Run the processing pipeline for the active session. Every run is durable and recoverable; crash mid-run resumes from the last completed stage."
   >
+    <template v-if="nodeMode" #sidebar>
+      <NodePalette @select="insertStageAt" />
+    </template>
+
+    <RecoveryBanner v-if="project" :project-id="project.project_id" />
+
+    <div class="mode-row">
+      <NodeGraphModeToggle />
+    </div>
+
     <div v-if="historyError" class="error-line font-body" role="alert">
       {{ historyError }}
     </div>
 
-    <section class="panel" aria-labelledby="sessions-title">
+    <NodeCanvas v-if="nodeMode && plan" />
+
+    <section v-if="!nodeMode" class="panel" aria-labelledby="sessions-title">
       <h2 id="sessions-title" class="font-display panel-title">Sessions</h2>
       <p v-if="historyLoading" class="hint font-body">Loading sessions…</p>
       <ul v-else-if="sessionHistory.length" class="session-list">
@@ -31,7 +43,7 @@
       <p v-else class="hint font-body">No sessions yet — import data first.</p>
     </section>
 
-    <section class="panel" aria-labelledby="plan-title">
+    <section v-if="!nodeMode" class="panel" aria-labelledby="plan-title">
       <div class="panel-header">
         <h2 id="plan-title" class="font-display panel-title">Pipeline plan</h2>
         <div class="row-actions">
@@ -125,6 +137,10 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { VueDraggable } from "vue-draggable-plus";
 import WorkspaceScreen from "@/components/WorkspaceScreen.vue";
+import NodeCanvas from "@/components/NodeCanvas.vue";
+import NodePalette from "@/components/NodePalette.vue";
+import NodeGraphModeToggle from "@/components/NodeGraphModeToggle.vue";
+import RecoveryBanner from "@/components/RecoveryBanner.vue";
 import { useStore } from "@/composables/useStore";
 import { useProjectContextStore } from "@/stores/projectContext";
 import {
@@ -133,6 +149,7 @@ import {
   stageExecutions,
 } from "@/lib/pipeline-plan-store";
 import { loadNodeCatalog } from "@/lib/node-catalog";
+import { isNodeMode } from "@/lib/node-graph-store";
 import {
   sessionListForProject,
   sessionContinue,
@@ -150,6 +167,7 @@ const context = useProjectContextStore();
 const plan = useStore(activePlan);
 const runStatus = useStore(runStatusStore);
 const execsStore = useStore(stageExecutions);
+const nodeMode = useStore(isNodeMode);
 
 const sessionHistory = ref([]);
 const historyLoading = ref(false);
@@ -319,6 +337,11 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.mode-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .panel {
   background: var(--surface-container-low);
   border: 1px solid var(--outline-variant);

@@ -36,15 +36,27 @@
         </button>
       </div>
 
+      <label class="sync-toggle font-body">
+        <input v-model="syncNav" type="checkbox" />
+        Sync zoom / pan
+      </label>
+
       <div class="previews">
-        <figure v-for="side in previewSides" :key="side.id" class="preview">
-          <img
-            v-if="side.url"
-            v-lazy="side.url"
-            :alt="`${side.label} preview`"
-            class="preview-img"
+        <figure class="preview">
+          <ImageCanvas
+            :version-id="aId"
+            :view="syncNav ? sharedView : null"
+            @view-change="onViewChange"
           />
-          <figcaption class="font-body">{{ side.label }}</figcaption>
+          <figcaption class="font-body">A · {{ versionA?.label ?? "—" }}</figcaption>
+        </figure>
+        <figure class="preview">
+          <ImageCanvas
+            :version-id="bId"
+            :view="syncNav ? sharedView : null"
+            @view-change="onViewChange"
+          />
+          <figcaption class="font-body">B · {{ versionB?.label ?? "—" }}</figcaption>
         </figure>
       </div>
 
@@ -97,10 +109,10 @@ import { computed, ref, watch } from "vue";
 import WorkspaceScreen from "@/components/WorkspaceScreen.vue";
 import { useStore } from "@/composables/useStore";
 import { versionStore } from "@/state/versions";
+import ImageCanvas from "@/components/ImageCanvas.vue";
 import {
   compareVersionMetrics,
   applyImageDecision,
-  readImageArtifact,
 } from "@/lib/astroforge-api";
 
 const versions = useStore(versionStore);
@@ -115,32 +127,12 @@ const decisionError = ref(null);
 const versionA = computed(() => versions.value.versions.find((v) => v.version_id === aId.value) ?? null);
 const versionB = computed(() => versions.value.versions.find((v) => v.version_id === bId.value) ?? null);
 
-const previewSides = computed(() => [
-  { id: "a", label: `A · ${versionA.value?.label ?? "—"}`, url: previewUrls.value[aId.value] ?? null },
-  { id: "b", label: `B · ${versionB.value?.label ?? "—"}`, url: previewUrls.value[bId.value] ?? null },
-]);
+const syncNav = ref(true);
+const sharedView = ref({ zoomMode: "fit", zoomLevel: 1, panX: 0, panY: 0 });
 
-const previewUrls = ref({});
-
-async function loadPreview(versionId) {
-  if (!versionId || previewUrls.value[versionId]) return;
-  try {
-    const artifact = await readImageArtifact(versionId);
-    if (artifact?.base64_data) {
-      previewUrls.value = {
-        ...previewUrls.value,
-        [versionId]: `data:${artifact.mime_type || "image/png"};base64,${artifact.base64_data}`,
-      };
-    }
-  } catch {
-    // preview is best-effort
-  }
+function onViewChange(view) {
+  if (syncNav.value) sharedView.value = view;
 }
-
-watch([aId, bId], ([a, b]) => {
-  void loadPreview(a);
-  void loadPreview(b);
-}, { immediate: true });
 
 const metricRows = computed(() => {
   if (!metrics.value) return [];
@@ -231,26 +223,23 @@ async function decide(state, version = versionA.value) {
   flex-wrap: wrap;
 }
 
+.sync-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  font-size: 0.85rem;
+  color: var(--on-surface-variant);
+  width: fit-content;
+}
+
 .previews {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: var(--sp-md);
 }
 
 .preview {
   margin: 0;
-  background: var(--surface-container-low);
-  border: 1px solid var(--outline-variant);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.preview-img {
-  width: 100%;
-  height: 240px;
-  object-fit: contain;
-  background: #000;
-  display: block;
 }
 
 .preview figcaption {

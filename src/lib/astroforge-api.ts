@@ -2694,3 +2694,27 @@ export const resetSessionToProjectDefault = (
   sessionId: string,
 ): Promise<PipelinePlanDto> =>
   invoke("reset_session_to_project_default", { projectId, sessionId });
+
+// ── CR-26: wrapper for the existing `recipe_apply` command ──
+
+export interface RecipeApplyStage {
+  stage_type: string;
+  parameters_json: string | null;
+}
+
+export interface RecipeApplyResponse {
+  profile_id: string;
+  version: number;
+  stages: RecipeApplyStage[];
+}
+
+export const recipeApply = (
+  profileId: string,
+  version: number,
+  availableModels?: string[],
+): Promise<RecipeApplyResponse> =>
+  invoke("recipe_apply", {
+    profileId,
+    version,
+    availableModels: availableModels ?? null,
+  }) as Promise<RecipeApplyResponse>;

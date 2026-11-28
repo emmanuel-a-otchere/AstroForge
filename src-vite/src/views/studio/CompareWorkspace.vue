@@ -36,15 +36,27 @@
         </button>
       </div>
 
+      <label class="sync-toggle font-body">
+        <input v-model="syncNav" type="checkbox" />
+        Sync zoom / pan
+      </label>
+
       <div class="previews">
-        <figure v-for="side in previewSides" :key="side.id" class="preview">
-          <img
-            v-if="side.url"
-            v-lazy="side.url"
-            :alt="`${side.label} preview`"
-            class="preview-img"
+        <figure class="preview">
+          <ImageCanvas
+            :version-id="aId"
+            :view="syncNav ? sharedView : null"
+            @view-change="onViewChange"
           />
-          <figcaption class="font-body">{{ side.label }}</figcaption>
+          <figcaption class="font-body">A · {{ versionA?.label ?? "—" }}</figcaption>
+        </figure>
+        <figure class="preview">
+          <ImageCanvas
+            :version-id="bId"
+            :view="syncNav ? sharedView : null"
+            @view-change="onViewChange"
+          />
+          <figcaption class="font-body">B · {{ versionB?.label ?? "—" }}</figcaption>
         </figure>
       </div>
 
@@ -70,6 +82,12 @@
       </table>
 
       <section class="decision" aria-label="Decision">
+        <label class="picker font-body">
+          Quality profile
+          <select v-model="qualityProfile" class="select">
+            <option v-for="q in qualityProfiles" :key="q" :value="q">{{ q }}</option>
+          </select>
+        </label>
         <button
           type="button"
           class="accept-cta font-display"
@@ -88,6 +106,42 @@
         </button>
         <p v-if="decisionError" class="error-line font-body" role="alert">{{ decisionError }}</p>
       </section>
+
+      <section class="panel" aria-labelledby="sets-title">
+        <div class="panel-header">
+          <h2 id="sets-title" class="font-display panel-title">Comparison sets</h2>
+          <div class="row-actions">
+            <input
+              v-model="setName"
+              type="text"
+              class="set-name font-body"
+              placeholder="Set name"
+              aria-label="Comparison set name"
+            />
+            <button
+              type="button"
+              class="secondary-cta font-display"
+              :disabled="!aId || !bId || setsBusy"
+              @click="saveSet"
+            >
+              Save A/B as set
+            </button>
+          </div>
+        </div>
+        <p v-if="setsError" class="error-line font-body" role="alert">{{ setsError }}</p>
+        <ul v-if="sets.length" class="sets-list">
+          <li v-for="s in sets" :key="s.id" class="set-row">
+            <button type="button" class="ghost-link font-body" @click="loadSet(s)">
+              {{ s.name }}
+            </button>
+            <span class="hint font-body">{{ s.version_ids.length }} versions</span>
+            <button type="button" class="ghost-link danger font-body" @click="removeSet(s)">
+              Delete
+            </button>
+          </li>
+        </ul>
+        <p v-else class="hint font-body">No saved comparison sets for this project.</p>
+      </section>
     </template>
   </WorkspaceScreen>
 </template>
@@ -95,15 +149,22 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import WorkspaceScreen from "@/components/WorkspaceScreen.vue";
+import ImageCanvas from "@/components/ImageCanvas.vue";
 import { useStore } from "@/composables/useStore";
+import { useProjectContextStore } from "@/stores/projectContext";
 import { versionStore } from "@/state/versions";
 import {
   compareVersionMetrics,
   applyImageDecision,
-  readImageArtifact,
+  listComparisonSetsForProject,
+  saveComparisonSet,
+  deleteComparisonSet,
+  QUALITY_PROFILES,
+  DEFAULT_QUALITY_PROFILE,
 } from "@/lib/astroforge-api";
 
 const versions = useStore(versionStore);
+const context = useProjectContextStore();
 
 const aId = ref(null);
 const bId = ref(null);
@@ -112,35 +173,18 @@ const metricsError = ref(null);
 const decisionBusy = ref(false);
 const decisionError = ref(null);
 
+const syncNav = ref(true);
+const sharedView = ref({ zoomMode: "fit", zoomLevel: 1, panX: 0, panY: 0 });
+
+const qualityProfiles = QUALITY_PROFILES;
+const qualityProfile = ref(DEFAULT_QUALITY_PROFILE);
+const sets = ref([]);
+const setName = ref("");
+const setsBusy = ref(false);
+const setsError = ref(null);
+
 const versionA = computed(() => versions.value.versions.find((v) => v.version_id === aId.value) ?? null);
 const versionB = computed(() => versions.value.versions.find((v) => v.version_id === bId.value) ?? null);
-
-const previewSides = computed(() => [
-  { id: "a", label: `A · ${versionA.value?.label ?? "—"}`, url: previewUrls.value[aId.value] ?? null },
-  { id: "b", label: `B · ${versionB.value?.label ?? "—"}`, url: previewUrls.value[bId.value] ?? null },
-]);
-
-const previewUrls = ref({});
-
-async function loadPreview(versionId) {
-  if (!versionId || previewUrls.value[versionId]) return;
-  try {
-    const artifact = await readImageArtifact(versionId);
-    if (artifact?.base64_data) {
-      previewUrls.value = {
-        ...previewUrls.value,
-        [versionId]: `data:${artifact.mime_type || "image/png"};base64,${artifact.base64_data}`,
-      };
-    }
-  } catch {
-    // preview is best-effort
-  }
-}
-
-watch([aId, bId], ([a, b]) => {
-  void loadPreview(a);
-  void loadPreview(b);
-}, { immediate: true });
 
 const metricRows = computed(() => {
   if (!metrics.value) return [];
@@ -171,6 +215,10 @@ watch(
   { immediate: true },
 );
 
+function onViewChange(view) {
+  if (syncNav.value) sharedView.value = view;
+}
+
 async function loadMetrics() {
   if (!aId.value || !bId.value) return;
   metricsError.value = null;
@@ -186,13 +234,77 @@ async function decide(state, version = versionA.value) {
   decisionBusy.value = true;
   decisionError.value = null;
   try {
-    await applyImageDecision(version.version_id, state, "user decision in Compare");
+    await applyImageDecision(
+      version.version_id,
+      state,
+      "user decision in Compare",
+      qualityProfile.value,
+    );
   } catch (e) {
     decisionError.value = e instanceof Error ? e.message : String(e);
   } finally {
     decisionBusy.value = false;
   }
 }
+
+async function loadSets() {
+  const project = context.project;
+  if (!project) return;
+  try {
+    sets.value = await listComparisonSetsForProject(project.project_id);
+  } catch (e) {
+    setsError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function saveSet() {
+  const project = context.project;
+  if (!project || !aId.value || !bId.value) return;
+  setsBusy.value = true;
+  setsError.value = null;
+  try {
+    await saveComparisonSet({
+      id: crypto.randomUUID(),
+      project_id: project.project_id,
+      name: setName.value.trim() || `A/B ${new Date().toISOString()}`,
+      version_ids: [aId.value, bId.value],
+      created_at: new Date().toISOString(),
+      slot_labels: ["A", "B"],
+    });
+    setName.value = "";
+    await loadSets();
+  } catch (e) {
+    setsError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    setsBusy.value = false;
+  }
+}
+
+function loadSet(s) {
+  if (s.version_ids.length >= 2) {
+    aId.value = s.version_ids[0];
+    bId.value = s.version_ids[1];
+    void loadMetrics();
+  }
+}
+
+async function removeSet(s) {
+  setsError.value = null;
+  try {
+    await deleteComparisonSet(s.id);
+    await loadSets();
+  } catch (e) {
+    setsError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+watch(
+  () => context.project?.project_id,
+  (pid) => {
+    if (pid) void loadSets();
+  },
+  { immediate: true },
+);
 </script>
 
 <style scoped>
@@ -231,26 +343,23 @@ async function decide(state, version = versionA.value) {
   flex-wrap: wrap;
 }
 
+.sync-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  font-size: 0.85rem;
+  color: var(--on-surface-variant);
+  width: fit-content;
+}
+
 .previews {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: var(--sp-md);
 }
 
 .preview {
   margin: 0;
-  background: var(--surface-container-low);
-  border: 1px solid var(--outline-variant);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.preview-img {
-  width: 100%;
-  height: 240px;
-  object-fit: contain;
-  background: #000;
-  display: block;
 }
 
 .preview figcaption {

@@ -1,17 +1,20 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import HomeView from "@/views/HomeView.vue";
 import ProjectsView from "@/views/ProjectsView.vue";
-import PlaceholderView from "@/views/PlaceholderView.vue";
-import StudioPlaceholder from "@/views/StudioPlaceholder.vue";
+import RecipesView from "@/views/RecipesView.vue";
+import AiModelsView from "@/views/AiModelsView.vue";
+import SettingsView from "@/views/SettingsView.vue";
+import HelpView from "@/views/HelpView.vue";
+import StudioShell from "@/components/StudioShell.vue";
 
 const routes = [
   { path: "/", name: "home", component: HomeView },
   { path: "/projects", name: "projects", component: ProjectsView },
-  { path: "/recipes", name: "recipes", component: PlaceholderView, props: { titleKey: "nav.recipes" } },
-  { path: "/ai-models", name: "ai-models", component: PlaceholderView, props: { titleKey: "nav.aiModels" } },
-  { path: "/settings", name: "settings", component: PlaceholderView, props: { titleKey: "nav.settings" } },
-  { path: "/help", name: "help", component: PlaceholderView, props: { titleKey: "nav.help" } },
-  { path: "/studio", name: "studio", component: StudioPlaceholder },
+  { path: "/recipes", name: "recipes", component: RecipesView },
+  { path: "/ai-models", name: "ai-models", component: AiModelsView },
+  { path: "/settings", name: "settings", component: SettingsView },
+  { path: "/help", name: "help", component: HelpView },
+  { path: "/studio", name: "studio", component: StudioShell },
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
 

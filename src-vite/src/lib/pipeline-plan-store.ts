@@ -1,0 +1,525 @@
+// src/lib/pipeline-plan-store.ts
+//
+// CR-05 P1 — frontend store for PipelinePlan (additive).
+//
+// The wizard `pipeline-store.ts` continues to own the live session
+// execution path. This store owns the **plan** surface: generate a plan
+// from a Session Understanding, render it as a human-readable
+// processing journey, list plans for a project.
+//
+// P1 ships Auto mode end-to-end (generate → render → list). P2 wires
+// the runner that produces StageExecution rows; P3 wires the
+// recommendation engine; P5 exposes the Expert DAG view.
+//
+// State shape mirrors the IPC types in `astroforge-api.ts`. Stores use
+// Svelte's `writable` so components can subscribe; the surface is small
+// enough to keep the entire store in one file.
+
+import { derived, get, writable, type Readable } from "./store-compat";
+
+import {
+  applyRecommendation,
+  cancelPipelinePlan,
+  createPipelinePlan,
+  createPreviewRun,
+  deletePreviewRun,
+  dismissRecommendation,
+  listPreviewRunsForStageExecution,
+  pausePipelinePlan,
+  pipelinePlanGet,
+  pipelinePlanListForProject,
+  pipelinePlanListRecommendations,
+  pipelinePlanListResumableForProject,
+  pipelinePlanListStageExecutions,
+  resetRecommendation,
+  resumePipelinePlan,
+  startPipelinePlan,
+  type CreatePipelinePlanRequest,
+  type CreatePreviewRunRequest,
+  type PipelinePlanDto,
+  type PipelinePlanMode,
+  type PipelinePlanSummary,
+  type PipelineStageDto,
+  type PreviewRunDto,
+  type RecommendationDto,
+  type RecommendationUpdateResult,
+  type RunOutcome,
+  type StageExecutionSummary,
+} from "./astroforge-api";
+
+// ─── Stores ─────────────────────────────────────────────────────────────────
+
+export const activePlan = writable<PipelinePlanDto | null>(null);
+export const planList = writable<PipelinePlanSummary[]>([]);
+export const planGenerationStatus = writable<"idle" | "generating" | "error">("idle");
+export const lastError = writable<string | null>(null);
+
+// ─── CR-05 P2 slice 1 — execution stores ─────────────────────────────────
+//
+// `runStatus` reflects the runner's lifecycle (idle | running | error).
+// `stageExecutions` is a per-plan map keyed by plan_id so multiple
+// plans can be observed concurrently. P2.5 adds `paused` to the
+// `runStatus` enum and per-plan pause handles.
+
+export const runStatus = writable<"idle" | "running" | "error">("idle");
+export const lastRunOutcome = writable<RunOutcome | null>(null);
+export const stageExecutions = writable<Record<string, StageExecutionSummary[]>>({});
+
+// ─── CR-05 P2.5 — recovery stores ─────────────────────────────────────────
+//
+// `resumablePlans` lists every `Paused` plan for a project. The
+// RecoveryBanner subscribes; clicking "Resume" calls resumePipelineRun
+// and re-fetches both `activePlan` and `resumablePlans`.
+
+export const resumablePlans = writable<PipelinePlanSummary[]>([]);
+
+// ─── CR-05 P3 slice 2 + 2.5 — recommendation stores ────────────────────
+//
+// `recommendationsForPlan` is a per-plan map keyed by plan_id so
+// multiple plans can be observed concurrently (matches the
+// `stageExecutions` shape). Each `RecommendationDto` carries the
+// user-decision lifecycle (`pending` | `applied` | `dismissed`)
+// introduced in slice 2.5; the IntelligencePanel consumes it
+// directly via the operation wrappers below.
+
+export const recommendationsForPlan = writable<Record<string, RecommendationDto[]>>(
+  {},
+);
+
+// ─── CR-05 P4 slice 4 — preview runs store ─ ─────────────────────── ─ ─
+//
+// `previewRunsForStageExecution` is keyed by stage_execution_id so
+// multiple stages can be observed concurrently (matches the
+// `stageExecutions` shape). The slice 4 IPC returns a
+// placeholder-completed PreviewRun; slice 5 will move the synthesis
+// into a background worker and add intermediate "running" frames.
+export const previewRunsForStageExecution = writable<
+  Record<string, PreviewRunDto[]>
+>({});
+
+/**
+ * CR-05 P4 slice 6 — §11 preview-before-commit gate, surfaced
+ * client-side. For each stage_execution_id, derive `true` when
+ * there is at least one completed preview that landed AFTER the
+ * stage execution's emission (proxy for "user saw the proposed
+ * change before applying"). Returns `false` otherwise; components
+ * disable the Apply button and surface a "Preview required" hint.
+ *
+ * The Rust side re-verifies at apply time; this derived store
+ * is purely for UI affordance.
+ */
+export const previewGateSatisfiedForStageExecution = derived(
+  previewRunsForStageExecution,
+  ($previews) => {
+    const out: Record<string, boolean> = {};
+    for (const [stageExecutionId, list] of Object.entries($previews)) {
+      out[stageExecutionId] = list.some(
+        (p) => p.status === "completed" && p.completed_at !== null,
+      );
+    }
+    return out;
+  },
+);
+
+// Derived: a human-readable processing journey string per CR-05 §2.1
+// ("M31 — Deep Sky OSC / ✓ Calibrate / ✓ Debayer / …"). Components
+// render this in the ProcessWorkspace zone-A strip.
+export const humanReadablePlan: Readable<string> = derived(activePlan, ($plan) => {
+  if (!$plan) return "";
+  const header = `${$plan.target_type.replace(/_/g, " ")} / ${$plan.mode}`;
+  const lines = $plan.stages.map((s) => {
+    const mark = s.required ? "✓" : "○";
+    return `${mark} ${s.label}`;
+  });
+  return [header, ...lines].join("\n");
+});
+
+// ─── Operations ────────────────────────────────────────────────────────────
+
+export async function generateAutoPlan(
+  projectId: string,
+  sessionId: string,
+): Promise<PipelinePlanDto | null> {
+  planGenerationStatus.set("generating");
+  lastError.set(null);
+  try {
+    const request: CreatePipelinePlanRequest = {
+      project_id: projectId,
+      session_id: sessionId,
+      recipe_id: "deep_sky_osc_balanced",
+      mode: "auto",
+      // P3 will pass the real Session Understanding from CR-04; P1 lets
+      // the backend apply its default (Deep-Sky OSC Balanced) so the
+      // Auto-mode smoke panel works without CR-04 integration.
+      session_understanding: null,
+    };
+    const plan = await createPipelinePlan(request);
+    activePlan.set(plan);
+    return plan;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    planGenerationStatus.set("error");
+    return null;
+  } finally {
+    if (get(planGenerationStatus) === "generating") {
+      planGenerationStatus.set("idle");
+    }
+  }
+}
+
+export async function generateGuidedPlan(
+  projectId: string,
+  sessionId: string,
+): Promise<PipelinePlanDto | null> {
+  return generatePlanWithMode(projectId, sessionId, "guided");
+}
+
+export async function generateExpertPlan(
+  projectId: string,
+  sessionId: string,
+): Promise<PipelinePlanDto | null> {
+  return generatePlanWithMode(projectId, sessionId, "expert");
+}
+
+async function generatePlanWithMode(
+  projectId: string,
+  sessionId: string,
+  mode: PipelinePlanMode,
+): Promise<PipelinePlanDto | null> {
+  planGenerationStatus.set("generating");
+  lastError.set(null);
+  try {
+    const plan = await createPipelinePlan({
+      project_id: projectId,
+      session_id: sessionId,
+      recipe_id: "deep_sky_osc_balanced",
+      mode,
+      session_understanding: null,
+    });
+    activePlan.set(plan);
+    return plan;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    planGenerationStatus.set("error");
+    return null;
+  } finally {
+    if (get(planGenerationStatus) === "generating") {
+      planGenerationStatus.set("idle");
+    }
+  }
+}
+
+export async function refreshPlanList(projectId: string): Promise<void> {
+  try {
+    const list = await pipelinePlanListForProject(projectId);
+    planList.set(list);
+  } catch (err) {
+    lastError.set(toMessage(err));
+  }
+}
+
+export async function loadPlan(planId: string): Promise<PipelinePlanDto | null> {
+  try {
+    const plan = await pipelinePlanGet(planId);
+    activePlan.set(plan);
+    return plan;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return null;
+  }
+}
+
+// ─── CR-05 P2 slice 1 — execution operations ──────────────────────────────
+//
+// `startPipelineRun` blocks until the runner returns. P5's
+// resource-aware execution will introduce async / backgrounded
+// execution; slice 1 keeps the synchronous, immediately-resolving
+// shape so the UI can mirror the wizard's button-press UX.
+
+export async function startPipelineRun(
+  planId: string,
+): Promise<RunOutcome | null> {
+  runStatus.set("running");
+  lastError.set(null);
+  lastRunOutcome.set(null);
+  try {
+    const outcome = await startPipelinePlan(planId);
+    lastRunOutcome.set(outcome);
+    // Refresh per-stage state so the UI reflects the persisted rows.
+    await refreshStageExecutions(planId);
+    // #465 W6 — the run flipped the plan's durable status (e.g.
+    // Ready → Completed); re-fetch so the run-controls header tracks
+    // the store instead of the pre-run snapshot.
+    try {
+      activePlan.set(await pipelinePlanGet(planId));
+    } catch {
+      /* the pre-run plan snapshot is still renderable */
+    }
+    // #465 W2 — the runner now persists Versions (VersionCreated
+    // events + artifacts) at each producing stage. Refresh the
+    // version store + overview so Enhance / Compare / Export and the
+    // Overview checklist see the outputs immediately; previously the
+    // version list stayed empty forever after a run.
+    try {
+      const { versionStore } = await import("../state/versions");
+      const { workspaceState } = await import("../state/workspace");
+      const plan = get(activePlan);
+      if (plan?.project_id) {
+        await versionStore.load(plan.project_id);
+        await workspaceState.refreshOverview();
+      }
+    } catch {
+      /* refresh is best-effort; the run outcome is already recorded */
+    }
+    return outcome;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    runStatus.set("error");
+    return null;
+  } finally {
+    if (get(runStatus) === "running") {
+      runStatus.set("idle");
+    }
+  }
+}
+
+export async function cancelPipelineRun(planId: string): Promise<boolean> {
+  try {
+    return await cancelPipelinePlan(planId);
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return false;
+  }
+}
+
+export async function refreshStageExecutions(
+  planId: string,
+): Promise<StageExecutionSummary[]> {
+  try {
+    const execs = await pipelinePlanListStageExecutions(planId);
+    stageExecutions.update((map) => ({ ...map, [planId]: execs }));
+    return execs;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return [];
+  }
+}
+
+// ─── CR-05 P2.5 — pause / resume / refresh operations ─────────────────────
+
+export async function pausePipelineRun(planId: string): Promise<boolean> {
+  try {
+    return await pausePipelinePlan(planId);
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return false;
+  }
+}
+
+export async function resumePipelineRun(
+  planId: string,
+): Promise<RunOutcome | null> {
+  runStatus.set("running");
+  lastError.set(null);
+  lastRunOutcome.set(null);
+  try {
+    const outcome = await resumePipelinePlan(planId);
+    lastRunOutcome.set(outcome);
+    await refreshStageExecutions(planId);
+    // #465 W6 — mirror startPipelineRun: the resumed run flips the
+    // plan's durable status; re-fetch so the header stays truthful.
+    try {
+      activePlan.set(await pipelinePlanGet(planId));
+    } catch {
+      /* the pre-run plan snapshot is still renderable */
+    }
+    return outcome;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    runStatus.set("error");
+    return null;
+  } finally {
+    if (get(runStatus) === "running") {
+      runStatus.set("idle");
+    }
+  }
+}
+
+export async function refreshResumablePlans(
+  projectId: string,
+): Promise<PipelinePlanSummary[]> {
+  try {
+    const list = await pipelinePlanListResumableForProject(projectId);
+    resumablePlans.set(list);
+    return list;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return [];
+  }
+}
+
+// ─── CR-05 P3 slice 2 + 2.5 — recommendation operations ────────────────
+//
+// `refreshRecommendations(planId)` fetches every recommendation for
+// the plan and stores it keyed by plan_id. `applyRecommendationFor`
+// / `dismissRecommendationFor` / `resetRecommendationFor` invoke
+// the matching Tauri command, then patch the in-memory row in
+// place so the panel reflects the new state without a re-fetch.
+
+export async function refreshRecommendations(
+  planId: string,
+): Promise<RecommendationDto[]> {
+  try {
+    const recs = await pipelinePlanListRecommendations(planId);
+    recommendationsForPlan.update((map) => ({ ...map, [planId]: recs }));
+    return recs;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return [];
+  }
+}
+
+/// CR-05 P3 slice 2.5 — merge a single updated recommendation
+/// into the per-plan map. Keeps the rest of the list untouched.
+function mergeRecommendation(
+  planId: string,
+  updated: RecommendationDto,
+): void {
+  recommendationsForPlan.update((map) => {
+    const list = map[planId] ?? [];
+    const next = list.map((r) => (r.id === updated.id ? updated : r));
+    return { ...map, [planId]: next };
+  });
+}
+
+export async function applyRecommendationFor(
+  planId: string,
+  recommendationId: string,
+): Promise<RecommendationUpdateResult | null> {
+  try {
+    const result = await applyRecommendation(recommendationId);
+    mergeRecommendation(planId, result.recommendation);
+    return result;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return null;
+  }
+}
+
+export async function dismissRecommendationFor(
+  planId: string,
+  recommendationId: string,
+): Promise<RecommendationUpdateResult | null> {
+  try {
+    const result = await dismissRecommendation(recommendationId);
+    mergeRecommendation(planId, result.recommendation);
+    return result;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return null;
+  }
+}
+
+export async function resetRecommendationFor(
+  planId: string,
+  recommendationId: string,
+): Promise<RecommendationUpdateResult | null> {
+  try {
+    const result = await resetRecommendation(recommendationId);
+    mergeRecommendation(planId, result.recommendation);
+    return result;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return null;
+  }
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+export function requiredStages(plan: PipelinePlanDto): PipelineStageDto[] {
+  return plan.stages.filter((s) => s.required);
+}
+
+export function optionalStages(plan: PipelinePlanDto): PipelineStageDto[] {
+  return plan.stages.filter((s) => !s.required);
+}
+
+// ─── CR-05 P4 slice 4 — preview operations ─────────────────────────────
+//
+// `refreshPreviewRuns(stage_execution_id)` re-reads every preview
+// for the stage; `createPreviewRunFor` invokes the IPC, patches the
+// new row in, and returns the DTO so the caller can show
+// confirmation; `deletePreviewRunFor` removes the row and refreshes
+// the cache.
+
+export async function refreshPreviewRuns(
+  stageExecutionId: string,
+): Promise<PreviewRunDto[]> {
+  try {
+    const rows = await listPreviewRunsForStageExecution(stageExecutionId);
+    previewRunsForStageExecution.update((map) => ({
+      ...map,
+      [stageExecutionId]: rows,
+    }));
+    return rows;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return [];
+  }
+}
+
+/// CR-05 P4 slice 4 — merge a freshly-created preview row into the
+/// per-stage-execution cache so the UI updates without a
+/// re-fetch.
+function mergePreviewRun(
+  stageExecutionId: string,
+  created: PreviewRunDto,
+): void {
+  previewRunsForStageExecution.update((map) => {
+    const list = map[stageExecutionId] ?? [];
+    const next = [created, ...list.filter((p) => p.preview_id !== created.preview_id)];
+    return { ...map, [stageExecutionId]: next };
+  });
+}
+
+export async function createPreviewRunFor(
+  request: CreatePreviewRunRequest,
+): Promise<PreviewRunDto | null> {
+  try {
+    const created = await createPreviewRun(request);
+    mergePreviewRun(request.stage_execution_id, created);
+    return created;
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return null;
+  }
+}
+
+export async function deletePreviewRunFor(
+  stageExecutionId: string,
+  previewId: string,
+): Promise<void> {
+  try {
+    await deletePreviewRun(previewId);
+  } catch (err) {
+    lastError.set(toMessage(err));
+    return;
+  }
+  // Refresh from the backend so the row disappears from the
+  // per-stage-execution cache.
+  await refreshPreviewRuns(stageExecutionId);
+}
+
+export function progressFraction(plan: PipelinePlanDto): number {
+  // P1 doesn't track per-stage execution yet (P2 wires it). For now
+  // "progress" reflects how many stages the user has enabled, which is
+  // a useful proxy for "how ready is this plan to run".
+  if (plan.stages.length === 0) return 0;
+  const enabled = plan.stages.filter((s) => s.enabled).length;
+  return enabled / plan.stages.length;
+}
+
+function toMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}

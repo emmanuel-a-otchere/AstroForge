@@ -86,6 +86,36 @@
         <p class="font-body">
           Session understanding: {{ understanding?.target_name ?? "analyzing…" }}
         </p>
+        <p v-if="understanding?.classification_confidence != null" class="font-body hint">
+          Classification confidence: {{ (understanding.classification_confidence * 100).toFixed(0) }}%
+        </p>
+        <div class="override-row">
+          <label class="font-body hint">
+            Capture kind
+            <select v-model="overrideKind" class="select">
+              <option :value="null">auto</option>
+              <option value="deep_sky">Deep sky</option>
+              <option value="planetary_lunar">Planetary / lunar</option>
+              <option value="ambiguous">Ambiguous</option>
+            </select>
+          </label>
+          <label class="font-body hint">
+            Narrowband
+            <select v-model="overrideComp" class="select">
+              <option :value="null">auto</option>
+              <option value="none">None</option>
+              <option value="mono">Mono</option>
+              <option value="hoo">HOO</option>
+              <option value="sho">SHO</option>
+              <option value="lrgb">LRGB</option>
+              <option value="hoo_or_sho">HOO or SHO</option>
+            </select>
+          </label>
+          <button type="button" class="secondary-cta font-display" @click="applyOverride">
+            Apply override
+          </button>
+        </div>
+        <p v-if="overrideError" class="error-line font-body" role="alert">{{ overrideError }}</p>
         <SkyMap
           v-if="overlay"
           :ra-center="overlay.ra_center"
@@ -140,6 +170,7 @@ import {
   importAnalyseSession,
   importGetUnderstanding,
   importConfirm,
+  importOverrideClassification,
   plateSolveOverlay,
 } from "@/lib/astroforge-api";
 import { invokeCommand } from "@/common/tauri";
@@ -158,7 +189,22 @@ const steps = [
 const understanding = ref(null);
 const overlay = ref(null);
 const obsDate = ref(null);
+const overrideKind = ref(null);
+const overrideComp = ref(null);
+const overrideError = ref(null);
 const confirmResult = ref(null);
+
+async function applyOverride() {
+  const sessionId = wizard.value.sessionId;
+  if (!sessionId) return;
+  overrideError.value = null;
+  try {
+    await importOverrideClassification(sessionId, overrideKind.value, overrideComp.value);
+    understanding.value = await importGetUnderstanding(sessionId);
+  } catch (e) {
+    overrideError.value = e instanceof Error ? e.message : String(e);
+  }
+}
 
 const filteredFrames = computed(() => {
   const frames = wizard.value.frames ?? [];
@@ -337,6 +383,23 @@ async function confirm() {
   color: var(--on-surface-variant);
   font-size: 0.85rem;
   margin: 0;
+}
+
+.override-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-md);
+  flex-wrap: wrap;
+}
+
+.override-row .select {
+  margin-left: var(--sp-xs);
+  background: var(--surface-container-low);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  padding: var(--sp-xs) var(--sp-sm);
+  font-family: var(--font-body);
 }
 
 .date-filter {

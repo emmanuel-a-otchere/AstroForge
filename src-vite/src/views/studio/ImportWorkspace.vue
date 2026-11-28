@@ -49,8 +49,24 @@
           {{ wizard.scanning ? "Scanning " + (wizard.scanDir ?? "") + "…" : "Scan complete." }}
         </p>
         <p v-if="wizard.frames.length" class="font-body hint">
-          {{ wizard.frames.length }} frames classified.
+          {{ filteredFrames.length }} of {{ wizard.frames.length }} frames classified.
         </p>
+        <label class="font-body hint date-filter">
+          Observation date
+          <calendar-date
+            class="cally"
+            :value="obsDate ?? undefined"
+            @change="onObsDateChange"
+          ></calendar-date>
+          <button
+            v-if="obsDate"
+            type="button"
+            class="ghost-link font-body"
+            @click="obsDate = null"
+          >
+            Clear
+          </button>
+        </label>
         <p v-if="wizard.scanError" class="error-line font-body" role="alert">
           {{ wizard.scanError }}
         </p>
@@ -58,7 +74,7 @@
           <button
             type="button"
             class="primary-cta font-display"
-            :disabled="wizard.scanning || wizard.frames.length === 0"
+            :disabled="wizard.scanning || filteredFrames.length === 0"
             @click="analyse"
           >
             Continue
@@ -70,6 +86,14 @@
         <p class="font-body">
           Session understanding: {{ understanding?.target_name ?? "analyzing…" }}
         </p>
+        <SkyMap
+          v-if="overlay"
+          :ra-center="overlay.ra_center"
+          :dec-center="overlay.dec_center"
+          :fov-arcmin="overlay.field_width_arcmin"
+          :target-name="overlay.target_name"
+          :source="overlay.source"
+        />
         <div class="row-actions">
           <button type="button" class="primary-cta font-display" @click="confirm">
             Confirm import
@@ -97,6 +121,7 @@
 import { ref } from "vue";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import WorkspaceScreen from "@/components/WorkspaceScreen.vue";
+import SkyMap from "@/components/SkyMap.vue";
 import { useStore } from "@/composables/useStore";
 import { useProjectContextStore } from "@/stores/projectContext";
 import {
@@ -115,8 +140,10 @@ import {
   importAnalyseSession,
   importGetUnderstanding,
   importConfirm,
+  plateSolveOverlay,
 } from "@/lib/astroforge-api";
 import { invokeCommand } from "@/common/tauri";
+import { computed } from "vue";
 
 const wizard = useStore(importWizard);
 const context = useProjectContextStore();
@@ -129,7 +156,19 @@ const steps = [
 ];
 
 const understanding = ref(null);
+const overlay = ref(null);
+const obsDate = ref(null);
 const confirmResult = ref(null);
+
+const filteredFrames = computed(() => {
+  const frames = wizard.value.frames ?? [];
+  if (!obsDate.value) return frames;
+  return frames.filter((f) => (f.dateObs ?? "").slice(0, 10) === obsDate.value);
+});
+
+function onObsDateChange(e) {
+  obsDate.value = e?.target?.value ?? null;
+}
 
 function stepIndex(id) {
   return steps.findIndex((s) => s.id === id);
@@ -163,6 +202,7 @@ async function startScan() {
       height: typeof f.height === "number" ? f.height : null,
       binning: typeof f.binning === "number" ? f.binning : null,
       anomalies: Array.isArray(f.anomalies) ? f.anomalies.map((a) => String(a)) : [],
+      dateObs: typeof f.date_obs === "string" ? f.date_obs : null,
     }));
     setFrames(frames);
     const sessionId = await sessionCreate(project.project_id, dir);
@@ -184,6 +224,15 @@ async function analyse() {
     await importRegisterAssets(sessionId, project.project_id, frames);
     await importAnalyseSession(project.project_id, sessionId, [], null);
     understanding.value = await importGetUnderstanding(sessionId);
+    const firstFrame = filteredFrames.value[0]?.path ?? wizard.value.frames[0]?.path;
+    if (firstFrame) {
+      try {
+        const res = await plateSolveOverlay(firstFrame);
+        overlay.value = res?.overlay ?? null;
+      } catch {
+        overlay.value = null;
+      }
+    }
     goToStep("understanding");
   } catch (e) {
     setScanError(e instanceof Error ? e.message : String(e));
@@ -288,6 +337,30 @@ async function confirm() {
   color: var(--on-surface-variant);
   font-size: 0.85rem;
   margin: 0;
+}
+
+.date-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  width: fit-content;
+}
+
+.cally {
+  background: var(--surface-container-low);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+}
+
+.ghost-link {
+  background: transparent;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 0.8rem;
+  width: fit-content;
+  padding: 0;
 }
 
 .error-line {

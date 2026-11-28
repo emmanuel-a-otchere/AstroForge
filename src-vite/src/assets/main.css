@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "daisyui/daisyui.css";
+@import "leaflet/dist/leaflet.css";
 @import "./tokens.css";
+
+.leaflet-container {
+  background: var(--surface-container-lowest);
+}
 
 @plugin "daisyui/theme" {
   name: "astroforge";

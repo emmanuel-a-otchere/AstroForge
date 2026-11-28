@@ -10,6 +10,8 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "AstroForge",
@@ -18,16 +20,48 @@
         "minWidth": 800,
         "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": true
       }
     ],
     "security": {
-      "csp": null
+      "capabilities": [
+        "default"
+      ],
+      "csp": "default-src 'self'; script-src 'self' http://localhost:1420; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1421 http://localhost:1420; media-src 'self' blob: data:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/com.astroforge.app/**",
+          "$HOME/Library/Application Support/com.astroforge.app/**",
+          "$HOME/.local/share/com.astroforge.app/**"
+        ]
+      }
     }
   },
   "plugins": {
     "fs": {
-      "requireLiteralLeadingDot": false
+      "requireLiteralLeadingDot": false,
+      "scope": [
+        "$APPDATA/com.astroforge.app/**",
+        "$HOME/Library/Application Support/com.astroforge.app/**",
+        "$HOME/.local/share/com.astroforge.app/**",
+        "$HOME/**",
+        "/Volumes/**",
+        "/media/**",
+        "/mnt/**"
+      ]
+    },
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://releases.astroforge.app/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": "REPLACE_WITH_SIGNING_PUBKEY",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
@@ -64,18 +98,6 @@
       },
       "appimage": {
         "bundleMediaFramework": false
-      }
-    }
-  },
-  "plugins": {
-    "updater": {
-      "active": true,
-      "endpoints": [
-        "https://releases.astroforge.app/{{target}}/{{arch}}/{{current_version}}"
-      ],
-      "pubkey": "REPLACE_WITH_SIGNING_PUBKEY",
-      "windows": {
-        "installMode": "passive"
       }
     }
   }

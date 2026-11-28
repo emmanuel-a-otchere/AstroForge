@@ -1,0 +1,63 @@
+@import "tailwindcss";
+@import "daisyui/daisyui.css";
+@import "./tokens.css";
+
+@plugin "daisyui/theme" {
+  name: "astroforge";
+  default: true;
+  color-scheme: dark;
+  --color-base-100: var(--surface);
+  --color-base-200: var(--surface-container-low);
+  --color-base-300: var(--surface-container);
+  --color-base-content: var(--on-surface);
+  --color-primary: var(--primary);
+  --color-primary-content: var(--on-primary);
+  --color-secondary: var(--secondary);
+  --color-secondary-content: var(--on-secondary);
+  --color-accent: var(--tertiary);
+  --color-accent-content: var(--on-tertiary);
+  --color-neutral: var(--surface-variant);
+  --color-neutral-content: var(--on-surface-variant);
+  --color-error: var(--error-container);
+  --color-error-content: var(--on-error-container);
+  --radius-box: var(--radius-lg);
+  --radius-field: var(--radius-md);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--on-surface);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-display { font-family: var(--font-display); }
+.font-body { font-family: var(--font-body); }
+.font-data { font-family: var(--font-data); }
+.font-mono { font-family: var(--font-mono); }
+.font-label { font-family: var(--font-data); }
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}

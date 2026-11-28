@@ -11,7 +11,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "gen:tokens": "node scripts/gen-design-tokens.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",

@@ -1,0 +1,76 @@
+{
+  "app": { "name": "AstroForge", "noProject": "No project open" },
+  "nav": {
+    "home": "Home",
+    "homeHint": "What do I want to do?",
+    "projects": "Projects",
+    "projectsHint": "Open a saved astrophotography library.",
+    "recipes": "Recipes",
+    "recipesHint": "Reusable processing workflows.",
+    "aiModels": "AI Models",
+    "aiModelsHint": "Manage installed AI capabilities.",
+    "settings": "Settings",
+    "settingsHint": "Application preferences.",
+    "help": "Help",
+    "helpHint": "Docs and shortcuts.",
+    "hideNav": "Hide navigation",
+    "showNav": "Show navigation"
+  },
+  "home": {
+    "title": "Home",
+    "subtitle": "What do you want to do? Pick a project to continue, or start a new one.",
+    "actions": {
+      "newProject": { "label": "New Project", "description": "Start a fresh astrophotography library from a target name." },
+      "openProject": { "label": "Open Project", "description": "Resume work in an existing project." },
+      "importSession": { "label": "Import Session", "description": "Bring raw telescope captures into a project." },
+      "resumeProcessing": { "label": "Resume Processing", "description": "Pick up a pipeline where you left off." }
+    },
+    "recent": "Recent Projects",
+    "seeAll": "See all",
+    "loading": "Loading projects…",
+    "loadError": "Could not load projects: {error}",
+    "emptyTitle": "Your astrophotography projects",
+    "emptyBody": "Nothing here yet. Create your first project from a telescope capture or import an existing one.",
+    "createProject": "Create Project",
+    "importExisting": "Import Existing Project",
+    "open": "Open",
+    "sessionActive": "session active"
+  },
+  "projects": {
+    "title": "Projects",
+    "subtitle": "Your persistent astrophotography library.",
+    "newProject": "New Project",
+    "loading": "Loading projects…",
+    "loadError": "Failed to load projects: {error}",
+    "retry": "Retry",
+    "emptyBody": "Nothing here yet. Create your first project from a telescope capture.",
+    "updated": "Updated {date}",
+    "targetActive": "active session linked",
+    "targetNone": "no session yet",
+    "openAria": "Open project {name}",
+    "rename": "Rename",
+    "archive": "Archive",
+    "delete": "Delete"
+  },
+  "dialog": {
+    "createTitle": "Create project",
+    "renameTitle": "Rename project",
+    "create": "Create",
+    "save": "Save",
+    "cancel": "Cancel",
+    "nameLabel": "Project name",
+    "namePlaceholder": "e.g. M42 — Orion Nebula",
+    "nameEmpty": "Name cannot be empty.",
+    "nameHint": "The name is shown in the project header and in your library. You can rename the project at any time.",
+    "deleteTitle": "Delete project",
+    "deleteBody": "This permanently removes the project, including its sessions, source assets, pipeline runs, image versions, and any exports. Source data on disk under the project directory is also deleted.",
+    "deleteType": "Type {name} to confirm.",
+    "deleteConfirm": "Delete project"
+  },
+  "save": { "saved": "Saved", "saving": "Saving…", "failed": "Save failed" },
+  "placeholder": {
+    "title": "{title}",
+    "body": "This destination is being ported to the Vue tree (CR-26 Phase 2). The Svelte app still ships it in the meantime.",
+    "studio": "The Studio workspace ports in CR-26 Phase 2. Active view: {view}."
+  }
+}

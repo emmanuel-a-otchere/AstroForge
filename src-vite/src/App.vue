@@ -1,6 +1,7 @@
 <template>
   <ApplicationShell :project-label="appStore.projectLabel">
-    <router-view @action="handleAction" />
+    <StudioShell v-if="appStore.hasOpenProject" />
+    <router-view v-else @action="handleAction" />
   </ApplicationShell>
 
   <ProjectDialog
@@ -30,23 +31,29 @@
 import { onMounted } from "vue";
 import { useRouter } from "vue-router";
 import ApplicationShell from "@/components/ApplicationShell.vue";
+import StudioShell from "@/components/StudioShell.vue";
 import ProjectDialog from "@/components/ProjectDialog.vue";
 import DeleteProjectDialog from "@/components/DeleteProjectDialog.vue";
 import { useApplicationStore } from "@/stores/application";
 import { useProjectsStore } from "@/stores/projects";
 import { useDialogStore } from "@/stores/dialog";
-import { useProjectContextStore } from "@/stores/projectContext";
-import * as api from "@/common/api";
+import { useLifecycle } from "@/stores/lifecycle";
+import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
+import * as api from "@/lib/astroforge-api";
 import { slugFromName } from "@/common/utils";
 
 const appStore = useApplicationStore();
 const projects = useProjectsStore();
 const dialogs = useDialogStore();
-const projectContext = useProjectContextStore();
+const { openProject } = useLifecycle();
 const router = useRouter();
 
 onMounted(() => {
   void projects.refresh();
+});
+
+useKeyboardShortcuts({
+  onCreateProject: () => dialogs.openCreate(),
 });
 
 function handleAction(action, project) {
@@ -59,6 +66,7 @@ function handleAction(action, project) {
       const summary = projects.items.find((p) => p.name === project.name);
       if (summary) {
         void openProject(summary);
+        void router.push("/studio");
         return;
       }
     }
@@ -87,6 +95,7 @@ function handleAction(action, project) {
   }
   if (action === "open" && project) {
     void openProject(project);
+    void router.push("/studio");
     return;
   }
   if (action === "rename" && project) {
@@ -106,12 +115,6 @@ function handleAction(action, project) {
   }
 }
 
-async function openProject(summary) {
-  projectContext.open(summary);
-  appStore.openProject(summary);
-  await router.push("/studio");
-}
-
 async function handleDialogSubmit(value) {
   try {
     if (dialogs.dialogMode === "create") {
@@ -122,15 +125,13 @@ async function handleDialogSubmit(value) {
       dialogs.closeDialog();
       await projects.refresh();
       await openProject(created);
+      void router.push("/studio");
       if (dialogs.postCreateAction === "import") {
         appStore.setView("import");
         dialogs.postCreateAction = null;
       }
     } else if (dialogs.dialogMode === "rename" && dialogs.dialogProject) {
-      await api.projectRename(
-        slugFromName(dialogs.dialogProject.name),
-        value.name,
-      );
+      await api.projectRename(slugFromName(dialogs.dialogProject.name), value.name);
       dialogs.closeDialog();
       await projects.refresh();
     }

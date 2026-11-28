@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createPinia, setActivePinia } from "pinia";
 import { useApplicationStore, STUDIO_VIEWS } from "../src/stores/application.js";
-import { useProjectsStore, countByStatus } from "../src/stores/projects.js";
 import { useProjectContextStore } from "../src/stores/projectContext.js";
+import { useDialogStore } from "../src/stores/dialog.js";
+import { countByStatus } from "../src/common/utils.js";
 
 test("application store navigates and tracks the studio viewport", () => {
   setActivePinia(createPinia());
@@ -22,20 +23,6 @@ test("application store navigates and tracks the studio viewport", () => {
   assert.equal(app.hasOpenProject, false);
 });
 
-test("projects store starts empty and countByStatus tallies", () => {
-  setActivePinia(createPinia());
-  const projects = useProjectsStore();
-  assert.equal(projects.isEmpty, true);
-  assert.deepEqual(
-    countByStatus([
-      { status: "Active" },
-      { status: "Active" },
-      { status: "Archived" },
-    ]),
-    { Active: 2, Archived: 1, Exported: 0 },
-  );
-});
-
 test("project context open/close/dirty", () => {
   setActivePinia(createPinia());
   const ctx = useProjectContextStore();
@@ -46,4 +33,28 @@ test("project context open/close/dirty", () => {
   assert.equal(ctx.isProjectDirty, true);
   ctx.close();
   assert.equal(ctx.hasOpenProject, false);
+});
+
+test("dialog store create/rename/delete flows", () => {
+  setActivePinia(createPinia());
+  const dialogs = useDialogStore();
+  dialogs.openCreate("import");
+  assert.equal(dialogs.dialogOpen, true);
+  assert.equal(dialogs.dialogMode, "create");
+  assert.equal(dialogs.postCreateAction, "import");
+  dialogs.closeDialog();
+  assert.equal(dialogs.dialogOpen, false);
+  dialogs.openRename({ project_id: "p1", name: "M42" });
+  assert.equal(dialogs.dialogMode, "rename");
+  dialogs.openDelete({ project_id: "p1", name: "M42" });
+  assert.equal(dialogs.deleteDialogOpen, true);
+  dialogs.closeDelete();
+  assert.equal(dialogs.deleteDialogOpen, false);
+});
+
+test("countByStatus tallies project statuses", () => {
+  assert.deepEqual(
+    countByStatus([{ status: "Active" }, { status: "Active" }, { status: "Archived" }]),
+    { Active: 2, Archived: 1, Exported: 0 },
+  );
 });

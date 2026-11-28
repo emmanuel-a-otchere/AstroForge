@@ -1,5 +1,7 @@
 import { defineStore } from "pinia";
-import * as api from "../common/api.js";
+import * as api from "../lib/astroforge-api";
+import { countByStatus } from "../common/utils.js";
+export { countByStatus };
 
 export const useProjectsStore = defineStore("projects", {
   state: () => ({ items: [], loading: false, error: null }),
@@ -21,9 +23,3 @@ export const useProjectsStore = defineStore("projects", {
     },
   },
 });
-
-export function countByStatus(items) {
-  const counts = { Active: 0, Archived: 0, Exported: 0 };
-  for (const p of items) counts[p.status] += 1;
-  return counts;
-}

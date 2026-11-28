@@ -34,3 +34,12 @@ test("parseDecDeg handles signed dms and plain degrees", () => {
   assert.equal(parseDecDeg("-12.5"), -12.5);
   assert.equal(parseDecDeg(null), null);
 });
+
+import { formatBytes } from "../src/common/utils.js";
+
+test("formatBytes scales units", () => {
+  assert.equal(formatBytes(512), "512 B");
+  assert.equal(formatBytes(2048), "2.0 KB");
+  assert.equal(formatBytes(5 * 1024 * 1024), "5.0 MB");
+  assert.equal(formatBytes(-1), "—");
+});

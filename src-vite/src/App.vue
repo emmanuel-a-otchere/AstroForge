@@ -4,6 +4,8 @@
     <router-view v-else @action="handleAction" />
   </ApplicationShell>
 
+  <UpdateBanner />
+
   <ProjectDialog
     v-if="dialogs.dialogOpen"
     :mode="dialogs.dialogMode"
@@ -32,6 +34,7 @@ import { onMounted } from "vue";
 import { useRouter } from "vue-router";
 import ApplicationShell from "@/components/ApplicationShell.vue";
 import StudioShell from "@/components/StudioShell.vue";
+import UpdateBanner from "@/components/UpdateBanner.vue";
 import ProjectDialog from "@/components/ProjectDialog.vue";
 import DeleteProjectDialog from "@/components/DeleteProjectDialog.vue";
 import { useApplicationStore } from "@/stores/application";

@@ -34,6 +34,31 @@ jobs:
       - name: Unit tests (vitest)
         run: npm run test
 
+  # CR-26 Phase 1: the parallel Vue tree (src-vite/) must compile and
+  # test alongside the shipping Svelte app until the Phase 5 cutover.
+  frontend-vue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies (src-vite)
+        run: pnpm --dir src-vite install --frozen-lockfile
+
+      - name: Build (src-vite)
+        run: pnpm --dir src-vite build
+
+      - name: Unit tests (src-vite)
+        run: pnpm --dir src-vite test
+
   # RT-1 (#419): the full Rust test suite previously ran only on Linux;
   # image math and Tauri-adjacent code differ per platform, so the core
   # crate's tests + clippy now run on all three target OSes.

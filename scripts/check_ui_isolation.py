@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-WEB_DIRS = ("src/", "src-tauri/")
+WEB_DIRS = ("src/", "src-vite/", "src-tauri/")
 WEB_FILES = {
     "index.html", "package.json", "package-lock.json", "svelte.config.js",
     "vite.config.ts", "vitest.config.ts", "vitest.setup.ts", "tsconfig.json",
@@ -67,7 +67,7 @@ def code_lines(path: Path):
 
 def find_refs(path: Path, patterns):
     hits = []
-    if path.suffix not in (".rs", ".toml", ".ts", ".svelte", ".js"):
+    if path.suffix not in (".rs", ".toml", ".ts", ".svelte", ".vue", ".js"):
         return hits
     for i, line in code_lines(path):
         for pat in patterns:
@@ -104,11 +104,12 @@ def static_check() -> list[str]:
                 for hit in find_refs(f, WEB_REF_PATTERNS):
                     errors.append(f"egui tree references web UI: {hit}")
     # 2/4. src-tauri must not depend on egui crates (covered by allow-list)
-    # 3. web src/ must not reference the Rust UI crates
-    for f in sorted((ROOT / "src").rglob("*")):
-        if f.is_file():
-            for hit in find_refs(f, EGUI_REF_PATTERNS):
-                errors.append(f"web tree references egui crates: {hit}")
+    # 3. web trees (src/ + src-vite/) must not reference the Rust UI crates
+    for web_dir in WEB_DIRS:
+        for f in sorted((ROOT / web_dir).rglob("*")):
+            if f.is_file():
+                for hit in find_refs(f, EGUI_REF_PATTERNS):
+                    errors.append(f"web tree references egui crates: {hit}")
     # 4. per-crate astroforge-* dep allow-list
     for crate, allowed in DEP_ALLOWLIST.items():
         extra = dep_names(ROOT / crate) - allowed
